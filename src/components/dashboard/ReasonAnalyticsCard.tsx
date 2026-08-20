@@ -117,12 +117,10 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
       let dormOut = 0;
       if (att.isHomeBreak || att.status === "HOME_BREAK") {
-        const cnt = dormStudentCounts[dormId] || 80;
-        dateReasonMap[dStr]["กลับบ้าน"] += cnt;
-        dormOut = cnt;
+        // Exclude round-trip home break
       } else if (att.records && Array.isArray(att.records)) {
         att.records.forEach((r) => {
-          if (r.status === "ROUND_HOME" || r.status === "HOME") { dateReasonMap[dStr]["กลับบ้าน"]++; dormOut++; }
+          if (r.status === "HOME") { dateReasonMap[dStr]["กลับบ้าน"]++; dormOut++; }
           else if (r.status === "CAMP") { dateReasonMap[dStr]["เข้าค่าย"]++; dormOut++; }
           else if (r.status === "SICK") { dateReasonMap[dStr]["ป่วย"]++; dormOut++; }
           else if (r.status === "SKILL_COMP") { dateReasonMap[dStr]["แข่งทักษะ"]++; dormOut++; }
@@ -147,12 +145,10 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         let dOut = 0;
         const dReasons = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
         if (att.isHomeBreak || att.status === "HOME_BREAK") {
-          const cnt = dormStudentCounts[d.id] || 80;
-          dReasons["กลับบ้าน"] = cnt;
-          dOut = cnt;
+          // Exclude round-trip home break
         } else if (att.records && Array.isArray(att.records)) {
           att.records.forEach((r) => {
-            if (r.status === "ROUND_HOME" || r.status === "HOME") { dReasons["กลับบ้าน"]++; dOut++; }
+            if (r.status === "HOME") { dReasons["กลับบ้าน"]++; dOut++; }
             else if (r.status === "CAMP") { dReasons["เข้าค่าย"]++; dOut++; }
             else if (r.status === "SICK") { dReasons["ป่วย"]++; dOut++; }
             else if (r.status === "SKILL_COMP") { dReasons["แข่งทักษะ"]++; dOut++; }
@@ -253,7 +249,13 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
       // Bar Chart: Compare Dorm Actual vs Normal Average
       const labels = dorms.map((d) => d.name);
-      const actualDormOut = dorms.map((d) => realtimeDormTotals?.[d.id]?.out || 0);
+      const actualDormOut = dorms.map((d) => {
+        const att = todayAttendance?.[d.id];
+        if (att && att.status === "CHECKED" && att.records) {
+          return att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
+        }
+        return 0;
+      });
       const normalDormOut = dorms.map((d) => processedHistoricalData.dowDormAvgOut[d.id]?.[currentDowIdx] || 0);
 
       const chartConfig = {
@@ -556,9 +558,6 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
               สัดส่วนและแนวโน้มสาเหตุการออกหอพัก (4 เงื่อนไข)
             </h3>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5 ml-9">
-            คำนวณจากประวัติการเช็คยอดและเหตุผลการออกหอพักใน Firestore ย้อนหลัง
-          </p>
         </div>
 
         {/* Timeframe Control Tabs */}
@@ -670,15 +669,13 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         </div>
 
         {/* Peak Timing / Rate Card */}
-        <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4 text-teal-950">
-          <div className="text-[11px] text-teal-700 font-bold mb-1 flex items-center gap-1">
-            <ArrowUpRight className="w-3.5 h-3.5 text-teal-600" />
-            <span>{activeAnalyticsConfig.card4Title}</span>
-          </div>
-          <div className="text-sm font-black text-teal-900 leading-snug">{activeAnalyticsConfig.peakText}</div>
-          <div className="mt-2 flex items-baseline justify-between text-xs border-t border-teal-200/60 pt-2">
-            <span className="font-medium text-teal-700">คำนวณจาก</span>
-            <span className="font-bold text-teal-950">ประวัติ Firestore</span>
+        <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4 text-teal-950 flex flex-col justify-between">
+          <div>
+            <div className="text-[11px] text-teal-700 font-bold mb-1 flex items-center gap-1">
+              <ArrowUpRight className="w-3.5 h-3.5 text-teal-600" />
+              <span>{activeAnalyticsConfig.card4Title}</span>
+            </div>
+            <div className="text-sm font-black text-teal-900 leading-snug">{activeAnalyticsConfig.peakText}</div>
           </div>
         </div>
       </div>

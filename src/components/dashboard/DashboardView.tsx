@@ -633,22 +633,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (att && att.status === "CHECKED" && att.records) {
         hasLiveRecords = true;
         att.records.forEach((r) => {
-          if (r.status === "ROUND_HOME" || r.status === "HOME") counts["กลับบ้าน"]++;
+          if (r.status === "HOME") counts["กลับบ้าน"]++;
           else if (r.status === "CAMP") counts["เข้าค่าย"]++;
           else if (r.status === "SICK") counts["ป่วย"]++;
           else if (r.status === "SKILL_COMP") counts["แข่งทักษะ"]++;
           else if (r.status === "EXCHANGE") counts["แลกเปลี่ยน"]++;
           else if (r.status === "OTHER") counts["อื่นๆ"]++;
         });
-      } else if (att && att.status === "HOME_BREAK") {
-        hasLiveRecords = true;
-        const dormTotal = realtimeDormTotals[d.id]?.total || 0;
-        counts["กลับบ้าน"] += dormTotal;
       }
     });
 
     if (!hasLiveRecords && absentStudentsList.length > 0 && !selectedDashboardDate) {
       absentStudentsList.forEach((s) => {
+        if (s.reason && (s.reason.includes("รอบกลับ") || s.reason === "รบ")) return; // Exclude round home
         if (s.reason.includes("กลับบ้าน")) counts["กลับบ้าน"]++;
         else if (s.reason.includes("เข้าค่าย")) counts["เข้าค่าย"]++;
         else if (s.reason.includes("ป่วย")) counts["ป่วย"]++;
@@ -659,7 +656,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
 
     return counts;
-  }, [dorms, activeAttendanceMap, realtimeDormTotals, absentStudentsList, selectedDashboardDate]);
+  }, [dorms, activeAttendanceMap, absentStudentsList, selectedDashboardDate]);
 
   // Filter dorms for comparison chart based on checkboxes
   const filteredChartDorms = React.useMemo(() => {
@@ -719,9 +716,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       let outCount = 0;
       if (att.isHomeBreak || att.status === "HOME_BREAK") {
-        outCount = dormStudentCounts[dormId] || 80;
+        outCount = 0; // Exclude round-trip home break
       } else if (att.records && Array.isArray(att.records)) {
-        outCount = att.records.filter((r) => r.status !== "PRESENT").length;
+        outCount = att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
       }
 
       if (!dateDormOutMap[dateStr]) dateDormOutMap[dateStr] = {};
@@ -735,9 +732,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         const dateStr = att.date || effectiveDashboardDate;
         let outCount = 0;
         if (att.isHomeBreak || att.status === "HOME_BREAK") {
-          outCount = dormStudentCounts[dormId] || 80;
+          outCount = 0; // Exclude round-trip home break
         } else if (att.records && Array.isArray(att.records)) {
-          outCount = att.records.filter((r) => r.status !== "PRESENT").length;
+          outCount = att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
         }
         if (!dateDormOutMap[dateStr]) dateDormOutMap[dateStr] = {};
         dateDormOutMap[dateStr][dormId] = outCount;
@@ -807,7 +804,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     if (trendTab === "today") {
       const labels = dorms.map((d) => d.name);
-      const actualData = dorms.map((d) => realtimeDormTotals[d.id]?.out || 0);
+      const actualData = dorms.map((d) => {
+        const att = activeAttendanceMap[d.id];
+        if (att && att.status === "CHECKED" && att.records) {
+          return att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
+        }
+        return 0;
+      });
       const predictedData = dorms.map((d) => historicalStats.avgDormDowMap[d.id]?.[currentDowIdx] || 0);
 
       const actualSum = actualData.reduce((a, b) => a + b, 0);
@@ -867,7 +870,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           return historicalStats.dateTotalOutMap[dStr];
         }
         if (dStr === effectiveDashboardDate) {
-          return realtimeGrandTotals.out;
+          let sum = 0;
+          dorms.forEach((d) => {
+            const att = activeAttendanceMap[d.id];
+            if (att && att.status === "CHECKED" && att.records) {
+              sum += att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
+            }
+          });
+          return sum;
         }
         return 0;
       });
@@ -1786,9 +1796,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <TrendingUp className="w-5 h-5 text-purple-600" />
                 สรุปสถิติการเช็คยอดประจำวัน (7 วัน) & คาดการณ์การออกหอพัก
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                คำนวณจากประวัติยอดนักเรียนออกหอพักทั้งหมดในระบบ Firestore
-              </p>
             </div>
 
             {/* Filter Toggle Buttons for 4 Conditions */}
