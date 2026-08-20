@@ -167,13 +167,13 @@ export function exportAllMonthlyReportsHtml(
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px; font-size:9.5px; color:#334155; background-color:#f8fafc; padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1;">
             <span style="font-weight:800; color:#0f172a;">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
             <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
-            <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน (สีเหลือง)</span>
-            <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน (สีส้ม)</span>
-            <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย (สีน้ำเงิน)</span>
-            <span><strong style="color:#e11d48;">ป</strong> = ป่วย (สีแดง)</span>
-            <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ (สีม่วง)</span>
-            <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน (สีฟ้า)</span>
-            <span><strong style="color:#78350f;">อ</strong> = อื่นๆ (สีน้ำตาล)</span>
+            <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
+            <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
+            <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
+            <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
+            <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
+            <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+            <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
           </div>
         </div>
       </div>

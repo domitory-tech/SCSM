@@ -647,25 +647,25 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                       <strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน (สีเหลือง)
+                      <strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-orange-700 font-black">กบ</strong> = กลับบ้าน (สีส้ม)
+                      <strong className="text-orange-700 font-black">กบ</strong> = กลับบ้าน
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-blue-700 font-black">ค</strong> = เข้าค่าย (สีน้ำเงิน)
+                      <strong className="text-blue-700 font-black">ค</strong> = เข้าค่าย
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-rose-700 font-black">ป</strong> = ป่วย (สีแดง)
+                      <strong className="text-rose-700 font-black">ป</strong> = ป่วย
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-purple-700 font-black">ท</strong> = แข่งทักษะ (สีม่วง)
+                      <strong className="text-purple-700 font-black">ท</strong> = แข่งทักษะ
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-sky-700 font-black">ลป</strong> = แลกเปลี่ยน (สีฟ้า)
+                      <strong className="text-sky-700 font-black">ลป</strong> = แลกเปลี่ยน
                     </span>
                     <span className="font-semibold">
-                      <strong className="text-amber-900 font-black">อ</strong> = อื่นๆ (สีน้ำตาล)
+                      <strong className="text-amber-900 font-black">อ</strong> = อื่นๆ
                     </span>
                   </div>
                 </div>
