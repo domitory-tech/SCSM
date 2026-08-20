@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "Dormitory": {
+      "title": "Dormitory",
+      "description": "Information about student dormitories",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "capacity": { "type": "number" },
+        "assignedTeacherId": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student record in the dormitory system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "number" },
+        "prefix": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "nickname": { "type": "string" },
+        "dormId": { "type": "string" },
+        "grade": { "type": "string" },
+        "room": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firstName", "lastName", "dormId"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account and teacher/admin profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "role"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Dormitory announcements and notices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string" },
+        "author": { "type": "string" }
+      },
+      "required": ["id", "title", "content"]
+    },
+    "DailyAttendance": {
+      "title": "DailyAttendance",
+      "description": "Daily student roll-call records for a dorm",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "dormId": { "type": "string" },
+        "status": { "type": "string" },
+        "checkedBy": { "type": "string" },
+        "records": { "type": "array" }
+      },
+      "required": ["id", "date", "dormId"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global school and system configurations",
+      "type": "object",
+      "properties": {
+        "schoolNameTh": { "type": "string" },
+        "systemNameTh": { "type": "string" },
+        "schoolLogoUrl": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/dorms/{dormId}": {
+      "schema": "Dormitory",
+      "description": "Collection of dormitories"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of students"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles"
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "Collection of notices"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "DailyAttendance",
+      "description": "Collection of daily attendance logs"
+    },
+    "/system_settings/config": {
+      "schema": "SystemSettings",
+      "description": "System configuration document"
+    }
+  }
+}

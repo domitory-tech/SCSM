@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-purple-primary: #A05AFF;
+  --color-teal-primary: #1BCFB4;
+  --color-cyan-supporting: #4BCBEB;
+  --color-coral-supporting: #FE9496;
+  --color-purple-vivid: #9E58FF;
+}
+
+.bg-purple-primary {
+  background-color: #A05AFF;
+}
+
+.text-purple-primary {
+  color: #A05AFF;
+}
+
+.border-purple-primary {
+  border-color: #A05AFF;
+}
+
+.bg-teal-primary {
+  background-color: #1BCFB4;
+}
+
+.text-teal-primary {
+  color: #1BCFB4;
+}
+
+.border-teal-primary {
+  border-color: #1BCFB4;
+}
+
+.bg-cyan-supporting {
+  background-color: #4BCBEB;
+}
+
+.text-cyan-supporting {
+  color: #4BCBEB;
+}
+
+.bg-coral-supporting {
+  background-color: #FE9496;
+}
+
+.text-coral-supporting {
+  color: #FE9496;
+}
+
+.bg-purple-vivid {
+  background-color: #9E58FF;
+}
+
+.text-purple-vivid {
+  color: #9E58FF;
+}
+
+/* Print Rules for Monthly Report & General Reports */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm 8mm 8mm 20mm; /* 20mm left margin for binding / punch hole */
+  }
+
+  body {
+    background-color: transparent !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .monthly-print-page {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+  }
+
+  .print-no-border {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Student Counting System (ระบบเช็คยอดนักเรียนหอพัก)",
+  "description": "ระบบบริหารจัดการและเช็คยอดนักเรียนหอพัก 6 หอพัก เชื่อมต่อฐานข้อมูลหลัก Firebase Cloud (Firestore) โดยบัญชี domitory@pcccr.ac.th",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
