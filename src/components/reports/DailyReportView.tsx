@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { DailyAttendance, DailyReportData, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString } from "../../utils/dateUtils";
 import {
@@ -14,11 +14,15 @@ import {
 import { MonthlyReportView } from "./MonthlyReportView";
 import { DashboardReportView } from "./DashboardReportView";
 import { DormitorySummaryReportView } from "./DormitorySummaryReportView";
+import { toPng, toBlob } from "html-to-image";
 import {
   BarChart3,
   Building2,
   Calendar,
+  Camera,
+  Check,
   CheckCircle2,
+  Copy,
   Download,
   ExternalLink,
   FileCode,
@@ -26,10 +30,13 @@ import {
   FileText,
   FolderOpen,
   LayoutGrid,
+  Loader2,
+  MessageCircle,
   Printer,
   RefreshCw,
   Share2,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
 interface DailyReportViewProps {
@@ -62,6 +69,19 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const [exportResult, setExportResult] = useState<{ url?: string; msg?: string } | null>(null);
+
+  // Capture Screenshot & Line Sharing State
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [capturingSheetKey, setCapturingSheetKey] = useState<string | null>(null);
+  const [showCaptureModal, setShowCaptureModal] = useState<boolean>(false);
+  const [capturedImageUrl, setCapturedImageUrl] = useState<string | null>(null);
+  const [capturedSheetInfo, setCapturedSheetInfo] = useState<{ key: string; title: string; subtitle: string } | null>(null);
+  const [copyImageSuccess, setCopyImageSuccess] = useState<boolean>(false);
+
+  // References for each printable sheet
+  const sheet1Ref = useRef<HTMLDivElement>(null);
+  const sheet2Ref = useRef<HTMLDivElement>(null);
+  const sheet3Ref = useRef<HTMLDivElement>(null);
 
   const handleExportHtml = () => {
     try {
@@ -133,6 +153,145 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const sheetInfoMap: Record<string, { title: string; subtitle: string; tag: string }> = {
+    sheet1: {
+      title: "ใบที่ 1: ตารางสรุปยอดจำนวนนักเรียน",
+      subtitle: `สรุปยอดประจำวัน ${formattedReportDateStr} (ยอดเมื่อคืนนี้ ${formattedSummaryDateStr})`,
+      tag: "ใบที่ 1 (ตารางสรุปยอด)"
+    },
+    sheet2: {
+      title: "ใบที่ 2: ใบรายงานเรื่องแจ้งอบรมประจำวัน",
+      subtitle: `เรื่องแจ้งอบรมจากหัวหน้างานและครูประจำหอพัก (${formattedSummaryDateStr})`,
+      tag: "ใบที่ 2 (เรื่องแจ้งอบรม)"
+    },
+    sheet3: {
+      title: "ใบที่ 3: ตารางรายชื่อนักเรียนออกหอพัก",
+      subtitle: `รายชื่อนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr} (${absentStudentsList.length} คน)`,
+      tag: "ใบที่ 3 (รายชื่อออกหอ)"
+    }
+  };
+
+  // Capture Screenshot for LINE sharing handler
+  const handleCaptureSheet = async (sheetKey: "sheet1" | "sheet2" | "sheet3") => {
+    if (isCapturing) return;
+
+    try {
+      setIsCapturing(true);
+      setCapturingSheetKey(sheetKey);
+      setActiveTab(sheetKey);
+
+      // Small delay to ensure DOM render & CSS styles are applied
+      await new Promise((resolve) => setTimeout(resolve, 180));
+
+      const sheetRefsMap: Record<string, HTMLElement | null> = {
+        sheet1: sheet1Ref.current || document.getElementById("daily-report-printable-sheet1"),
+        sheet2: sheet2Ref.current || document.getElementById("daily-report-printable-sheet2"),
+        sheet3: sheet3Ref.current || document.getElementById("daily-report-printable-sheet3")
+      };
+
+      const targetEl = sheetRefsMap[sheetKey];
+      if (!targetEl) {
+        throw new Error("ไม่พบข้อมูลรายงานของใบที่เลือก");
+      }
+
+      // Generate sharp PNG image (pixelRatio 2.5) with skipFonts to avoid remote stylesheet CORS errors
+      const dataUrl = await toPng(targetEl, {
+        pixelRatio: 2.5,
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+        skipFonts: true,
+        fontEmbedCSS: "",
+        filter: (node: any) => {
+          if (node.classList && typeof node.classList.contains === "function") {
+            return !node.classList.contains("capture-ignore");
+          }
+          return true;
+        }
+      });
+
+      setCapturedImageUrl(dataUrl);
+      setCapturedSheetInfo({
+        key: sheetKey,
+        title: sheetInfoMap[sheetKey]?.title || "รายงานสรุปประจำวัน",
+        subtitle: sheetInfoMap[sheetKey]?.subtitle || ""
+      });
+      setShowCaptureModal(true);
+
+      // Auto-copy directly to clipboard for quick Ctrl + V into LINE
+      try {
+        const blob = await toBlob(targetEl, {
+          pixelRatio: 2.5,
+          backgroundColor: "#ffffff",
+          cacheBust: true,
+          skipFonts: true,
+          fontEmbedCSS: "",
+          filter: (node: any) => {
+            if (node.classList && typeof node.classList.contains === "function") {
+              return !node.classList.contains("capture-ignore");
+            }
+            return true;
+          }
+        });
+
+        if (blob && navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              "image/png": blob
+            })
+          ]);
+          setCopyImageSuccess(true);
+          setTimeout(() => setCopyImageSuccess(false), 3500);
+        }
+      } catch (clipErr) {
+        console.warn("Direct clipboard copy fallback:", clipErr);
+      }
+    } catch (error: any) {
+      console.error("Failed to capture sheet:", error);
+      alert("เกิดข้อผิดพลาดในการแคปหน้าจอ: " + (error.message || "กรุณาลองใหม่อีกครั้ง"));
+    } finally {
+      setIsCapturing(false);
+      setCapturingSheetKey(null);
+    }
+  };
+
+  // Re-copy image from preview modal
+  const handleCopyImageAgain = () => {
+    if (!capturedImageUrl) return;
+    fetch(capturedImageUrl)
+      .then((res) => res.blob())
+      .then(async (blob) => {
+        if (blob && navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              "image/png": blob
+            })
+          ]);
+          setCopyImageSuccess(true);
+          setTimeout(() => setCopyImageSuccess(false), 3000);
+        } else {
+          alert("เบราว์เซอร์นี้ไม่รองรับการคัดลอกรูปภาพโดยตรง กรุณากดปุ่มดาวน์โหลดรูปภาพแทน");
+        }
+      })
+      .catch((e) => console.error(e));
+  };
+
+  // User-triggered download of captured image
+  const handleDownloadImage = () => {
+    if (!capturedImageUrl) return;
+    const link = document.createElement("a");
+    link.href = capturedImageUrl;
+    const sheetTag =
+      capturedSheetInfo?.key === "sheet1"
+        ? "ใบที่1_ตารางสรุปยอด"
+        : capturedSheetInfo?.key === "sheet2"
+        ? "ใบที่2_เรื่องแจ้งอบรม"
+        : "ใบที่3_รายชื่อออกหอพัก";
+    link.download = `รายงานประจำวัน_${sheetTag}_${reportDate || selectedReportDate}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -260,6 +419,61 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {/* LINE Quick Screenshot Buttons Group */}
+                <div className="flex items-center bg-emerald-50 border border-emerald-200 rounded-xl p-1 gap-1">
+                  <div className="flex items-center gap-1 px-2 text-emerald-800 text-[11px] font-extrabold">
+                    <Camera className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>แคปส่ง LINE:</span>
+                  </div>
+                  <button
+                    onClick={() => handleCaptureSheet("sheet1")}
+                    disabled={isCapturing}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      activeTab === "sheet1"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-white text-emerald-900 hover:bg-emerald-100 border border-emerald-200"
+                    } ${isCapturing && capturingSheetKey === "sheet1" ? "opacity-70 animate-pulse" : ""}`}
+                    title="แคปหน้าจอ ใบที่ 1 (ตารางสรุปยอด) คัดลอกลงคลิปบอร์ด ส่งเข้า LINE ได้ทันที"
+                  >
+                    {isCapturing && capturingSheetKey === "sheet1" ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : null}
+                    <span>ใบที่ 1</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleCaptureSheet("sheet2")}
+                    disabled={isCapturing}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      activeTab === "sheet2"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-white text-emerald-900 hover:bg-emerald-100 border border-emerald-200"
+                    } ${isCapturing && capturingSheetKey === "sheet2" ? "opacity-70 animate-pulse" : ""}`}
+                    title="แคปหน้าจอ ใบที่ 2 (ใบเรื่องแจ้งอบรม) คัดลอกลงคลิปบอร์ด ส่งเข้า LINE ได้ทันที"
+                  >
+                    {isCapturing && capturingSheetKey === "sheet2" ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : null}
+                    <span>ใบที่ 2</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleCaptureSheet("sheet3")}
+                    disabled={isCapturing}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      activeTab === "sheet3"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-white text-emerald-900 hover:bg-emerald-100 border border-emerald-200"
+                    } ${isCapturing && capturingSheetKey === "sheet3" ? "opacity-70 animate-pulse" : ""}`}
+                    title="แคปหน้าจอ ใบที่ 3 (รายชื่อออกหอพัก) คัดลอกลงคลิปบอร์ด ส่งเข้า LINE ได้ทันที"
+                  >
+                    {isCapturing && capturingSheetKey === "sheet3" ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : null}
+                    <span>ใบที่ 3</span>
+                  </button>
+                </div>
+
                 {currentUser && (
                   <button
                     onClick={handleExportHtml}
@@ -339,7 +553,27 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
 
       {/* SHEET 1: ตารางสรุปยอดจำนวนนักเรียน (แบ่ง 2 คอลัมน์ 2 แถว) */}
       {(activeTab === "sheet1" || typeof window !== "undefined") && (
-        <div id="daily-report-printable-sheet1" className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet1" ? "hidden print:block" : ""}`}>
+        <div
+          id="daily-report-printable-sheet1"
+          ref={sheet1Ref}
+          className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet1" ? "hidden print:block" : ""}`}
+        >
+          {/* Sheet Top Control Banner */}
+          <div className="capture-ignore print:hidden flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-gray-100">
+            <span className="text-[11px] font-bold text-gray-500 flex items-center gap-1">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-pink-600" />
+              <span>เอกสารแบบฟอร์ม ใบที่ 1 (ตารางสรุปยอดจำนวนนักเรียน)</span>
+            </span>
+            <button
+              onClick={() => handleCaptureSheet("sheet1")}
+              disabled={isCapturing}
+              className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition flex items-center gap-1.5"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>แคปหน้าจอส่ง LINE (ใบที่ 1)</span>
+            </button>
+          </div>
+
           {/* Report Header Metadata */}
           <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
             <h1 className="text-lg font-black text-gray-900">
@@ -559,7 +793,27 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
 
       {/* SHEET 2: ใบรายงานเรื่องแจ้งอบรมประจำวัน (แบ่ง 2 คอลัมน์สำหรับ A4 1 หน้า) */}
       {(activeTab === "sheet2" || typeof window !== "undefined") && (
-        <div id="daily-report-printable-sheet2" className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet2" ? "hidden print:block" : ""}`}>
+        <div
+          id="daily-report-printable-sheet2"
+          ref={sheet2Ref}
+          className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet2" ? "hidden print:block" : ""}`}
+        >
+          {/* Sheet Top Control Banner */}
+          <div className="capture-ignore print:hidden flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-gray-100">
+            <span className="text-[11px] font-bold text-gray-500 flex items-center gap-1">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
+              <span>เอกสารแบบฟอร์ม ใบที่ 2 (ใบรายงานเรื่องแจ้งอบรมประจำวัน)</span>
+            </span>
+            <button
+              onClick={() => handleCaptureSheet("sheet2")}
+              disabled={isCapturing}
+              className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition flex items-center gap-1.5"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>แคปหน้าจอส่ง LINE (ใบที่ 2)</span>
+            </button>
+          </div>
+
           <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
             <h1 className="text-lg font-black text-gray-900">
               ใบรายงานเรื่องแจ้งอบรมประจำวัน
@@ -641,7 +895,27 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
 
       {/* SHEET 3: ตารางรายชื่อนักเรียนออกหอพัก */}
       {(activeTab === "sheet3" || typeof window !== "undefined") && (
-        <div id="daily-report-printable-sheet3" className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet3" ? "hidden print:block" : ""}`}>
+        <div
+          id="daily-report-printable-sheet3"
+          ref={sheet3Ref}
+          className={`bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4 ${activeTab !== "sheet3" ? "hidden print:block" : ""}`}
+        >
+          {/* Sheet Top Control Banner */}
+          <div className="capture-ignore print:hidden flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-gray-100">
+            <span className="text-[11px] font-bold text-gray-500 flex items-center gap-1">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-pink-600" />
+              <span>เอกสารแบบฟอร์ม ใบที่ 3 (ตารางรายชื่อนักเรียนออกหอพัก)</span>
+            </span>
+            <button
+              onClick={() => handleCaptureSheet("sheet3")}
+              disabled={isCapturing}
+              className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition flex items-center gap-1.5"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>แคปหน้าจอส่ง LINE (ใบที่ 3)</span>
+            </button>
+          </div>
+
           <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
             <h1 className="text-lg font-black text-gray-900">
               ตารางรายชื่อนักเรียนออกหอพัก
@@ -696,6 +970,113 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
         </div>
       )}
         </>
+      )}
+
+      {/* Screenshot Capture LINE Sharing Modal */}
+      {showCaptureModal && capturedImageUrl && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-inner">
+                  <Camera className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight flex items-center gap-2">
+                    <span>แคปภาพรายงานสำหรับส่ง LINE เรียบร้อย!</span>
+                  </h3>
+                  <p className="text-xs text-emerald-100 font-medium">
+                    {capturedSheetInfo?.title} • {capturedSheetInfo?.subtitle}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowCaptureModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content / Alert */}
+            <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 bg-slate-50/50">
+              {/* Copy Success Banner */}
+              <div className={`rounded-2xl p-3.5 border transition-all flex items-start gap-3 ${
+                copyImageSuccess
+                  ? "bg-emerald-50 border-emerald-300 text-emerald-950 ring-2 ring-emerald-400/30"
+                  : "bg-teal-50/90 border-teal-200 text-teal-950"
+              }`}>
+                <div className={`p-2 rounded-xl shrink-0 ${copyImageSuccess ? "bg-emerald-600 text-white" : "bg-teal-600 text-white"}`}>
+                  {copyImageSuccess ? <Check className="w-4 h-4" /> : <MessageCircle className="w-4 h-4" />}
+                </div>
+                <div className="text-xs space-y-0.5">
+                  <div className="font-extrabold text-sm">
+                    {copyImageSuccess
+                      ? "✅ คัดลอกรูปภาพลงคลิปบอร์ดแล้ว (Copied to Clipboard)!"
+                      : "💬 พร้อมส่งเข้าแชท LINE ทันที"}
+                  </div>
+                  <div className="text-gray-700 font-medium leading-relaxed">
+                    คุณสามารถสลับไปที่หน้าต่างแชท LINE แล้วกดปุ่มลัด <kbd className="px-1.5 py-0.5 bg-white border border-gray-300 rounded-md font-mono text-[11px] font-bold text-gray-800 shadow-2xs">Ctrl + V</kbd> (หรือคลิกขวา &gt; Paste / วาง) เพื่อส่งภาพรายงานได้ทันทีโดยไม่ต้องดาวน์โหลดไฟล์ลงเครื่อง
+                  </div>
+                </div>
+              </div>
+
+              {/* Image Preview Box */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-600 px-1">
+                  <span>ตัวอย่างภาพที่ถูกแคป (ความละเอียดสูง):</span>
+                  <span className="text-[11px] text-gray-400">ขนาดภาพคมชัด 2.5x Resolution</span>
+                </div>
+                <div className="border border-gray-200 rounded-2xl p-2 bg-white shadow-inner max-h-[50vh] overflow-y-auto flex justify-center">
+                  <img
+                    src={capturedImageUrl}
+                    alt={capturedSheetInfo?.title || "Daily Report"}
+                    className="max-w-full h-auto rounded-xl shadow-xs object-contain"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="p-4 bg-white border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <button
+                onClick={() => setShowCaptureModal(false)}
+                className="px-4 py-2 text-xs font-bold text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleDownloadImage}
+                  className="px-4 py-2.5 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                >
+                  <Download className="w-4 h-4 text-gray-600" />
+                  <span>ดาวน์โหลดภาพ (PNG)</span>
+                </button>
+
+                <button
+                  onClick={handleCopyImageAgain}
+                  className="px-5 py-2.5 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md shadow-emerald-200 rounded-xl transition cursor-pointer flex items-center gap-2 active:scale-95"
+                >
+                  {copyImageSuccess ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>คัดลอกลงคลิปบอร์ดแล้ว!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>คัดลอกภาพส่ง LINE (Ctrl + V)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

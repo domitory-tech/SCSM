@@ -39,7 +39,9 @@ export async function exportHtmlToPdf(
     const imgData = await toPng(clone, {
       pixelRatio: 2,
       backgroundColor: "#ffffff",
-      cacheBust: true
+      cacheBust: true,
+      skipFonts: true,
+      fontEmbedCSS: ""
     });
 
     const img = new Image();

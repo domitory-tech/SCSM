@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
 
@@ -386,37 +386,39 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
   };
 
-  // Generate all unique grade/room combinations based on the selected dormitory (or all dorms)
+  // Helper to format class key uniformly (e.g. "ม.1/1", "ม.2/3")
+  const formatClassKey = (grade?: string, room?: string | number): string => {
+    if (!grade) return "";
+    const cleanGrade = grade.trim();
+    if (cleanGrade.includes("/")) {
+      return cleanGrade;
+    }
+    if (room !== undefined && room !== null && String(room).trim() !== "") {
+      return `${cleanGrade}/${String(room).trim()}`;
+    }
+    return cleanGrade;
+  };
+
+  // Generate all unique grade/room combinations that ACTUALLY exist in the database based on the selected scope
   const gradeRoomOptions = useMemo(() => {
     const targetStudents =
       selectedDormFilter === "ALL"
         ? students
         : students.filter((s) => s.dormId === selectedDormFilter);
 
-    const classSet = new Set<string>();
+    const classCountMap = new Map<string, number>();
 
-    if (selectedDormFilter === "ALL") {
-      // Pre-populate standard school classes (ม.1/1 to ม.6/7)
-      ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"].forEach((g) => {
-        for (let r = 1; r <= 7; r++) {
-          classSet.add(`${g}/${r}`);
-        }
-      });
-    }
-
-    // Extract from students within the selected dorm scope
+    // Extract ONLY from students that actually exist in the database
     targetStudents.forEach((s) => {
-      if (s.grade) {
-        const g = s.grade.trim();
-        if (s.room) {
-          classSet.add(`${g}/${String(s.room).trim()}`);
-        } else {
-          classSet.add(g);
+      if (s.grade && s.grade.trim()) {
+        const classKey = formatClassKey(s.grade, s.room);
+        if (classKey) {
+          classCountMap.set(classKey, (classCountMap.get(classKey) || 0) + 1);
         }
       }
     });
 
-    const sortedClasses = Array.from(classSet).sort((a, b) => {
+    const sortedClasses = Array.from(classCountMap.keys()).sort((a, b) => {
       const partsA = a.split("/");
       const partsB = b.split("/");
       const gradeA = parseGradeNum(partsA[0]);
@@ -427,18 +429,32 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       return roomA - roomB;
     });
 
-    return sortedClasses;
+    return sortedClasses.map((cls) => ({
+      value: cls,
+      label: `${cls} (${classCountMap.get(cls)} คน)`,
+      count: classCountMap.get(cls) || 0
+    }));
   }, [students, selectedDormFilter]);
+
+  // Synchronize and validate selectedClassFilter when options or dorm change
+  useEffect(() => {
+    if (
+      selectedClassFilter !== "ALL" &&
+      !gradeRoomOptions.some((opt) => opt.value === selectedClassFilter)
+    ) {
+      setSelectedClassFilter("ALL");
+    }
+  }, [gradeRoomOptions, selectedClassFilter]);
 
   // Filter & Sort students
   const filteredStudents = useMemo(() => {
     const result = students.filter((s) => {
       if (selectedDormFilter !== "ALL" && s.dormId !== selectedDormFilter) return false;
 
-      // Class / Room filter (e.g. "ม.1/1", "ม.1/2")
+      // Class / Room filter (matches formatted class key e.g. "ม.1/1" or raw grade)
       if (selectedClassFilter !== "ALL") {
-        const studentClassStr = `${s.grade}/${s.room}`;
-        if (studentClassStr !== selectedClassFilter && `${s.grade}` !== selectedClassFilter) {
+        const studentClassStr = formatClassKey(s.grade, s.room);
+        if (studentClassStr !== selectedClassFilter && s.grade?.trim() !== selectedClassFilter) {
           return false;
         }
       }
@@ -575,19 +591,21 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               <select
                 value={selectedClassFilter}
                 onChange={(e) => setSelectedClassFilter(e.target.value)}
-                className="bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-pink-500 min-w-[170px]"
+                className="bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-pink-500 min-w-[190px]"
               >
                 <option value="ALL">
-                  {selectedDormFilter === "ALL" ? "ทุกระดับชั้น/ห้อง (ม.1 - ม.6)" : "ทุกชั้น/ห้องในหอพักนี้"}
+                  {selectedDormFilter === "ALL"
+                    ? `ทุกระดับชั้น/ห้อง (${gradeRoomOptions.length} ห้องในระบบ)`
+                    : `ทุกระดับชั้น/ห้อง (${gradeRoomOptions.length} ห้องในหอนี้)`}
                 </option>
                 {gradeRoomOptions.length > 0 ? (
                   gradeRoomOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
                     </option>
                   ))
                 ) : (
-                  <option disabled>ไม่มีข้อมูลห้องในหอพักนี้</option>
+                  <option disabled>ไม่มีข้อมูลห้องในฐานข้อมูล</option>
                 )}
               </select>
             </div>

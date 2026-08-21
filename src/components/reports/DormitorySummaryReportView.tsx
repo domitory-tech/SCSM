@@ -469,7 +469,9 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
       const dataUrl = await toPng(captureCardRef.current, {
         pixelRatio: 2.5,
         backgroundColor: "#ffffff",
-        cacheBust: true
+        cacheBust: true,
+        skipFonts: true,
+        fontEmbedCSS: ""
       });
 
       setCapturedImageUrl(dataUrl);
@@ -480,7 +482,9 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
         const blob = await toBlob(captureCardRef.current, {
           pixelRatio: 2.5,
           backgroundColor: "#ffffff",
-          cacheBust: true
+          cacheBust: true,
+          skipFonts: true,
+          fontEmbedCSS: ""
         });
 
         if (blob && navigator.clipboard && window.ClipboardItem) {
