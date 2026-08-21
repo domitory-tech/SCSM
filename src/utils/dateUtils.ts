@@ -219,6 +219,33 @@ export function formatGradeRoomFullTitle(grade: string, room: number | string): 
   return `${trimmed}/${room}`;
 }
 
+export function formatGradeRoomShort(grade?: string, room?: number | string): string {
+  if (!grade) return room !== undefined && room !== null ? `ห้อง ${room}` : "-";
+  const trimmed = grade.trim();
+  let gradeShort = trimmed;
+  if (trimmed.startsWith("มัธยมศึกษาปีที่")) {
+    const num = trimmed.replace("มัธยมศึกษาปีที่", "").trim();
+    gradeShort = `ม.${num}`;
+  } else if (trimmed.startsWith("ประถมศึกษาปีที่")) {
+    const num = trimmed.replace("ประถมศึกษาปีที่", "").trim();
+    gradeShort = `ป.${num}`;
+  } else if (!trimmed.startsWith("ม.") && !trimmed.startsWith("ป.")) {
+    const num = trimmed.replace(/[^0-9]/g, "");
+    if (num) {
+      gradeShort = `ม.${num}`;
+    }
+  }
+
+  if (gradeShort.includes("/")) {
+    return gradeShort;
+  }
+
+  if (room !== undefined && room !== null && String(room).trim() !== "") {
+    return `${gradeShort}/${room}`;
+  }
+  return gradeShort;
+}
+
 /**
  * คัดแยกเพศนักเรียน (ชาย/หญิง) จากคำนำหน้านามตามเงื่อนไข:
  * เพศชาย = เด็กชาย, ด.ช., นาย

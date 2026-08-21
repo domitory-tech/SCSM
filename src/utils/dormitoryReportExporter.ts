@@ -73,18 +73,34 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
 
   const reasonListHtml = reasons.length > 0
     ? reasons.map((r) => `
-        <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-slate-50 border border-slate-100 text-xs">
-          <div class="flex items-center gap-2">
-            <span class="w-5 h-5 rounded-full bg-purple-100 text-purple-700 font-black text-[10px] flex items-center justify-center">${r.index}</span>
-            <span class="font-bold text-slate-800">${r.label}</span>
+        <div class="flex items-center justify-between py-1 px-2.5 rounded-lg bg-slate-50 border border-slate-100 text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-purple-100 text-purple-700 font-black text-[10px] flex items-center justify-center">${r.index}</span>
+            <span class="font-bold text-slate-800 text-[11px]">${r.label}</span>
           </div>
-          <div class="flex items-center gap-3">
-            <span class="font-extrabold text-slate-900">${r.count} <span class="font-normal text-slate-500 text-[11px]">คน</span></span>
-            <span class="text-[11px] font-extrabold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200/60">คิดเป็นร้อยละ ${r.percentOfTotal.toFixed(1)}%</span>
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-slate-900 text-xs">${r.count} <span class="font-normal text-slate-500 text-[10px]">คน</span></span>
+            <span class="text-[10px] font-extrabold text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded border border-purple-200/60">${r.percentOfTotal.toFixed(1)}%</span>
           </div>
         </div>
       `).join("")
-    : `<div class="text-xs text-slate-400 py-2 italic text-center">ไม่มีนักเรียนออกหอพักในวันที่สรุปยอด</div>`;
+    : `<div class="text-[11px] text-emerald-700 bg-emerald-50 py-1.5 px-2 rounded-lg border border-emerald-200 font-bold text-center">✓ ไม่มีนักเรียนออกหอพัก (อยู่ครบ 100%)</div>`;
+
+  const orientationList = orientationNotes
+    ? orientationNotes.split("\n").filter((n) => n.trim().length > 0)
+    : [];
+
+  const orientationHtml = orientationList.length > 0
+    ? orientationList.map((n, idx) => `
+        <div class="p-2.5 rounded-xl bg-white border border-amber-200/80 space-y-1 text-xs">
+          <div class="flex items-center gap-1.5 font-bold text-amber-900 text-[11px]">
+            <span class="w-4 h-4 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center text-[10px]">${idx + 1}</span>
+            <span>หัวข้อที่ ${idx + 1}</span>
+          </div>
+          <div class="text-slate-800 pl-5 text-[11px] leading-relaxed whitespace-pre-wrap">${n}</div>
+        </div>
+      `).join("")
+    : `<div class="p-4 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 font-medium">ไม่มีบันทึกเรื่องการอบรม</div>`;
 
   const gradeTableRows = gradeStats.map((g, idx) => `
     <tr class="${idx % 2 === 0 ? "bg-white" : "bg-slate-50/70"}">
@@ -100,17 +116,11 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
 
   const absentListRows = absentList.map((st) => `
     <tr class="hover:bg-slate-50 text-xs">
-      <td class="py-2 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-200">${st.index}</td>
-      <td class="py-2 px-2.5 text-center font-semibold text-slate-600 border-r border-slate-200">${st.studentNo ?? "-"}</td>
-      <td class="py-2 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${st.studentId}</td>
-      <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200">${st.fullName}</td>
-      <td class="py-2 px-2.5 text-center text-slate-700 border-r border-slate-200">${st.gradeRoom}</td>
-      <td class="py-2 px-3 font-medium text-slate-800 border-r border-slate-200">${st.reason}</td>
-      <td class="py-2 px-2.5 text-center">
-        <span class="inline-block px-2 py-0.5 rounded text-[11px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">
-          ${st.statusLabel}
-        </span>
-      </td>
+      <td class="py-1.5 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-200">${st.index}</td>
+      <td class="py-1.5 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${st.studentId}</td>
+      <td class="py-1.5 px-3 font-bold text-slate-900 border-r border-slate-200">${st.fullName}</td>
+      <td class="py-1.5 px-2.5 text-center font-bold text-slate-800 border-r border-slate-200">${st.gradeRoom}</td>
+      <td class="py-1.5 px-3 font-medium text-slate-800">${st.reason}</td>
     </tr>
   `).join("");
 
@@ -186,7 +196,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
           <span>Dormitory Daily Summary Report</span>
         </div>
         <h1 class="text-xl font-black text-slate-900 tracking-tight">รายงานสรุปรายหอพัก (${dormName})</h1>
-        <p class="text-sm text-purple-800 font-bold mt-0.5">ประจำวัน: ${dateText}</p>
+        <p class="text-sm text-purple-800 font-bold mt-0.5">สรุปยอดประจำวัน: ${dateText}</p>
         <p class="text-[11px] text-slate-500 font-medium">${schoolName} • ${systemTitle}</p>
       </div>
       <div class="text-right text-xs">
@@ -197,82 +207,99 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
       </div>
     </div>
 
-    <!-- Main Summary Block: ตามรูปแบบที่ต้องการ -->
-    <div class="bg-gradient-to-br from-purple-50/70 via-white to-indigo-50/50 border border-purple-200 rounded-2xl p-6 mb-6 shadow-xs">
-      <div class="text-sm font-black text-purple-950 mb-4 flex items-center gap-2">
-        <span class="w-3 h-3 rounded-full bg-purple-600"></span>
-        <span>รายละเอียดสรุปยอดประจำวันของ ${dormName}</span>
+    <!-- 2-Column Summary Block: Left = รายละเอียดสรุปยอดประจำวัน, Right = เรื่องการอบรม -->
+    <div class="grid grid-cols-2 gap-4 mb-5">
+      <!-- Left Column: รายละเอียดสรุปยอดประจำวัน -->
+      <div class="bg-gradient-to-br from-purple-50/70 via-white to-indigo-50/50 border border-purple-200 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+        <div class="space-y-3">
+          <div class="text-xs font-black text-purple-950 flex items-center gap-2 pb-1 border-b border-purple-200/80">
+            <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+            <span>รายละเอียดสรุปยอดประจำวันของ ${dormName}</span>
+          </div>
+
+          <!-- Section 1: ข้อมูลนักเรียนในหอพัก -->
+          <div class="space-y-1.5 text-xs text-slate-800">
+            <div class="flex items-center justify-between font-black text-xs text-slate-900 bg-white px-3 py-1.5 rounded-xl border border-purple-100">
+              <span>นักเรียนในหอพัก</span>
+              <span class="text-purple-700 font-black text-sm">${totalStudents} <span class="text-[10px] font-normal text-slate-500">คน</span></span>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div class="flex items-center justify-between px-2.5 py-1 rounded-lg bg-blue-50/80 border border-blue-100 text-[11px]">
+                <span class="text-blue-950 font-bold">ชาย</span>
+                <span class="font-black text-blue-800">${maleStudents} <span class="text-[9px] font-normal text-blue-600">คน</span></span>
+              </div>
+              <div class="flex items-center justify-between px-2.5 py-1 rounded-lg bg-pink-50/80 border border-pink-100 text-[11px]">
+                <span class="text-pink-950 font-bold">หญิง</span>
+                <span class="font-black text-pink-800">${femaleStudents} <span class="text-[9px] font-normal text-pink-600">คน</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: นักเรียนอยู่หอพัก / ออกหอพัก -->
+          <div class="space-y-1.5 text-xs text-slate-800 pt-1 border-t border-purple-200/60">
+            <div class="flex items-center justify-between bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
+              <span class="font-extrabold text-emerald-950 text-xs">อยู่หอพัก</span>
+              <div class="flex items-center gap-2">
+                <span class="font-black text-emerald-800 text-xs">${presentCount} <span class="text-[10px] font-normal text-emerald-600">คน</span></span>
+                <span class="text-[10px] font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">${presentPercent.toFixed(1)}%</span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+              <span class="font-extrabold text-rose-950 text-xs">ออกหอพัก</span>
+              <div class="flex items-center gap-2">
+                <span class="font-black text-rose-800 text-xs">${outCount} <span class="text-[10px] font-normal text-rose-600">คน</span></span>
+                <span class="text-[10px] font-black text-rose-800 bg-rose-100 px-1.5 py-0.2 rounded border border-rose-300">${outPercent.toFixed(1)}%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: สาเหตุที่ออกหอพัก -->
+          <div class="pt-1 border-t border-purple-200/60">
+            <div class="font-black text-slate-900 text-[11px] mb-1.5">สาเหตุที่ออกหอพัก (รวม ${outCount} คน)</div>
+            <div class="space-y-1">
+              ${reasonListHtml}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Section 1: ข้อมูลนักเรียนในหอพัก -->
-      <div class="space-y-2.5 text-xs text-slate-800 pb-4 border-b border-purple-200/80">
-        <div class="flex items-center justify-between font-black text-sm text-slate-900 bg-white px-4 py-2.5 rounded-xl border border-purple-100 shadow-2xs">
-          <span class="flex items-center gap-2">
-            <span>นักเรียนในหอพัก</span>
-          </span>
-          <span class="text-purple-700 font-black text-base">${totalStudents} <span class="text-xs font-normal text-slate-500">คน</span></span>
-        </div>
-        <div class="grid grid-cols-2 gap-2.5 pt-1">
-          <div class="flex items-center justify-between px-4 py-2 rounded-xl bg-blue-50/80 border border-blue-100">
-            <span class="flex items-center gap-1.5 text-blue-950 font-bold">
-              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-              <span>นักเรียนชาย จำนวน</span>
-            </span>
-            <span class="font-black text-blue-800">${maleStudents} <span class="text-[11px] font-normal text-blue-600">คน</span></span>
+      <!-- Right Column: เรื่องการอบรม -->
+      <div class="bg-gradient-to-br from-amber-50/50 via-white to-slate-50/50 border border-amber-200 rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+        <div class="space-y-2.5">
+          <div class="text-xs font-black text-amber-950 flex items-center justify-between pb-1 border-b border-amber-200/80">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              <span>เรื่องการอบรม</span>
+            </div>
+            <span class="text-[10px] text-amber-800 bg-amber-100 px-2 py-0.2 rounded font-bold">บันทึกหอพัก</span>
           </div>
-          <div class="flex items-center justify-between px-4 py-2 rounded-xl bg-pink-50/80 border border-pink-100">
-            <span class="flex items-center gap-1.5 text-pink-950 font-bold">
-              <span class="w-2 h-2 rounded-full bg-pink-500"></span>
-              <span>นักเรียนหญิง จำนวน</span>
-            </span>
-            <span class="font-black text-pink-800">${femaleStudents} <span class="text-[11px] font-normal text-pink-600">คน</span></span>
+          <div class="space-y-2">
+            ${orientationHtml}
           </div>
         </div>
-      </div>
-
-      <!-- Section 2: นักเรียนอยู่หอพัก / ออกหอพัก -->
-      <div class="space-y-2.5 text-xs text-slate-800 py-4 border-b border-purple-200/80">
-        <div class="flex items-center justify-between bg-emerald-50 px-4 py-3 rounded-xl border border-emerald-200">
-          <span class="font-extrabold text-emerald-950 text-sm">นักเรียนอยู่หอพัก จำนวน</span>
-          <div class="flex items-center gap-3">
-            <span class="font-black text-emerald-800 text-base">${presentCount} <span class="text-xs font-normal text-emerald-600">คน</span></span>
-            <span class="text-xs font-black text-emerald-800 bg-emerald-100/90 px-2.5 py-1 rounded-lg border border-emerald-300">คิดเป็นร้อยละ ${presentPercent.toFixed(1)}%</span>
-          </div>
-        </div>
-        <div class="flex items-center justify-between bg-rose-50 px-4 py-3 rounded-xl border border-rose-200">
-          <span class="font-extrabold text-rose-950 text-sm">นักเรียนออกหอพัก จำนวน</span>
-          <div class="flex items-center gap-3">
-            <span class="font-black text-rose-800 text-base">${outCount} <span class="text-xs font-normal text-rose-600">คน</span></span>
-            <span class="text-xs font-black text-rose-800 bg-rose-100/90 px-2.5 py-1 rounded-lg border border-rose-300">คิดเป็นร้อยละ ${outPercent.toFixed(1)}%</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Section 3: สาเหตุที่ออกหอพัก -->
-      <div class="pt-4">
-        <div class="font-black text-slate-900 text-xs mb-3 px-1">สาเหตุที่ออกหอพัก (รวม ${outCount} คน)</div>
-        <div class="space-y-2">
-          ${reasonListHtml}
+        <div class="pt-2 text-[10px] text-slate-400 border-t border-slate-200/60 flex items-center justify-between">
+          <span>${schoolName}</span>
+          <span>${dateText}</span>
         </div>
       </div>
     </div>
 
     <!-- Section 4: ตารางสถิติแยกตามระดับชั้น (ม.1 - ม.6) -->
-    <div class="mb-5">
-      <h3 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+    <div class="mb-4">
+      <h3 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
         <span>สรุปสถิติข้อมูลแยกตามระดับชั้นภายใน ${dormName}</span>
       </h3>
       <div class="border border-slate-200 rounded-xl overflow-hidden">
         <table class="w-full text-left text-xs border-collapse">
           <thead class="bg-slate-100 text-slate-800 font-bold border-b border-slate-200">
             <tr>
-              <th class="py-2 px-3 border-r border-slate-200">ระดับชั้น</th>
-              <th class="py-2 px-2.5 text-center border-r border-slate-200">ชาย</th>
-              <th class="py-2 px-2.5 text-center border-r border-slate-200">หญิง</th>
-              <th class="py-2 px-2.5 text-center border-r border-slate-200">รวม</th>
-              <th class="py-2 px-2.5 text-center border-r border-slate-200">อยู่</th>
-              <th class="py-2 px-2.5 text-center border-r border-slate-200">ออก</th>
-              <th class="py-2 px-2.5 text-center">ร้อยละ</th>
+              <th class="py-1.5 px-3 border-r border-slate-200">ระดับชั้น</th>
+              <th class="py-1.5 px-2.5 text-center border-r border-slate-200">ชาย</th>
+              <th class="py-1.5 px-2.5 text-center border-r border-slate-200">หญิง</th>
+              <th class="py-1.5 px-2.5 text-center border-r border-slate-200">รวม</th>
+              <th class="py-1.5 px-2.5 text-center border-r border-slate-200">อยู่</th>
+              <th class="py-1.5 px-2.5 text-center border-r border-slate-200">ออก</th>
+              <th class="py-1.5 px-2.5 text-center">ร้อยละ</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -280,13 +307,13 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
           </tbody>
           <tfoot class="bg-slate-100 font-bold border-t border-slate-200">
             <tr>
-              <td class="py-2 px-3 font-black text-slate-900 border-r border-slate-200">รวมทั้งหมด</td>
-              <td class="py-2 px-2.5 text-center font-bold text-blue-800 border-r border-slate-200">${maleStudents}</td>
-              <td class="py-2 px-2.5 text-center font-bold text-pink-800 border-r border-slate-200">${femaleStudents}</td>
-              <td class="py-2 px-2.5 text-center font-black text-slate-900 border-r border-slate-200">${totalStudents}</td>
-              <td class="py-2 px-2.5 text-center font-black text-emerald-800 border-r border-slate-200">${presentCount}</td>
-              <td class="py-2 px-2.5 text-center font-black text-rose-700 border-r border-slate-200">${outCount}</td>
-              <td class="py-2 px-2.5 text-center font-black text-purple-800">${presentPercent.toFixed(0)}%</td>
+              <td class="py-1.5 px-3 font-black text-slate-900 border-r border-slate-200">รวมทั้งหมด</td>
+              <td class="py-1.5 px-2.5 text-center font-bold text-blue-800 border-r border-slate-200">${maleStudents}</td>
+              <td class="py-1.5 px-2.5 text-center font-bold text-pink-800 border-r border-slate-200">${femaleStudents}</td>
+              <td class="py-1.5 px-2.5 text-center font-black text-slate-900 border-r border-slate-200">${totalStudents}</td>
+              <td class="py-1.5 px-2.5 text-center font-black text-emerald-800 border-r border-slate-200">${presentCount}</td>
+              <td class="py-1.5 px-2.5 text-center font-black text-rose-700 border-r border-slate-200">${outCount}</td>
+              <td class="py-1.5 px-2.5 text-center font-black text-purple-800">${presentPercent.toFixed(0)}%</td>
             </tr>
           </tfoot>
         </table>
@@ -296,20 +323,18 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
     <!-- Section 5: รายชื่อนักเรียนที่ออกหอพัก (ถ้ามี) -->
     ${absentList.length > 0 ? `
       <div>
-        <h3 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
+        <h3 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-1.5 flex items-center justify-between">
           <span>บัญชีรายชื่อนักเรียนที่มีการออกหอพัก (${absentList.length} คน)</span>
         </h3>
         <div class="border border-slate-200 rounded-xl overflow-hidden">
           <table class="w-full text-left text-xs border-collapse">
             <thead class="bg-slate-100 text-slate-800 font-bold border-b border-slate-200">
               <tr>
-                <th class="py-2 px-2.5 text-center border-r border-slate-200 w-10">ลำดับ</th>
-                <th class="py-2 px-2.5 text-center border-r border-slate-200 w-12">เลขที่</th>
-                <th class="py-2 px-2.5 text-center border-r border-slate-200 w-20">รหัสนักเรียน</th>
-                <th class="py-2 px-3 border-r border-slate-200">ชื่อ - สกุล</th>
-                <th class="py-2 px-2.5 text-center border-r border-slate-200 w-24">ชั้น/ห้อง</th>
-                <th class="py-2 px-3 border-r border-slate-200">สาเหตุการออกหอพัก</th>
-                <th class="py-2 px-2.5 text-center w-24">สถานะ</th>
+                <th class="py-1.5 px-2.5 text-center border-r border-slate-200 w-12">ลำดับ</th>
+                <th class="py-1.5 px-2.5 text-center border-r border-slate-200 w-24">รหัสนักเรียน</th>
+                <th class="py-1.5 px-3 border-r border-slate-200">ชื่อ - สกุล</th>
+                <th class="py-1.5 px-2.5 text-center border-r border-slate-200 w-20">ชั้น/ห้อง</th>
+                <th class="py-1.5 px-3">สาเหตุ</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">

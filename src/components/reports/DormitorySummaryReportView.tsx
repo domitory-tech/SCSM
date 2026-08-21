@@ -4,7 +4,7 @@ import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from
 import {
   DEFAULT_SYSTEM_SETTINGS,
   detectStudentGender,
-  formatGradeRoomFullTitle,
+  formatGradeRoomShort,
   formatThaiFullDate,
   formatThaiMediumDate,
   getTodayDateString,
@@ -46,13 +46,46 @@ interface DormitorySummaryReportViewProps {
 
 // Reason mappings
 const REASON_CONFIGS: Record<string, { label: string; color: string; bg: string; text: string }> = {
-  ROUND_HOME: { label: "รอบกลับบ้านตามปฏิทิน", color: "#64748b", bg: "bg-slate-100", text: "text-slate-700" },
-  HOME: { label: "กลับบ้าน/ธุระครอบครัว", color: "#f97316", bg: "bg-orange-100", text: "text-orange-700" },
-  CAMP: { label: "เข้าค่ายวิชาการ/ลูกเสือ", color: "#1d4ed8", bg: "bg-blue-100", text: "text-blue-700" },
-  SICK: { label: "ป่วย/รักษาพยาบาล", color: "#f43f5e", bg: "bg-rose-100", text: "text-rose-700" },
-  SKILL_COMP: { label: "แข่งขันทักษะวิชาการ", color: "#a855f7", bg: "bg-purple-100", text: "text-purple-700" },
-  EXCHANGE: { label: "นักเรียนแลกเปลี่ยน", color: "#0ea5e9", bg: "bg-sky-100", text: "text-sky-700" },
-  OTHER: { label: "อื่นๆ/ลากิจ", color: "#d97706", bg: "bg-amber-100", text: "text-amber-700" }
+  ROUND_HOME: { label: "รอบกลับบ้าน", color: "#64748b", bg: "bg-slate-100", text: "text-slate-700" },
+  HOME: { label: "กลับบ้าน", color: "#f97316", bg: "bg-orange-100", text: "text-orange-700" },
+  CAMP: { label: "เข้าค่าย", color: "#1d4ed8", bg: "bg-blue-100", text: "text-blue-700" },
+  SICK: { label: "ป่วย", color: "#f43f5e", bg: "bg-rose-100", text: "text-rose-700" },
+  SKILL_COMP: { label: "แข่งทักษะ", color: "#a855f7", bg: "bg-purple-100", text: "text-purple-700" },
+  EXCHANGE: { label: "แลกเปลี่ยน", color: "#0ea5e9", bg: "bg-sky-100", text: "text-sky-700" },
+  OTHER: { label: "อื่น", color: "#d97706", bg: "bg-amber-100", text: "text-amber-700" }
+};
+
+// Helper: Get clean reason text based on status and check data
+const getAttendanceReasonText = (status?: string, reason?: string, note?: string): string => {
+  if (status === "ROUND_HOME") return "รอบกลับบ้าน";
+  if (status === "HOME") {
+    if (reason && reason.trim() && !reason.includes("กลับบ้าน/ธุระครอบครัว")) return reason.trim();
+    return "กลับบ้าน";
+  }
+  if (status === "CAMP") {
+    if (reason && reason.trim() && !reason.includes("เข้าค่ายวิชาการ")) return reason.trim();
+    return "เข้าค่าย";
+  }
+  if (status === "SICK") {
+    if (reason && reason.trim() && !reason.includes("ป่วย/รักษาพยาบาล")) return reason.trim();
+    return "ป่วย";
+  }
+  if (status === "SKILL_COMP") {
+    if (reason && reason.trim() && !reason.includes("แข่งขันทักษะวิชาการ")) return reason.trim();
+    return "แข่งทักษะ";
+  }
+  if (status === "EXCHANGE") {
+    if (reason && reason.trim() && !reason.includes("นักเรียนแลกเปลี่ยน")) return reason.trim();
+    return "แลกเปลี่ยน";
+  }
+  if (status === "OTHER") {
+    if (reason && reason.trim() && !reason.includes("อื่นๆ/ลากิจ")) return reason.trim();
+    if (note && note.trim()) return note.trim();
+    return "อื่น";
+  }
+  if (reason && reason.trim()) return reason.trim();
+  if (note && note.trim()) return note.trim();
+  return REASON_CONFIGS[status || "OTHER"]?.label || "ไม่ระบุสาเหตุ";
 };
 
 export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProps> = ({
@@ -127,6 +160,18 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
 
   const isHomeBreak = attendanceForDate?.isHomeBreak || attendanceForDate?.status === "HOME_BREAK";
 
+  // Orientation Notes list
+  const orientationNotesList: string[] = useMemo(() => {
+    const notes = attendanceForDate?.teacherOrientationNotes || (attendanceForDate as any)?.orientationNotes || [];
+    if (Array.isArray(notes)) {
+      return notes.filter((n: string) => typeof n === "string" && n.trim().length > 0);
+    }
+    if (typeof notes === "string" && (notes as string).trim().length > 0) {
+      return [(notes as string).trim()];
+    }
+    return [];
+  }, [attendanceForDate]);
+
   // Process Absent / Present Students
   const { absentList, presentCount, outCount, reasonsSummary } = useMemo(() => {
     const absents: Array<{
@@ -151,17 +196,17 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
           studentNo: s.no,
           studentId: s.studentId,
           fullName: `${s.title}${s.firstName} ${s.lastName}`,
-          gradeRoom: formatGradeRoomFullTitle(s.grade, s.room),
+          gradeRoom: formatGradeRoomShort(s.grade, s.room),
           grade: s.grade,
           room: s.room,
-          reason: "รอบกลับบ้านตามปฏิทินโรงเรียน",
+          reason: "รอบกลับบ้าน",
           status: "ROUND_HOME",
           statusLabel: "รอบกลับบ้าน"
         });
       });
 
       reasonCounts["ROUND_HOME"] = {
-        label: "รอบกลับบ้านตามปฏิทิน",
+        label: "รอบกลับบ้าน",
         count: dormStudents.length,
         color: "#64748b"
       };
@@ -170,8 +215,8 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
         if (rec.status && rec.status !== "PRESENT") {
           const s = dormStudents.find((st) => st.studentId === rec.studentId);
           const fullName = s ? `${s.title}${s.firstName} ${s.lastName}` : rec.studentName || rec.studentId;
-          const gradeRoom = s ? formatGradeRoomFullTitle(s.grade, s.room) : "-";
-          const reasonLabel = rec.reason || rec.note || REASON_CONFIGS[rec.status]?.label || "ไม่ระบุสาเหตุ";
+          const gradeRoom = s ? formatGradeRoomShort(s.grade, s.room) : "-";
+          const reasonText = getAttendanceReasonText(rec.status, rec.reason, rec.note);
           const statusConfig = REASON_CONFIGS[rec.status] || { label: rec.status, color: "#64748b" };
 
           absents.push({
@@ -182,7 +227,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
             gradeRoom,
             grade: s?.grade || "",
             room: s?.room,
-            reason: reasonLabel,
+            reason: reasonText,
             status: rec.status,
             statusLabel: statusConfig.label
           });
@@ -219,7 +264,8 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
       if (rA !== rB) return rA - rB;
       const noA = a.studentNo ?? 9999;
       const noB = b.studentNo ?? 9999;
-      return noA - noB;
+      if (noA !== noB) return noA - noB;
+      return a.studentId.localeCompare(b.studentId);
     });
 
     absents.forEach((item, i) => {
@@ -373,15 +419,16 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
   const handleCopyText = () => {
     const lines = [
       `รายงานสรุปรายหอพัก: ${currentDorm.name}`,
-      `ประจำวันที่: ${formattedDateStr}`,
+      `สรุปยอดประจำวัน: ${formattedDateStr}`,
       `-----------------------------`,
+      `รายละเอียดสรุปยอดประจำวันของ ${currentDorm.name}`,
       `นักเรียนในหอพัก ${totalStudentsInDorm} คน`,
       `นักเรียนชาย จำนวน ${maleStudentsCount} คน`,
       `นักเรียนหญิง จำนวน ${femaleStudentsCount} คน`,
       `-----------------------------`,
       `นักเรียนอยู่หอพัก จำนวน ${presentCount} คน คิดเป็นร้อยละ ${presentPercent.toFixed(1)}%`,
       `นักเรียนออกหอพัก  จำนวน ${outCount} คน คิดเป็นร้อยละ ${outPercent.toFixed(1)}%`,
-      `สาเหตุที่ออกหอพัก`
+      `สาเหตุที่ออกหอพัก:`
     ];
 
     if (reasonsSummary.length === 0) {
@@ -390,6 +437,20 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
       reasonsSummary.forEach((r) => {
         lines.push(`${r.index}. ${r.label} จำนวน ${r.count} คน คิดเป็นร้อยละ ${r.percentOfTotal.toFixed(1)}%`);
       });
+    }
+
+    lines.push(`-----------------------------`);
+    lines.push(`เรื่องการอบรม:`);
+    if (orientationNotesList.length > 0) {
+      orientationNotesList.forEach((n, idx) => {
+        lines.push(`${idx + 1}. ${n}`);
+      });
+    } else {
+      lines.push(`- ไม่มีบันทึกเรื่องการอบรม -`);
+    }
+
+    if (attendanceForDate?.checkedBy) {
+      lines.push(`ผู้บันทึกการเช็คยอด: ${attendanceForDate.checkedBy}`);
     }
 
     navigator.clipboard.writeText(lines.join("\n")).then(() => {
@@ -419,7 +480,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
       gradeStats,
       absentList,
       isHomeBreak,
-      orientationNotes: attendanceForDate?.orientationNotes
+      orientationNotes: orientationNotesList.length > 0 ? orientationNotesList.join("\n") : undefined
     });
   };
 
@@ -580,9 +641,9 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
         className="bg-white rounded-3xl p-6 sm:p-8 lg:p-10 border border-slate-200/90 shadow-sm relative overflow-hidden space-y-6"
       >
         {/* Subtle decorative background gradient */}
-        <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-purple-100/50 via-indigo-50/30 to-transparent rounded-bl-full pointer-events-none -mr-8 -mt-8"></div>
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-purple-100/50 via-indigo-50/30 to-transparent rounded-bl-full pointer-events-none -mr-8 -mt-8"></div>
 
-        <div className="max-w-2xl mx-auto space-y-6">
+        <div className="max-w-5xl mx-auto space-y-6">
           {/* Card Header */}
           <div className="text-center space-y-2 pb-5 border-b border-slate-100">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-100/90 text-purple-900 text-xs font-black">
@@ -593,146 +654,214 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               {currentDorm.name}
             </h3>
             <p className="text-xs sm:text-sm font-bold text-slate-500">
-              ประจำวัน {formattedDateStr}
+              สรุปยอดประจำวัน {formattedDateStr}
             </p>
           </div>
 
-          {/* Formatted Structure Block: จัดกรอบให้ข้อความห่างจากเส้นกรอบอย่างสมส่วนและอ่านง่าย */}
-          <div className="bg-slate-50/90 rounded-3xl p-6 sm:p-8 border border-slate-200 space-y-6 font-sans shadow-2xs">
+          {/* 2-Column Grid Layout: Left = รายละเอียดสรุปยอดประจำวัน, Right = เรื่องการอบรม */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
             
-            {/* Title inside summary block */}
-            <div className="text-sm font-black text-purple-950 flex items-center gap-2.5 pb-1">
-              <span className="w-3 h-3 rounded-full bg-purple-600 shadow-xs"></span>
-              <span>รายละเอียดสรุปยอดประจำวันของ {currentDorm.name}</span>
-            </div>
-
-            {/* Section 1: ข้อมูลนักเรียนในหอพัก */}
-            <div className="space-y-3">
-              {/* นักเรียนในหอพัก รวม */}
-              <div className="flex items-center justify-between px-6 py-4 rounded-2xl bg-white border border-purple-100 shadow-2xs">
-                <span className="flex items-center gap-2.5 text-sm sm:text-base font-extrabold text-slate-900">
-                  <Users className="w-5 h-5 text-purple-600 shrink-0" />
-                  <span>นักเรียนในหอพัก</span>
-                </span>
-                <span className="text-purple-700 font-black text-lg sm:text-xl">
-                  {totalStudentsInDorm} <span className="text-xs sm:text-sm font-normal text-slate-500">คน</span>
-                </span>
-              </div>
-
-              {/* ชาย / หญิง */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-blue-50/80 border border-blue-100 text-xs sm:text-sm">
-                  <span className="font-bold text-blue-900 flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0"></span>
-                    <span>นักเรียนชาย จำนวน</span>
-                  </span>
-                  <span className="font-black text-blue-800 text-sm sm:text-base">{maleStudentsCount} <span className="text-xs font-normal text-blue-600">คน</span></span>
+            {/* Left Column: รายละเอียดสรุปยอดประจำวันของ {currentDorm.name} */}
+            <div className="lg:col-span-6 bg-slate-50/90 rounded-3xl p-5 sm:p-6 border border-slate-200 space-y-5 font-sans shadow-2xs flex flex-col justify-between">
+              <div className="space-y-5">
+                {/* Title inside left column */}
+                <div className="text-sm font-black text-purple-950 flex items-center gap-2.5 pb-2 border-b border-slate-200/80">
+                  <span className="w-3 h-3 rounded-full bg-purple-600 shadow-xs"></span>
+                  <span>รายละเอียดสรุปยอดประจำวันของ {currentDorm.name}</span>
                 </div>
 
-                <div className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-pink-50/80 border border-pink-100 text-xs sm:text-sm">
-                  <span className="font-bold text-pink-900 flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-pink-500 shrink-0"></span>
-                    <span>นักเรียนหญิง จำนวน</span>
-                  </span>
-                  <span className="font-black text-pink-800 text-sm sm:text-base">{femaleStudentsCount} <span className="text-xs font-normal text-pink-600">คน</span></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Divider Line: ----------------------------- */}
-            <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t-2 border-dashed border-slate-300"></div>
-              <span className="flex-shrink mx-4 px-3 py-1 bg-white rounded-full border border-slate-200 text-slate-500 text-[11px] font-mono font-black tracking-widest uppercase">
-                สรุปยอดคืนนี้
-              </span>
-              <div className="flex-grow border-t-2 border-dashed border-slate-300"></div>
-            </div>
-
-            {/* Section 2: นักเรียนอยู่ / นักเรียนออกหอพัก */}
-            <div className="space-y-3.5">
-              {/* อยู่หอพัก */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4.5 rounded-2xl bg-emerald-50 border border-emerald-200">
-                <span className="font-extrabold text-emerald-950 text-sm sm:text-base flex items-center gap-2.5">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span>นักเรียนอยู่หอพัก จำนวน</span>
-                </span>
-                <div className="flex items-center gap-3 self-end sm:self-auto">
-                  <span className="font-black text-emerald-800 text-lg sm:text-xl">
-                    {presentCount} <span className="text-xs sm:text-sm font-normal text-emerald-700">คน</span>
-                  </span>
-                  <span className="text-xs font-black text-emerald-800 bg-emerald-100/90 px-3 py-1.5 rounded-xl border border-emerald-300">
-                    คิดเป็นร้อยละ {presentPercent.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-
-              {/* ออกหอพัก */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4.5 rounded-2xl bg-rose-50 border border-rose-200">
-                <span className="font-extrabold text-rose-950 text-sm sm:text-base flex items-center gap-2.5">
-                  <UserMinus className="w-5 h-5 text-rose-600 shrink-0" />
-                  <span>นักเรียนออกหอพัก จำนวน</span>
-                </span>
-                <div className="flex items-center gap-3 self-end sm:self-auto">
-                  <span className="font-black text-rose-800 text-lg sm:text-xl">
-                    {outCount} <span className="text-xs sm:text-sm font-normal text-rose-700">คน</span>
-                  </span>
-                  <span className="text-xs font-black text-rose-800 bg-rose-100/90 px-3 py-1.5 rounded-xl border border-rose-300">
-                    คิดเป็นร้อยละ {outPercent.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Section 3: สาเหตุที่ออกหอพัก */}
-            <div className="pt-3 space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                  <span>สาเหตุที่ออกหอพัก</span>
-                </h4>
-                <span className="text-xs font-bold text-slate-500">
-                  รวม {outCount} คน
-                </span>
-              </div>
-
-              {reasonsSummary.length > 0 ? (
+                {/* Section 1: ข้อมูลนักเรียนในหอพัก */}
                 <div className="space-y-2.5">
-                  {reasonsSummary.map((r) => (
-                    <div
-                      key={r.key}
-                      className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:border-purple-200 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="w-6 h-6 rounded-full bg-purple-100 text-purple-800 font-black text-xs flex items-center justify-center shrink-0">
-                          {r.index}
-                        </span>
-                        <span className="text-xs sm:text-sm font-bold text-slate-800">{r.label}</span>
-                      </div>
-                      <div className="flex items-center gap-3 sm:gap-4">
-                        <span className="text-xs sm:text-sm font-black text-slate-900">
-                          จำนวน <strong className="text-purple-700 text-sm sm:text-base">{r.count}</strong> คน
-                        </span>
-                        <span className="text-xs font-black text-purple-800 bg-purple-50 px-3 py-1 rounded-lg border border-purple-100">
-                          คิดเป็นร้อยละ {r.percentOfTotal.toFixed(1)}%
-                        </span>
-                      </div>
+                  {/* นักเรียนในหอพัก รวม */}
+                  <div className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-white border border-purple-100 shadow-2xs">
+                    <span className="flex items-center gap-2 text-xs sm:text-sm font-extrabold text-slate-900">
+                      <Users className="w-4 h-4 text-purple-600 shrink-0" />
+                      <span>นักเรียนในหอพัก</span>
+                    </span>
+                    <span className="text-purple-700 font-black text-base sm:text-lg">
+                      {totalStudentsInDorm} <span className="text-xs font-normal text-slate-500">คน</span>
+                    </span>
+                  </div>
+
+                  {/* ชาย / หญิง */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-blue-50/80 border border-blue-100 text-xs">
+                      <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                        <span>ชาย</span>
+                      </span>
+                      <span className="font-black text-blue-800 text-sm">{maleStudentsCount} <span className="text-[11px] font-normal text-blue-600">คน</span></span>
                     </div>
-                  ))}
+
+                    <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-pink-50/80 border border-pink-100 text-xs">
+                      <span className="font-bold text-pink-900 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-pink-500 shrink-0"></span>
+                        <span>หญิง</span>
+                      </span>
+                      <span className="font-black text-pink-800 text-sm">{femaleStudentsCount} <span className="text-[11px] font-normal text-pink-600">คน</span></span>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="p-5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-center">
-                  <p className="text-xs sm:text-sm font-bold text-emerald-800">
-                    ✓ ไม่มีนักเรียนออกหอพักในวันนี้ (นักเรียนอยู่ครบ 100%)
-                  </p>
+
+                {/* Divider Line: ----------------------------- */}
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t-2 border-dashed border-slate-300"></div>
+                  <span className="flex-shrink mx-3 px-2.5 py-0.5 bg-white rounded-full border border-slate-200 text-slate-500 text-[10px] font-mono font-black tracking-widest uppercase">
+                    สรุปยอดคืนนี้
+                  </span>
+                  <div className="flex-grow border-t-2 border-dashed border-slate-300"></div>
                 </div>
-              )}
+
+                {/* Section 2: นักเรียนอยู่ / นักเรียนออกหอพัก */}
+                <div className="space-y-2.5">
+                  {/* อยู่หอพัก */}
+                  <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-200">
+                    <span className="font-extrabold text-emerald-950 text-xs sm:text-sm flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>นักเรียนอยู่หอพัก</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-emerald-800 text-sm sm:text-base">
+                        {presentCount} <span className="text-[11px] font-normal text-emerald-700">คน</span>
+                      </span>
+                      <span className="text-[11px] font-black text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-lg border border-emerald-300">
+                        {presentPercent.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ออกหอพัก */}
+                  <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-rose-50 border border-rose-200">
+                    <span className="font-extrabold text-rose-950 text-xs sm:text-sm flex items-center gap-2">
+                      <UserMinus className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>นักเรียนออกหอพัก</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-rose-800 text-sm sm:text-base">
+                        {outCount} <span className="text-[11px] font-normal text-rose-700">คน</span>
+                      </span>
+                      <span className="text-[11px] font-black text-rose-800 bg-rose-100/90 px-2 py-0.5 rounded-lg border border-rose-300">
+                        {outPercent.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: สาเหตุที่ออกหอพัก */}
+                <div className="pt-2 space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-xs font-black text-slate-900 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span>สาเหตุที่ออกหอพัก</span>
+                    </h4>
+                    <span className="text-[11px] font-bold text-slate-500">
+                      รวม {outCount} คน
+                    </span>
+                  </div>
+
+                  {reasonsSummary.length > 0 ? (
+                    <div className="space-y-2">
+                      {reasonsSummary.map((r) => (
+                        <div
+                          key={r.key}
+                          className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:border-purple-200 transition-colors text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-800 font-black text-[10px] flex items-center justify-center shrink-0">
+                              {r.index}
+                            </span>
+                            <span className="font-bold text-slate-800">{r.label}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-900">
+                              <strong className="text-purple-700">{r.count}</strong> คน
+                            </span>
+                            <span className="text-[10px] font-black text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                              {r.percentOfTotal.toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-emerald-50/90 border border-emerald-200 text-center">
+                      <p className="text-xs font-bold text-emerald-800">
+                        ✓ ไม่มีนักเรียนออกหอพักในวันนี้ (นักเรียนอยู่ครบ 100%)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Bottom Watermark in Capture Image */}
-            <div className="pt-4 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-400 font-medium px-1">
-              <span>{systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล"}</span>
-              <span>ระบบบริหารจัดการหอพักนักเรียน</span>
+            {/* Right Column: เรื่องการอบรม */}
+            <div className="lg:col-span-6 bg-slate-50/90 rounded-3xl p-5 sm:p-6 border border-slate-200 space-y-4 font-sans shadow-2xs flex flex-col justify-between">
+              <div className="space-y-4">
+                {/* Title inside right column */}
+                <div className="text-sm font-black text-purple-950 flex items-center justify-between pb-2 border-b border-slate-200/80">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3 h-3 rounded-full bg-amber-500 shadow-xs"></span>
+                    <span>เรื่องการอบรม</span>
+                  </div>
+                  {attendanceForDate?.checkedBy && (
+                    <span className="text-[11px] font-bold text-purple-700 bg-purple-100/80 px-2.5 py-0.5 rounded-lg">
+                      ผู้บันทึก: {attendanceForDate.checkedBy}
+                    </span>
+                  )}
+                </div>
+
+                {/* Training topics list */}
+                {orientationNotesList.length > 0 ? (
+                  <div className="space-y-3">
+                    {orientationNotesList.map((note, idx) => (
+                      <div
+                        key={idx}
+                        className="p-4 rounded-2xl bg-white border border-amber-200/80 shadow-2xs space-y-1.5"
+                      >
+                        <div className="flex items-center gap-2 text-xs font-black text-amber-900">
+                          <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-[11px] shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span>หัวข้อที่ {idx + 1}</span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-slate-800 font-medium pl-7 leading-relaxed whitespace-pre-wrap">
+                          {note}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 rounded-2xl bg-white border border-slate-200/80 text-center space-y-2 flex flex-col items-center justify-center min-h-[220px]">
+                    <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <MessageCircle className="w-6 h-6 text-amber-500" />
+                    </div>
+                    <p className="text-xs sm:text-sm font-bold text-slate-600">
+                      ไม่มีบันทึกเรื่องการอบรม
+                    </p>
+                    <p className="text-[11px] text-slate-400 max-w-xs">
+                      สามารถระบุเรื่องการอบรมได้ในหน้าเช็คยอดประจำวัน
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Note footer */}
+              <div className="pt-3 border-t border-slate-200/70 text-[11px] text-slate-400 flex items-center justify-between">
+                <span>บันทึกการอบรมประจำหอพัก</span>
+                {attendanceForDate?.checkedAt ? (
+                  <span>เวลาเช็คยอด: {new Date(attendanceForDate.checkedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span>
+                ) : (
+                  <span>{formattedDateStr}</span>
+                )}
+              </div>
             </div>
+
+          </div>
+
+          {/* Bottom Watermark in Capture Image */}
+          <div className="pt-4 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-400 font-medium px-1">
+            <span>{systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล"}</span>
+            <span>ระบบบริหารจัดการหอพักนักเรียน</span>
           </div>
         </div>
       </div>
@@ -790,14 +919,14 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
           </div>
         </div>
 
-        {/* Table 2: รายชื่อนักเรียนที่มีการออกหอพักในวันนั้น */}
+        {/* Table 2: รายชื่อนักเรียนที่มีการออกหอพักในวันนั้น (ลบคอลัมน์สถานะและเลขที่ออก, ชั้น/ห้องใช้แบบย่อ เช่น ม.1/1, สาเหตุใช้ตามสถานะ) */}
         <div className="lg:col-span-7 bg-white rounded-3xl p-5 border border-slate-100 shadow-xs space-y-4">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
               <UserMinus className="w-4 h-4 text-rose-600" />
               <span>บัญชีรายชื่อนักเรียนที่มีการออกหอพัก ({absentList.length} คน)</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">เรียงลำดับตามชั้น/ห้อง และเลขที่</p>
+            <p className="text-xs text-slate-400 mt-0.5">เรียงลำดับตามชั้น/ห้อง</p>
           </div>
 
           {absentList.length > 0 ? (
@@ -805,29 +934,21 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-200 sticky top-0 z-10">
                   <tr>
-                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-10">#</th>
-                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-12">เลขที่</th>
-                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-20">รหัสนักเรียน</th>
+                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-12">ลำดับ</th>
+                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-24">รหัสนักเรียน</th>
                     <th className="py-2 px-3 border-r border-slate-200">ชื่อ - สกุล</th>
-                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-24">ชั้น/ห้อง</th>
-                    <th className="py-2 px-3 border-r border-slate-200">สาเหตุ</th>
-                    <th className="py-2 px-2.5 text-center w-24">สถานะ</th>
+                    <th className="py-2 px-2.5 text-center border-r border-slate-200 w-20">ชั้น/ห้อง</th>
+                    <th className="py-2 px-3">สาเหตุ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {absentList.map((st) => (
                     <tr key={st.studentId} className="hover:bg-slate-50 text-xs">
                       <td className="py-2 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-100">{st.index}</td>
-                      <td className="py-2 px-2.5 text-center font-semibold text-slate-600 border-r border-slate-100">{st.studentNo ?? "-"}</td>
                       <td className="py-2 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-100">{st.studentId}</td>
                       <td className="py-2 px-3 font-bold text-slate-900 border-r border-slate-100">{st.fullName}</td>
-                      <td className="py-2 px-2.5 text-center text-slate-700 border-r border-slate-100">{st.gradeRoom}</td>
-                      <td className="py-2 px-3 font-medium text-slate-800 border-r border-slate-100">{st.reason}</td>
-                      <td className="py-2 px-2.5 text-center">
-                        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">
-                          {st.statusLabel}
-                        </span>
-                      </td>
+                      <td className="py-2 px-2.5 text-center font-bold text-slate-800 border-r border-slate-100">{st.gradeRoom}</td>
+                      <td className="py-2 px-3 font-medium text-slate-800">{st.reason}</td>
                     </tr>
                   ))}
                 </tbody>
