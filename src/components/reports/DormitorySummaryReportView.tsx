@@ -11,12 +11,15 @@ import {
   getYesterdayDateString
 } from "../../utils/dateUtils";
 import { exportDormitoryReportHtmlDocument } from "../../utils/dormitoryReportExporter";
+import { useAttendanceQuery } from "../../services/useDormQueries";
 import {
+  AlertCircle,
   Building2,
   Calendar,
   Camera,
   Check,
   CheckCircle2,
+  Clock,
   Copy,
   Download,
   FileCode,
@@ -27,6 +30,7 @@ import {
   Loader2,
   MessageCircle,
   Printer,
+  RotateCcw,
   Share2,
   Sparkles,
   UserCheck,
@@ -123,8 +127,23 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
   const todayStr = getTodayDateString();
   const yesterdayStr = getYesterdayDateString();
 
+  // Smart initial date:
+  // Before 20:00 (when today's check hasn't occurred yet), default to yesterday's attendance so user immediately sees latest data
+  const smartInitialDate = useMemo(() => {
+    const hasTodayCheckedInList = attendanceRecords.some(
+      (att) =>
+        att.date === todayStr &&
+        (att.status === "CHECKED" || att.status === "HOME_BREAK" || (att.records && att.records.length > 0))
+    );
+    const currentHour = new Date().getHours();
+    if (hasTodayCheckedInList || currentHour >= 20) {
+      return todayStr;
+    }
+    return yesterdayStr;
+  }, [attendanceRecords, todayStr, yesterdayStr]);
+
   // Date selection state
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const [selectedDate, setSelectedDate] = useState<string>(smartInitialDate);
 
   // Accessible Dormitories Logic:
   // - Admin (ผู้ดูแล) & Staff (เจ้าหน้าที่): Allowed to view and select ALL dormitories
@@ -179,6 +198,12 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     }
   }, [accessibleDorms, selectedDormId]);
 
+  // Direct real-time fetch from Firestore for the selected date & dormitory
+  const { data: directAttendanceData, isLoading: isLoadingDirectAttendance, refetch: refetchAttendance } = useAttendanceQuery(
+    selectedDate,
+    selectedDormId
+  );
+
   // Card reference for screenshot capture
   const captureCardRef = useRef<HTMLDivElement>(null);
 
@@ -213,12 +238,55 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     return dormStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "female").length;
   }, [dormStudents]);
 
-  // 2. Attendance data for selected dormitory and selected date
+  // 2. Attendance data for selected dormitory and selected date (Look in direct query first, then all records)
   const attendanceForDate = useMemo(() => {
-    return attendanceRecords.find((att) => att.date === selectedDate && att.dormId === selectedDormId);
-  }, [attendanceRecords, selectedDate, selectedDormId]);
+    // 1) Check direct queried doc
+    if (
+      directAttendanceData &&
+      typeof directAttendanceData === "object" &&
+      "records" in directAttendanceData
+    ) {
+      const direct = directAttendanceData as DailyAttendance;
+      if (
+        direct.status === "CHECKED" ||
+        direct.status === "HOME_BREAK" ||
+        (direct.records && direct.records.length > 0) ||
+        (direct.teacherOrientationNotes && direct.teacherOrientationNotes.length > 0)
+      ) {
+        return direct;
+      }
+    }
 
-  const isHomeBreak = attendanceForDate?.isHomeBreak || attendanceForDate?.status === "HOME_BREAK";
+    // 2) Look in attendanceRecords prop
+    const match = attendanceRecords.find(
+      (att) =>
+        (att.date === selectedDate || att.id === `${selectedDate}_${selectedDormId}`) &&
+        (att.dormId === selectedDormId || att.id?.endsWith(`_${selectedDormId}`))
+    );
+    if (match) return match;
+
+    // 3) Direct query fallback
+    if (
+      directAttendanceData &&
+      typeof directAttendanceData === "object" &&
+      "records" in directAttendanceData
+    ) {
+      return directAttendanceData as DailyAttendance;
+    }
+
+    return undefined;
+  }, [directAttendanceData, attendanceRecords, selectedDate, selectedDormId]);
+
+  const isHomeBreak = Boolean(
+    attendanceForDate?.isHomeBreak || attendanceForDate?.status === "HOME_BREAK"
+  );
+
+  const isChecked = Boolean(
+    attendanceForDate &&
+      (attendanceForDate.status === "CHECKED" ||
+        attendanceForDate.status === "HOME_BREAK" ||
+        (attendanceForDate.records && attendanceForDate.records.length > 0))
+  );
 
   // Orientation Notes list
   const orientationNotesList: string[] = useMemo(() => {
@@ -629,6 +697,54 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
           </div>
         )}
       </div>
+
+      {/* Date Status Notice if data is not checked yet */}
+      {!isChecked && !isLoadingDirectAttendance && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs shadow-amber-200">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs sm:text-sm font-extrabold text-amber-950">
+                ยังไม่มีข้อมูลการเช็คยอดของวันที่ {formattedDateStr}
+              </h4>
+              <p className="text-[11px] sm:text-xs text-amber-800">
+                {selectedDate === todayStr
+                  ? "ระบบจะทำการเช็คยอดนักเรียนในช่วงเวลา 20.00 น. ของทุกวัน"
+                  : "ไม่มีบันทึกข้อมูลการเช็คยอดในระบบสำหรับวันที่เลือกนี้"}
+              </p>
+            </div>
+          </div>
+          {selectedDate !== yesterdayStr && (
+            <button
+              onClick={() => setSelectedDate(yesterdayStr)}
+              className="px-4 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white shadow-sm shadow-purple-200 cursor-pointer transition flex items-center gap-1.5 shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>📅 ดูผลเช็คยอดของเมื่อวาน ({formatThaiMediumDate(yesterdayStr)})</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Verified Badge when viewing yesterday's data */}
+      {isChecked && selectedDate === yesterdayStr && (
+        <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs text-emerald-950">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-bold">
+              แสดงข้อมูลผลการเช็คยอดประจำคืนวานนี้ ({formatThaiFullDate(yesterdayStr, false)})
+            </span>
+          </div>
+          <button
+            onClick={() => setSelectedDate(todayStr)}
+            className="text-[11px] font-bold text-purple-700 hover:text-purple-900 underline cursor-pointer"
+          >
+            สลับไปดูของวันนี้
+          </button>
+        </div>
+      )}
 
       {/* Main Formatted Summary Card (Target for Screenshot Capture & Line Sharing) */}
       <div

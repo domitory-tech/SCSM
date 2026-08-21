@@ -992,10 +992,28 @@ export async function fetchAttendance(
   }
 
   if (dormId) {
-    const match = allRecords.find((r) => r.date === date && r.dormId === dormId);
+    const docId = `${date}_${dormId}`;
+    const match = allRecords.find(
+      (r) =>
+        (r.date === date || r.id === docId) &&
+        (r.dormId === dormId || r.id?.endsWith(`_${dormId}`))
+    );
     if (match) return match;
+
+    // Direct Firestore Document lookup fallback
+    try {
+      const docSnap = await getDoc(doc(db, "attendance", docId));
+      if (docSnap.exists()) {
+        const docData = { id: docSnap.id, ...docSnap.data() } as DailyAttendance;
+        updateLocalCacheList(CACHE_KEYS.ATTENDANCE, docData, "UPSERT");
+        return docData;
+      }
+    } catch (e) {
+      console.warn("Direct doc fetch fallback:", e);
+    }
+
     return {
-      id: `${date}_${dormId}`,
+      id: docId,
       date,
       dormId,
       isHomeBreak: false,
@@ -1006,7 +1024,7 @@ export async function fetchAttendance(
   } else {
     const resMap: Record<string, DailyAttendance> = {};
     allRecords.forEach((r) => {
-      if (r.date === date) {
+      if (r.date === date || r.id?.startsWith(`${date}_`)) {
         resMap[r.dormId] = r;
       }
     });

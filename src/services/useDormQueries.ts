@@ -251,7 +251,8 @@ export function useSaveAttendanceMutation() {
     mutationFn: saveAttendance,
     onSuccess: (_, variables) => {
       recordLastDbSave();
-      queryClient.invalidateQueries({ queryKey: ["attendance", variables.date] });
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
       queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
     }
   });
