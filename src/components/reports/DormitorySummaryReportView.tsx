@@ -88,6 +88,30 @@ const getAttendanceReasonText = (status?: string, reason?: string, note?: string
   return REASON_CONFIGS[status || "OTHER"]?.label || "ไม่ระบุสาเหตุ";
 };
 
+// Safe formatter for check time to eliminate "Invalid Date"
+const formatCheckedTime = (val?: string): string | null => {
+  if (!val || typeof val !== "string") return null;
+  const clean = val.trim();
+  if (!clean || clean === "Invalid Date" || clean.toLowerCase().includes("invalid")) {
+    return null;
+  }
+  // Check if string is already formatted as HH:mm or HH:mm:ss
+  const timeMatch = clean.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (timeMatch) {
+    const hh = timeMatch[1].padStart(2, "0");
+    const mm = timeMatch[2];
+    return `${hh}:${mm}`;
+  }
+  // Parse standard Date / ISO
+  const d = new Date(clean);
+  if (!isNaN(d.getTime())) {
+    const formatted = d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+    if (!formatted || formatted.includes("Invalid")) return null;
+    return formatted;
+  }
+  return null;
+};
+
 export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProps> = ({
   students = [],
   dorms = [],
@@ -102,21 +126,58 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
   // Date selection state
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
-  // Dormitory selection state: Default to logged-in user's assigned dorm, or first dorm
+  // Accessible Dormitories Logic:
+  // - Admin (ผู้ดูแล) & Staff (เจ้าหน้าที่): Allowed to view and select ALL dormitories
+  // - Dorm Teacher (ครูหอพัก): Allowed to view and select ONLY their own dormitory (หอพักตัวเอง)
+  const accessibleDorms = useMemo(() => {
+    if (!currentUser) return dorms;
+
+    const isAdminOrStaff =
+      currentUser.roleLevel === 1 ||
+      currentUser.roleLevel === 2 ||
+      currentUser.roleCategory === "ADMIN" ||
+      currentUser.roleCategory === "STAFF" ||
+      currentUser.role === "SYSTEM_ADMIN" ||
+      currentUser.role === "ADMIN_OFFICER" ||
+      currentUser.role === "HEAD_TEACHER" ||
+      currentUser.role === "DEPUTY_DIRECTOR";
+
+    if (isAdminOrStaff) {
+      return dorms;
+    }
+
+    // ครูหอพัก: แสดงเฉพาะหอพักของตัวเอง
+    if (currentUser.allowedDormIds && currentUser.allowedDormIds.length > 0) {
+      const allowed = dorms.filter((d) => currentUser.allowedDormIds?.includes(d.id));
+      if (allowed.length > 0) return allowed;
+    }
+
+    if (currentUser.dormId) {
+      const userDorm = dorms.filter((d) => d.id === currentUser.dormId);
+      if (userDorm.length > 0) return userDorm;
+    }
+
+    return dorms;
+  }, [dorms, currentUser]);
+
+  // Dormitory selection state: Default to assigned dorm within accessible dorms, or first accessible dorm
   const defaultDormId = useMemo(() => {
-    if (currentUser?.dormId) return currentUser.dormId;
+    if (currentUser?.dormId && accessibleDorms.some((d) => d.id === currentUser.dormId)) {
+      return currentUser.dormId;
+    }
+    if (accessibleDorms.length > 0) return accessibleDorms[0].id;
     if (dorms.length > 0) return dorms[0].id;
     return "dorm-1";
-  }, [currentUser, dorms]);
+  }, [currentUser, accessibleDorms, dorms]);
 
   const [selectedDormId, setSelectedDormId] = useState<string>(defaultDormId);
 
-  // Sync selectedDormId if currentUser changes
+  // Sync selectedDormId if accessibleDorms change
   React.useEffect(() => {
-    if (currentUser?.dormId) {
-      setSelectedDormId(currentUser.dormId);
+    if (accessibleDorms.length > 0 && !accessibleDorms.some((d) => d.id === selectedDormId)) {
+      setSelectedDormId(accessibleDorms[0].id);
     }
-  }, [currentUser?.dormId]);
+  }, [accessibleDorms, selectedDormId]);
 
   // Card reference for screenshot capture
   const captureCardRef = useRef<HTMLDivElement>(null);
@@ -561,7 +622,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               <span>เลือกหอพัก:</span>
             </span>
             <div className="flex flex-wrap items-center gap-1.5">
-              {dorms.map((d) => {
+              {accessibleDorms.map((d) => {
                 const isSelected = d.id === selectedDormId;
                 const isUserDorm = currentUser?.dormId === d.id;
                 return (
@@ -628,7 +689,9 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               </span>
             </div>
             <div className="text-[11px] font-semibold text-purple-700">
-              {currentUser.dormId ? `หอพักประจำตัว: ${dorms.find((d) => d.id === currentUser.dormId)?.name || currentUser.dormId}` : "สิทธิ์การเข้าถึง: ทุกหอพัก"}
+              {currentUser.roleLevel === 1 || currentUser.roleLevel === 2
+                ? "สิทธิ์การเข้าถึง: แสดงและเลือกได้ทุกหอพัก"
+                : `หอพักประจำตัว: ${dorms.find((d) => d.id === currentUser.dormId)?.name || currentUser.dormId || currentDorm.name}`}
             </div>
           </div>
         )}
@@ -848,8 +911,8 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               {/* Note footer */}
               <div className="pt-3 border-t border-slate-200/70 text-[11px] text-slate-400 flex items-center justify-between">
                 <span>บันทึกการอบรมประจำหอพัก</span>
-                {attendanceForDate?.checkedAt ? (
-                  <span>เวลาเช็คยอด: {new Date(attendanceForDate.checkedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span>
+                {formatCheckedTime(attendanceForDate?.checkedAt) ? (
+                  <span>เวลาเช็คยอด: {formatCheckedTime(attendanceForDate?.checkedAt)} น.</span>
                 ) : (
                   <span>{formattedDateStr}</span>
                 )}

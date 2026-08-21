@@ -57,13 +57,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   dorms = [],
   attendanceRecords = []
 }) => {
-  const [reportMode, setReportMode] = useState<"daily" | "dorm-summary" | "monthly" | "dashboard">(() => {
-    // If logged in as dorm teacher, default to dorm-summary
-    if (currentUser?.roleLevel === 3 && currentUser?.dormId) {
-      return "dorm-summary";
-    }
-    return "daily";
-  });
+  const [reportMode, setReportMode] = useState<"daily" | "dorm-summary" | "monthly" | "dashboard">("dorm-summary");
   const [activeTab, setActiveTab] = useState<"sheet1" | "sheet2" | "sheet3">("sheet1");
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
