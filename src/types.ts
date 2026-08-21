@@ -1,7 +1,7 @@
 export type UserRoleCategory = "ADMIN" | "STAFF" | "DORM_TEACHER";
 export type UserRole = "ADMIN_OFFICER" | "HEAD_TEACHER" | "DORM_TEACHER" | "DEPUTY_DIRECTOR" | "SYSTEM_ADMIN";
 
-export type DormPosition = "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก";
+export type DormPosition = "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก" | "ผู้ดูแลระบบ" | "เจ้าหน้าที่ส่วนกลาง" | string;
 
 export interface UserProfile {
   id: string;
@@ -31,6 +31,7 @@ export interface Dormitory {
   id: string;
   name: string;
   type: "male" | "female" | "mixed";
+  gender?: "male" | "female" | "mixed";
   teacherName: string;
   teacherPhone: string;
   capacity: number;
@@ -57,10 +58,12 @@ export type AttendanceStatus = "ROUND_HOME" | "PRESENT" | "HOME" | "CAMP" | "SIC
 
 export interface StudentAttendanceRecord {
   studentId: string;
+  studentName?: string;
   status: AttendanceStatus;
   reason?: string;
   note?: string;
 }
+
 
 export interface DailyAttendance {
   id: string;
@@ -87,6 +90,7 @@ export interface DailyReportData {
   success: boolean;
   reportDate: string;
   summaryDate: string;
+  date?: string;
   dormitories: Dormitory[];
   grades: string[];
   totalMatrix: Record<string, Record<string, number>>;
@@ -105,11 +109,12 @@ export interface DailyReportData {
     reason: string;
     status: AttendanceStatus;
   }>;
-  signatories: {
+  signatories?: {
     creator: string;
     headTeacher: string;
     deputyDirector: string;
   };
+
   headTeacherNotices?: Array<{
     id: string;
     date: string;

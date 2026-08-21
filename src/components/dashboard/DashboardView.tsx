@@ -1055,18 +1055,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [trendTab, dorms, realtimeDormTotals, historicalStats, effectiveDashboardDate, checkedDormsCount, totalDorms, presentPercentage, realtimeGrandTotals.out]);
 
-  if (isLoading || !reportData) {
+  if (isLoading && !reportData) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-10 h-10 border-4 border-[#A05AFF] border-t-transparent rounded-full animate-spin"></div>
           <span className="text-sm font-semibold text-gray-600">กำลังโหลดข้อมูล Dashboard...</span>
         </div>
       </div>
     );
   }
 
-  const { grandTotals, gradeTotals } = reportData;
+  const safeReportData: DailyReportData = reportData || {
+    success: true,
+    reportDate: effectiveDashboardDate || getTodayDateString(),
+    summaryDate: effectiveDashboardDate || getTodayDateString(),
+    date: effectiveDashboardDate || getTodayDateString(),
+    dormitories: dorms,
+    grades: ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"],
+    grandTotals: { total: 0, out: 0, remaining: 0 },
+    gradeTotals: {
+      "ม.1": { total: 0, out: 0, remaining: 0 },
+      "ม.2": { total: 0, out: 0, remaining: 0 },
+      "ม.3": { total: 0, out: 0, remaining: 0 },
+      "ม.4": { total: 0, out: 0, remaining: 0 },
+      "ม.5": { total: 0, out: 0, remaining: 0 },
+      "ม.6": { total: 0, out: 0, remaining: 0 }
+    },
+    dormTotals: {},
+    totalMatrix: {},
+    outMatrix: {},
+    remainingMatrix: {},
+    absentStudentsList: []
+  };
+
+
+  const { grandTotals, gradeTotals } = safeReportData;
+
 
   // Chart 0: Dormitory Comparison Chart (การจัดวาง layer จากบน ลง ล่าง)
   const dormComparisonChartData = {

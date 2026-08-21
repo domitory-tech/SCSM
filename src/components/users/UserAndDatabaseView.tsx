@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { UserProfile, UserRole, Dormitory, SystemSettings } from "../../types";
+import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition } from "../../types";
+
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
 import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
@@ -416,11 +417,12 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     roleLevel: 2, // 1 = Admin, 2 = Staff, 3 = Teacher
     roleCategory: "STAFF" as "ADMIN" | "STAFF" | "DORM_TEACHER",
     dormId: "",
-    dormPosition: "ครูประจำหอพัก" as "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก",
+    dormPosition: "ครูประจำหอพัก" as DormPosition,
     allowedDormIds: [] as string[],
     avatarUrl: PRESET_AVATARS[0],
     password: "123456"
   });
+
 
   // Google Drive Upload State
   const [isUploadingDrive, setIsUploadingDrive] = useState<boolean>(false);
@@ -540,11 +542,14 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     | "CLEAR"
     | "CLEAR_ATTENDANCE_DATE"
     | "CLEAR_ATTENDANCE_ALL"
+    | "CLEAR_ATTENDANCE_GRANULAR"
+    | "RESTORE_ATTENDANCE_NOTICES"
     | "CLEAR_STUDENTS_DORM"
     | "CLEAR_STUDENTS_ALL"
     | "DELETE_USER"
     | null
   >(null);
+
   const [targetUserToDelete, setTargetUserToDelete] = useState<UserProfile | null>(null);
   const [clearStudentsDormId, setClearStudentsDormId] = useState<string>("dorm-1");
   const [isClearingStudents, setIsClearingStudents] = useState<boolean>(false);
