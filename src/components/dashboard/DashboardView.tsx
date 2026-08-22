@@ -4,6 +4,7 @@ import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile } from "../../types";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
 import { getDashboardDefaultDate, getTodayDateString, detectStudentGender } from "../../utils/dateUtils";
+import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch } from "../../utils/dormUtils";
 import { ThaiCalendarPicker } from "./ThaiCalendarPicker";
 import {
   exportDailyReportToExcel,
@@ -463,29 +464,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const result: Record<string, { total: number; out: number; remaining: number }> = {};
 
     dorms.forEach((d) => {
-      const dormStudents = students.filter((s) => s.dormId === d.id);
-      const baseTotal = dormStudents.length > 0 ? dormStudents.length : (dormTotals[d.id]?.total || 80);
-      const att = activeAttendanceMap[d.id];
+      const dormStudents = getStudentsInDorm(students, d);
+      const totalCount = dormStudents.length;
+      const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
 
-      if (att && att.status === "CHECKED" && att.records) {
-        const outCount = att.records.filter((r) => r.status !== "PRESENT").length;
-        const totalCount = att.records.length > 0 ? att.records.length : baseTotal;
+      if (att && (att.status === "CHECKED" || (att.records && att.records.length > 0))) {
+        let outCount = 0;
+        if (att.isHomeBreak || att.status === "HOME_BREAK") {
+          outCount = totalCount;
+        } else if (Array.isArray(att.records)) {
+          const absentSet = new Set(
+            att.records
+              .filter((r) => r.status && r.status !== "PRESENT")
+              .map((r) => r.studentId)
+          );
+          outCount = dormStudents.filter((s) => absentSet.has(s.studentId)).length;
+          // Fallback if records didn't match student IDs exactly
+          if (outCount === 0 && absentSet.size > 0) {
+            outCount = Math.min(totalCount, absentSet.size);
+          }
+        }
         result[d.id] = {
           total: totalCount,
           out: outCount,
           remaining: Math.max(0, totalCount - outCount)
         };
-      } else if (att && att.status === "HOME_BREAK") {
+      } else if (att && (att.status === "HOME_BREAK" || att.isHomeBreak)) {
         result[d.id] = {
-          total: baseTotal,
-          out: baseTotal,
+          total: totalCount,
+          out: totalCount,
           remaining: 0
         };
       } else {
         result[d.id] = {
-          total: baseTotal,
+          total: totalCount,
           out: 0,
-          remaining: baseTotal
+          remaining: totalCount
         };
       }
     });
@@ -496,7 +510,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Calculation of grand totals across all dorms
   const realtimeGrandTotals = React.useMemo(() => {
     // Total students ALWAYS uses total registered students in system (Rule 2)
-    const totalRegStudents = students.length > 0 ? students.length : (reportData?.grandTotals?.total || 0);
+    const totalRegStudents = students.length;
 
     let out = 0;
     let remaining = 0;
@@ -509,7 +523,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const total = totalRegStudents > 0 ? totalRegStudents : (out + remaining);
 
     return { total, out, remaining };
-  }, [students.length, reportData, realtimeDormTotals]);
+  }, [students.length, realtimeDormTotals]);
 
   // 1. Grade Statistics (สรุปสถิติข้อมูลแยกตามระดับชั้น ม.1 - ม.6) สำหรับวันปัจจุบัน/วันที่เลือก
   const dashboardGradeStats = React.useMemo(() => {
@@ -519,9 +533,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const absentStudentIds = new Set<string>();
 
     dorms.forEach((d) => {
-      const att = activeAttendanceMap[d.id];
+      const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
       if (!att) return;
-      const dormStudents = students.filter((s) => s.dormId === d.id);
+      const dormStudents = getStudentsInDorm(students, d);
 
       if (att.isHomeBreak || att.status === "HOME_BREAK") {
         dormStudents.forEach((s) => absentStudentIds.add(s.studentId));
@@ -578,10 +592,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 2. Dormitory Statistics (สรุปสถิติข้อมูลแยกตามหอพัก หอพัก 1 - 6) สำหรับวันปัจจุบัน/วันที่เลือก
   const dashboardDormStats = React.useMemo(() => {
     const stats = dorms.map((d) => {
-      const isMale = d.type === "male" || d.gender === "male" || d.id.includes("1") || d.id.includes("2") || d.id.includes("3");
-      const dTotal = realtimeDormTotals[d.id]?.total || students.filter((s) => s.dormId === d.id).length;
-      const dPresent = realtimeDormTotals[d.id]?.remaining || 0;
-      const dOut = realtimeDormTotals[d.id]?.out || 0;
+      const isMale = d.type === "male" || d.gender === "male" || d.name?.includes("ชาย") || d.id.includes("1") || d.id.includes("2") || d.id.includes("3");
+      const dTotal = countStudentsInDorm(students, d);
+      const dPresent = realtimeDormTotals[d.id]?.remaining ?? dTotal;
+      const dOut = realtimeDormTotals[d.id]?.out ?? 0;
       const dCapacity = d.capacity || 80;
       const occupancyRate = dTotal > 0 ? (dPresent / dTotal) * 100 : 0;
 
@@ -705,8 +719,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     const dormStudentCounts: Record<string, number> = {};
     dorms.forEach((d) => {
-      const dormSts = students.filter((s) => s.dormId === d.id);
-      dormStudentCounts[d.id] = dormSts.length > 0 ? dormSts.length : d.capacity || 80;
+      const dormCount = countStudentsInDorm(students, d);
+      dormStudentCounts[d.id] = dormCount > 0 ? dormCount : d.capacity || 80;
     });
 
     allHistoricalRecords.forEach((att) => {

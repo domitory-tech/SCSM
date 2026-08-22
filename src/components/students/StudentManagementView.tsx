@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
+import { matchStudentToDorm, findDormForStudent, countStudentsInDorm } from "../../utils/dormUtils";
 
 // Helper parsers for sorting grade, room, and student number
 const parseGradeNum = (grade: string | undefined): number => {
@@ -401,9 +402,12 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
   // Generate all unique grade/room combinations that ACTUALLY exist in the database based on the selected scope
   const gradeRoomOptions = useMemo(() => {
+    const targetDorm = selectedDormFilter === "ALL" ? null : dorms.find((d) => d.id === selectedDormFilter);
     const targetStudents =
       selectedDormFilter === "ALL"
         ? students
+        : targetDorm
+        ? students.filter((s) => matchStudentToDorm(s, targetDorm))
         : students.filter((s) => s.dormId === selectedDormFilter);
 
     const classCountMap = new Map<string, number>();
@@ -434,7 +438,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       label: `${cls} (${classCountMap.get(cls)} คน)`,
       count: classCountMap.get(cls) || 0
     }));
-  }, [students, selectedDormFilter]);
+  }, [students, selectedDormFilter, dorms]);
 
   // Synchronize and validate selectedClassFilter when options or dorm change
   useEffect(() => {
@@ -448,8 +452,16 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
   // Filter & Sort students
   const filteredStudents = useMemo(() => {
+    const targetDorm = selectedDormFilter === "ALL" ? null : dorms.find((d) => d.id === selectedDormFilter);
+
     const result = students.filter((s) => {
-      if (selectedDormFilter !== "ALL" && s.dormId !== selectedDormFilter) return false;
+      if (selectedDormFilter !== "ALL") {
+        if (targetDorm) {
+          if (!matchStudentToDorm(s, targetDorm)) return false;
+        } else if (s.dormId !== selectedDormFilter) {
+          return false;
+        }
+      }
 
       // Class / Room filter (matches formatted class key e.g. "ม.1/1" or raw grade)
       if (selectedClassFilter !== "ALL") {
@@ -463,7 +475,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         const q = searchQuery.toLowerCase();
         const name = `${s.title || ""}${s.firstName || ""} ${s.lastName || ""}`.toLowerCase();
         const nickname = (s.nickname || "").toLowerCase();
-        const dormObj = dorms.find((d) => d.id === s.dormId);
+        const dormObj = findDormForStudent(s, dorms) || dorms.find((d) => d.id === s.dormId);
         const dormName = (dormObj?.name || s.dormId || "").toLowerCase();
         const roomStr = `${s.grade}/${s.room}`.toLowerCase();
         const dormRoom = (s.dormRoom || "").toLowerCase();
@@ -577,10 +589,10 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                 }}
                 className="bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-pink-500"
               >
-                <option value="ALL">ทุกหอพัก (หอ 1 - 6)</option>
+                <option value="ALL">ทุกหอพัก (รวม {students.length} คน)</option>
                 {dorms.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name}
+                    {d.name} ({countStudentsInDorm(students, d)} คน)
                   </option>
                 ))}
               </select>

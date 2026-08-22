@@ -1,11 +1,13 @@
 import React, { useState } from "react";
-import { Dormitory, DormTeacher } from "../../types";
-import { Database, Edit, Home, Phone, Plus, ShieldCheck, Trash2, User, Users, UserCheck } from "lucide-react";
+import { Dormitory, DormTeacher, Student } from "../../types";
+import { countStudentsInDorm } from "../../utils/dormUtils";
+import { Database, Edit, Home, Phone, Plus, ShieldCheck, Trash2, User, Users, UserCheck, CheckCircle2, BedDouble } from "lucide-react";
 
 type DormPosition = "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก";
 
 interface DormsManagementViewProps {
   dorms: Dormitory[];
+  students?: Student[];
   onAddDorm: (data: { name: string; type: "male" | "female" | "mixed"; teacherName: string; teacherPhone: string; capacity: number; teachers?: DormTeacher[] }) => Promise<void>;
   onUpdateDorm?: (id: string, data: Partial<Dormitory>) => Promise<void>;
   onNavigateToUsers?: () => void;
@@ -21,6 +23,7 @@ const getPositionBadgeStyle = (pos?: string) => {
 
 export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
   dorms,
+  students = [],
   onAddDorm,
   onUpdateDorm,
   onNavigateToUsers
@@ -35,6 +38,10 @@ export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
     { name: "", phone: "", position: "ครูประจำหอพัก", isHead: false }
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const totalCapacity = dorms.reduce((acc, d) => acc + (d.capacity || 80), 0);
+  const totalStudents = students.length;
+  const overallOccupancy = totalCapacity > 0 ? (totalStudents / totalCapacity) * 100 : 0;
 
   const handleOpenAdd = () => {
     setEditingDorm(null);
@@ -178,6 +185,41 @@ export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
         </div>
       </div>
 
+      {/* Summary Stats Overview */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-gray-500 text-xs font-bold mb-1">
+            <Home className="w-4 h-4 text-[#A05AFF]" />
+            <span>หอพักทั้งหมด</span>
+          </div>
+          <div className="text-2xl font-black text-gray-900">{dorms.length} <span className="text-xs font-normal text-gray-500">หอ</span></div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-gray-500 text-xs font-bold mb-1">
+            <Users className="w-4 h-4 text-purple-600" />
+            <span>นักเรียนทั้งหมดในระบบ</span>
+          </div>
+          <div className="text-2xl font-black text-purple-700">{totalStudents} <span className="text-xs font-normal text-gray-500">คน</span></div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-gray-500 text-xs font-bold mb-1">
+            <BedDouble className="w-4 h-4 text-emerald-600" />
+            <span>ความจุรวมทุกหอ</span>
+          </div>
+          <div className="text-2xl font-black text-emerald-700">{totalCapacity} <span className="text-xs font-normal text-gray-500">ที่</span></div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs">
+          <div className="flex items-center gap-2 text-gray-500 text-xs font-bold mb-1">
+            <CheckCircle2 className="w-4 h-4 text-blue-600" />
+            <span>อัตราการครองเตียงรวม</span>
+          </div>
+          <div className="text-2xl font-black text-blue-700">{overallOccupancy.toFixed(1)}%</div>
+        </div>
+      </div>
+
       {/* Dormitories Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {dorms.map((d) => {
@@ -185,6 +227,10 @@ export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
             d.teachers && d.teachers.length > 0
               ? d.teachers
               : [{ name: d.teacherName || "ยังไม่ได้ระบุครู", phone: d.teacherPhone, isHead: true, position: "ครูประธานหอพัก" }];
+
+          const dormStudentCount = countStudentsInDorm(students, d);
+          const dormCap = d.capacity || 80;
+          const dormOccPercent = dormCap > 0 ? (dormStudentCount / dormCap) * 100 : 0;
 
           return (
             <div
@@ -278,14 +324,45 @@ export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-xs text-gray-600 border-t border-gray-100 pt-3">
-                <span className="flex items-center gap-1.5 font-bold">
-                  <Users className="w-4 h-4 text-gray-400" />
-                  <span>ความจุที่รองรับ:</span>
-                </span>
-                <span className="font-black text-gray-900 bg-gray-100 px-2.5 py-1 rounded-lg">
-                  {d.capacity || 80} คน
-                </span>
+              {/* Dorm Capacity & Actual Student Counts */}
+              <div className="space-y-2 border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 font-bold text-gray-600">
+                    <Users className="w-4 h-4 text-purple-600" />
+                    <span>นักเรียนปัจจุบัน:</span>
+                  </span>
+                  <span className="font-black text-purple-900 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-lg">
+                    {dormStudentCount} คน
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-600">
+                  <span className="flex items-center gap-1.5 font-medium text-gray-500">
+                    <BedDouble className="w-4 h-4 text-gray-400" />
+                    <span>ความจุที่รองรับ:</span>
+                  </span>
+                  <span className="font-bold text-gray-700 bg-gray-100 px-2.5 py-0.5 rounded-lg">
+                    {dormCap} คน
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mt-1">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      dormOccPercent > 100
+                        ? "bg-red-500"
+                        : dormOccPercent > 90
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                    }`}
+                    style={{ width: `${Math.min(100, dormOccPercent)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-[10px] text-gray-400 font-medium">
+                  <span>อัตราการครองเตียง</span>
+                  <span className="font-bold text-gray-700">{dormOccPercent.toFixed(1)}%</span>
+                </div>
               </div>
             </div>
           );

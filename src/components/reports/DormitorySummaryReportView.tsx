@@ -10,6 +10,7 @@ import {
   getTodayDateString,
   getYesterdayDateString
 } from "../../utils/dateUtils";
+import { getStudentsInDorm, isDormMatch } from "../../utils/dormUtils";
 import { exportDormitoryReportHtmlDocument } from "../../utils/dormitoryReportExporter";
 import { useAttendanceQuery } from "../../services/useDormQueries";
 import {
@@ -214,20 +215,25 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
   const [copyImageSuccess, setCopyImageSuccess] = useState<boolean>(false);
 
   // Active Dormitory Object
-  const currentDorm = useMemo(() => {
-    return dorms.find((d) => d.id === selectedDormId) || dorms[0] || {
-      id: selectedDormId,
-      name: "หอพัก 1",
-      type: "male",
-      gender: "male",
-      capacity: 80
-    };
+  const currentDorm: Dormitory = useMemo(() => {
+    return (
+      dorms.find((d) => d.id === selectedDormId) ||
+      dorms[0] || {
+        id: selectedDormId,
+        name: "หอพัก 1",
+        type: "male",
+        capacity: 80,
+        teacherName: "ครูประจำหอพัก",
+        teacherPhone: "-",
+        teachers: []
+      }
+    );
   }, [dorms, selectedDormId]);
 
   // Filter students belonging to this dormitory
   const dormStudents = useMemo(() => {
-    return students.filter((s) => s.dormId === selectedDormId);
-  }, [students, selectedDormId]);
+    return currentDorm ? getStudentsInDorm(students, currentDorm) : students.filter((s) => s.dormId === selectedDormId);
+  }, [students, selectedDormId, currentDorm]);
 
   // 1. Calculations: Total, Male, Female Students
   const totalStudentsInDorm = dormStudents.length;
@@ -260,8 +266,8 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     // 2) Look in attendanceRecords prop
     const match = attendanceRecords.find(
       (att) =>
-        (att.date === selectedDate || att.id === `${selectedDate}_${selectedDormId}`) &&
-        (att.dormId === selectedDormId || att.id?.endsWith(`_${selectedDormId}`))
+        (att.date === selectedDate || att.id?.startsWith(`${selectedDate}_`)) &&
+        (att.dormId === selectedDormId || isDormMatch(currentDorm, att.dormId) || att.id?.endsWith(`_${selectedDormId}`))
     );
     if (match) return match;
 

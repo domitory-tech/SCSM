@@ -17,7 +17,8 @@ import {
   Info,
   Tent
 } from "lucide-react";
-import { DailyAttendance, Dormitory } from "../../types";
+import { DailyAttendance, Dormitory, Student } from "../../types";
+import { countStudentsInDorm } from "../../utils/dormUtils";
 
 interface ReasonAnalyticsCardProps {
   liveReasonCounts: Record<string, number>;
@@ -96,8 +97,8 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
   const processedHistoricalData = useMemo(() => {
     const dormStudentCounts: Record<string, number> = {};
     dorms.forEach((d) => {
-      const dormSts = students ? students.filter((s) => s.dormId === d.id) : [];
-      dormStudentCounts[d.id] = dormSts.length > 0 ? dormSts.length : d.capacity || 80;
+      const dormCount = countStudentsInDorm(students || [], d);
+      dormStudentCounts[d.id] = dormCount > 0 ? dormCount : d.capacity || 80;
     });
 
     // dateStr -> reason -> count

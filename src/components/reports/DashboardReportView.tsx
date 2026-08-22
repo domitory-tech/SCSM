@@ -12,6 +12,7 @@ import {
   THAI_DAYS_SHORT,
   THAI_MONTHS
 } from "../../utils/dateUtils";
+import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch } from "../../utils/dormUtils";
 import {
   exportDashboardReportHtml,
   DashboardReportExportData
@@ -137,12 +138,19 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
 
   // 2. Filter Students
   const filteredStudents = useMemo(() => {
+    const targetDorm = filterDormId === "ALL" ? null : dorms.find((d) => d.id === filterDormId);
     return students.filter((s) => {
-      if (filterDormId !== "ALL" && s.dormId !== filterDormId) return false;
+      if (filterDormId !== "ALL") {
+        if (targetDorm) {
+          if (!matchStudentToDorm(s, targetDorm)) return false;
+        } else if (s.dormId !== filterDormId) {
+          return false;
+        }
+      }
       if (filterGrade !== "ALL" && s.grade !== filterGrade) return false;
       return true;
     });
-  }, [students, filterDormId, filterGrade]);
+  }, [students, filterDormId, filterGrade, dorms]);
 
   const totalRegistered = filteredStudents.length;
   const maleCount = filteredStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "male").length;
@@ -216,7 +224,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
     > = {};
 
     dorms.forEach((d) => {
-      const dormStudents = students.filter((s) => s.dormId === d.id);
+      const dormStudents = getStudentsInDorm(students, d);
       dormStatMap[d.id] = {
         dormId: d.id,
         dormName: d.name,
@@ -259,13 +267,14 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
 
     // Process each relevant attendance entry
     relevantAttendance.forEach((att) => {
-      const dorm = dormMap.get(att.dormId);
+      const dorm = dormMap.get(att.dormId) || dorms.find((d) => isDormMatch(d, att.dormId));
       const isHomeBreak = att.isHomeBreak || att.status === "HOME_BREAK";
-      const dormStudents = students.filter((s) => s.dormId === att.dormId);
+      const dormStudents = dorm ? getStudentsInDorm(students, dorm) : students.filter((s) => s.dormId === att.dormId);
       const totalInDorm = dormStudents.length;
 
-      if (dormStatMap[att.dormId]) {
-        dormStatMap[att.dormId].checkedDays += 1;
+      const matchedDormId = dorm ? dorm.id : att.dormId;
+      if (dormStatMap[matchedDormId]) {
+        dormStatMap[matchedDormId].checkedDays += 1;
       }
 
       let absentInDorm = 0;

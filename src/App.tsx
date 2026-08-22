@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DEMO_USERS } from "./data/userProfiles";
 import { UserProfile, SystemSettings } from "./types";
 import { DEFAULT_SYSTEM_SETTINGS, getTodayDateString } from "./utils/dateUtils";
+import { matchStudentToDorm } from "./utils/dormUtils";
 import { clearSessionUser, getSessionUser, setSessionUser } from "./utils/session";
 import { Navbar } from "./components/layout/Navbar";
 import { Sidebar } from "./components/layout/Sidebar";
@@ -230,7 +230,10 @@ function MainAppContent() {
               dorms={dorms}
               selectedDormId={selectedDormId}
               onDormChange={setSelectedDormId}
-              students={students.filter((s) => s.dormId === selectedDormId)}
+              students={students.filter((s) => {
+                const currentDorm = dorms.find((d) => d.id === selectedDormId);
+                return currentDorm ? matchStudentToDorm(s, currentDorm) : s.dormId === selectedDormId;
+              })}
               attendanceData={
                 singleDormAttendance && "records" in singleDormAttendance
                   ? (singleDormAttendance as any)
@@ -307,6 +310,7 @@ function MainAppContent() {
           {activeTab === "dorms" && (
             <DormsManagementView
               dorms={dorms}
+              students={students}
               onAddDorm={async (dData) => {
                 await addDormMutation.mutateAsync(dData);
               }}
