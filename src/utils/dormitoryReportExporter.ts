@@ -1,5 +1,6 @@
-import { SystemSettings, UserProfile } from "../types";
+import { DormTeacher, SystemSettings, UserProfile } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
+import { isTeacherCheckedBy } from "./dormUtils";
 
 export interface DormitorySummaryExportData {
   dormId: string;
@@ -9,6 +10,9 @@ export interface DormitorySummaryExportData {
   dateText: string;
   systemSettings: SystemSettings;
   currentUser?: UserProfile | null;
+  teachers?: DormTeacher[];
+  checkedBy?: string;
+  checkedAt?: string;
   totalStudents: number;
   maleStudents: number;
   femaleStudents: number;
@@ -64,12 +68,105 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
     gradeStats,
     absentList,
     isHomeBreak,
-    orientationNotes
+    orientationNotes,
+    teachers,
+    checkedBy,
+    checkedAt
   } = data;
 
   const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
   const systemTitle = systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน";
   const logoUrl = systemSettings?.schoolLogoUrl;
+
+  const teacherList = Array.isArray(teachers) && teachers.length > 0 ? teachers : [];
+  const anyTeacherMatched = Boolean(checkedBy && teacherList.some((t) => isTeacherCheckedBy(t.name, checkedBy)));
+
+  const getHtmlPositionStyle = (pos?: string, isHead?: boolean) => {
+    const rawPos = (pos || "").trim();
+    let actualPos = rawPos;
+    if (!actualPos) {
+      actualPos = isHead ? "ครูประธานหอพัก" : "ครูประจำหอพัก";
+    } else if (actualPos === "ประธานหอพัก" || actualPos === "หัวหน้าครูประธานหอพัก") {
+      actualPos = "ครูประธานหอพัก";
+    } else if (actualPos === "รองประธานหอพัก") {
+      actualPos = "ครูรองประธานหอพัก";
+    } else if (actualPos === "หัวหน้าหอพัก") {
+      actualPos = "ครูหัวหน้าหอพัก";
+    } else if (actualPos === "ประจำหอพัก") {
+      actualPos = "ครูประจำหอพัก";
+    }
+
+    if (actualPos.includes("ประธาน") && !actualPos.includes("รอง")) {
+      return {
+        dotClass: "bg-purple-600",
+        badgeClass: "bg-purple-100 text-purple-800 border border-purple-200 font-black",
+        label: actualPos
+      };
+    }
+    if (actualPos.includes("รองประธาน")) {
+      return {
+        dotClass: "bg-blue-600",
+        badgeClass: "bg-blue-100 text-blue-800 border border-blue-200 font-bold",
+        label: actualPos
+      };
+    }
+    if (actualPos.includes("หัวหน้า")) {
+      return {
+        dotClass: "bg-amber-600",
+        badgeClass: "bg-amber-100 text-amber-800 border border-amber-200 font-bold",
+        label: actualPos
+      };
+    }
+    return {
+      dotClass: "bg-emerald-600",
+      badgeClass: "bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold",
+      label: actualPos
+    };
+  };
+
+  const teacherListHtml = teacherList.length > 0
+    ? `
+      <div class="mb-4 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+        <div class="text-xs font-black text-slate-800 flex items-center justify-between pb-1 border-b border-slate-200">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+            <span>คณะครูประจำหอพัก (${teacherList.length} ท่าน)</span>
+          </div>
+          ${checkedBy ? `<span class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200">ผู้บันทึกข้อมูล: ${checkedBy}</span>` : ""}
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+          ${teacherList.map((t) => {
+            const isChecker = Boolean(checkedBy && isTeacherCheckedBy(t.name, checkedBy));
+            const styleInfo = getHtmlPositionStyle(t.position, t.isHead);
+            return `
+              <div class="px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between gap-1.5 ${
+                isChecker
+                  ? "bg-emerald-100/90 border border-emerald-400 text-emerald-950 font-bold"
+                  : "bg-white border border-slate-200 text-slate-700 font-medium"
+              }">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="w-2 h-2 rounded-full shrink-0 ${isChecker ? "bg-emerald-600" : styleInfo.dotClass}"></span>
+                  <span class="truncate ${isChecker ? "font-black text-emerald-950" : "text-slate-800"}">${t.name}</span>
+                  <span class="text-[9px] px-1.5 py-0.2 rounded shrink-0 ${styleInfo.badgeClass}">${styleInfo.label}</span>
+                </div>
+                ${isChecker ? `<span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full shrink-0">ผู้เช็คยอด</span>` : ""}
+              </div>
+            `;
+          }).join("")}
+          ${checkedBy && !anyTeacherMatched ? `
+            <div class="px-2.5 py-1.5 rounded-xl text-xs bg-emerald-100/90 border border-emerald-400 text-emerald-950 font-bold flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="w-2 h-2 rounded-full shrink-0 bg-emerald-600"></span>
+                <span class="truncate font-black text-emerald-950">${checkedBy}</span>
+                <span class="text-[9px] px-1.5 py-0.2 rounded font-bold bg-emerald-200 text-emerald-900 shrink-0">ส่วนกลาง/เช็คแทน</span>
+              </div>
+              <span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full shrink-0">ผู้เช็คยอด</span>
+            </div>
+          ` : ""}
+        </div>
+      </div>
+    `
+    : "";
 
   const reasonListHtml = reasons.length > 0
     ? reasons.map((r) => `
@@ -206,6 +303,9 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
         ${currentUser ? `<div class="text-[10px] text-slate-400 mt-1">ผู้จัดทำ: ${currentUser.name}</div>` : ""}
       </div>
     </div>
+
+    <!-- Dormitory Teachers Team -->
+    ${teacherListHtml}
 
     <!-- 2-Column Summary Block: Left = รายละเอียดสรุปยอดประจำวัน, Right = เรื่องการอบรม -->
     <div class="grid grid-cols-2 gap-4 mb-5">

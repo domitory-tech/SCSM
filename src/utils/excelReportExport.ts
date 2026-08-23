@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { DailyReportData, Dormitory } from "../types";
+import { DailyReportData, Dormitory, UserProfile } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
 
 export const GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/17hrwt9Dy_liRz9sSte2PKOpO0QYqwcGg?usp=sharing";
@@ -11,12 +11,19 @@ export const GOOGLE_DRIVE_FOLDER_ID = "17hrwt9Dy_liRz9sSte2PKOpO0QYqwcGg";
  */
 export function exportDailyReportToExcel(
   reportData: DailyReportData,
-  schoolName: string = "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย"
+  schoolName: string = "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย",
+  currentUser?: UserProfile | null
 ) {
   const wb = XLSX.utils.book_new();
 
   const formattedReportDateStr = formatThaiFullDate(reportData.reportDate);
   const formattedSummaryDateStr = formatThaiFullDate(reportData.summaryDate);
+
+  const reporterName = currentUser?.name?.trim() || "";
+  const reporterPosition =
+    currentUser?.dormPosition ||
+    (currentUser?.roleLabel ? currentUser.roleLabel.replace(/\s*\(.*?\)/g, "").trim() : "") ||
+    "เจ้าหน้าที่สำนักงาน";
 
   // ==================== SHEET 1: สรุปยอดจำนวนนักเรียน ====================
   const sheet1Data: any[][] = [];
@@ -24,7 +31,8 @@ export function exportDailyReportToExcel(
   // Title Block (Matching UI header)
   sheet1Data.push(["รายงานสรุปยอดจำนวนนักเรียนในหอพักประจำวัน"]);
   sheet1Data.push([schoolName]);
-  sheet1Data.push([`(สรุปรายงานเช็คยอดประจำวัน ${formattedReportDateStr}) • (สรุปนักเรียนอยู่หอพักคืนวัน ${formattedSummaryDateStr})`]);
+  sheet1Data.push([`(สรุปรายงานเช็คยอดประจำวัน  ${formattedReportDateStr} )`]);
+  sheet1Data.push([`(สรุปนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr})`]);
   sheet1Data.push([]); // blank row
 
   // 1. ตารางจำนวนนักเรียนทั้งหมด
@@ -107,18 +115,25 @@ export function exportDailyReportToExcel(
     "ลงชื่อ............................................................"
   ]);
   sheet1Data.push([
-    "(.....................................................)",
+    reporterName ? `( ${reporterName} )` : "(.....................................................)",
     "",
     "(.....................................................)",
     "",
     "(.....................................................)"
   ]);
   sheet1Data.push([
-    "ผู้รายงาน (เจ้าหน้าที่สำนักงาน)",
+    "ตำแหน่ง เจ้าหน้าที่สำนักงาน",
     "",
     "หัวหน้างานหอพัก",
     "",
     "รองผู้อำนวยการ"
+  ]);
+  sheet1Data.push([
+    "ผู้รายงาน",
+    "",
+    "",
+    "",
+    ""
   ]);
 
   const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
@@ -150,8 +165,9 @@ export function exportDailyReportToExcel(
   // ==================== SHEET 2: รายชื่อนักเรียนออกหอพัก ====================
   const sheet2Data: any[][] = [];
   sheet2Data.push(["ตารางรายชื่อนักเรียนออกหอพัก"]);
-  sheet2Data.push([`รายชื่อนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr}`]);
   sheet2Data.push([schoolName]);
+  sheet2Data.push([`(สรุปรายงานประจำวัน  ${formattedReportDateStr} )`]);
+  sheet2Data.push([`(สรุปรายชื่อนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr})`]);
   sheet2Data.push([]);
 
   sheet2Data.push(["ที่", "รหัสนักเรียน", "รายชื่อนักเรียน", "ระดับชั้น/ห้อง", "หอพัก", "เหตุผลที่ออกหอพัก"]);
@@ -186,7 +202,8 @@ export function exportDailyReportToExcel(
   ws2["!merges"] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
+    { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } }
   ];
 
   XLSX.utils.book_append_sheet(wb, ws2, "2_รายชื่อนักเรียนออกหอพัก");
@@ -194,28 +211,36 @@ export function exportDailyReportToExcel(
   // ==================== SHEET 3: เรื่องแจ้งอบรมประจำวัน ====================
   const sheet3Data: any[][] = [];
   sheet3Data.push(["ใบรายงานเรื่องแจ้งอบรมประจำวัน"]);
-  sheet3Data.push([`สรุปเรื่องแจ้งอบรมเมื่อคืนวัน ${formattedSummaryDateStr} (รายงานเช้าวัน ${formattedReportDateStr})`]);
   sheet3Data.push([schoolName]);
+  sheet3Data.push([`(สรุปรายงานอบรมประจำวัน  ${formattedReportDateStr} )`]);
+  sheet3Data.push([`(สรุปเรื่องแจ้งอบรมนักเรียนคืนวัน ${formattedSummaryDateStr})`]);
   sheet3Data.push([]);
 
-  sheet3Data.push(["1. เรื่องแจ้งอบรมจากหัวหน้างานหอพัก"]);
   if (reportData.headTeacherNotices && reportData.headTeacherNotices.length > 0) {
+    sheet3Data.push(["เรื่องแจ้งอบรมจากหัวหน้างานหอพัก"]);
     reportData.headTeacherNotices.forEach((n, idx) => {
-      sheet3Data.push([`📌 เรื่องที่ ${idx + 1}: ${n.title}`, `โดย: ${n.createdBy}`]);
+      sheet3Data.push([`📌 เรื่อง: ${n.title}`, `โดย: ${n.createdBy || "หัวหน้างานหอพัก"}`]);
       n.topics.forEach((tp) => {
         sheet3Data.push([`   • ${tp}`]);
       });
     });
-  } else {
-    sheet3Data.push(["ไม่มีเรื่องแจ้งอบรมจากหัวหน้างานหอพักในวันนี้"]);
+    sheet3Data.push([]);
   }
-  sheet3Data.push([]);
 
-  sheet3Data.push(["2. เรื่องที่ครูประจำหอพักอบรมนักเรียน"]);
-  sheet3Data.push(["หอพัก", "ครูผู้เช็คยอดและอบรม", "หัวข้อ / เรื่องที่แจ้งอบรมนักเรียน"]);
+  sheet3Data.push(["เรื่องที่ครูประจำหอพักอบรมนักเรียน"]);
+  sheet3Data.push(["หอพัก", "ครูผู้บันทึก (ครูประจำหอพัก)", "หัวข้อ / เรื่องที่แจ้งอบรมนักเรียน"]);
 
-  if (reportData.dormTeacherOrientations && reportData.dormTeacherOrientations.length > 0) {
-    reportData.dormTeacherOrientations.forEach((orient) => {
+  const sortedOrientations = [...(reportData.dormTeacherOrientations || [])].sort((a, b) => {
+    const numA = parseInt((a.dormName || a.dormId || "").replace(/\D/g, ""), 10);
+    const numB = parseInt((b.dormName || b.dormId || "").replace(/\D/g, ""), 10);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
+    return (a.dormName || "").localeCompare(b.dormName || "", "th", { numeric: true });
+  });
+
+  if (sortedOrientations.length > 0) {
+    sortedOrientations.forEach((orient) => {
       const notes =
         orient.orientationNotes && orient.orientationNotes.length > 0
           ? orient.orientationNotes.join("; ")
@@ -236,7 +261,8 @@ export function exportDailyReportToExcel(
   ws3["!merges"] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } }
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
+    { s: { r: 3, c: 0 }, e: { r: 3, c: 2 } }
   ];
 
   XLSX.utils.book_append_sheet(wb, ws3, "3_เรื่องแจ้งอบรมประจำวัน");

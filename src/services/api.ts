@@ -24,6 +24,7 @@ import {
   SystemSettings,
   UserProfile
 } from "../types";
+import { getTodayDateString, getPreviousDateString } from "../utils/dateUtils";
 
 // Default System Settings for Firestore Initialization
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -1105,8 +1106,8 @@ export async function updateSystemSettings(settings: SystemSettings): Promise<Sy
 // Reports API (Generated from Firebase Firestore Data)
 // ----------------------------------------------------------------------
 export async function fetchDailyReport(date?: string): Promise<DailyReportData> {
-  const reportDate = date || new Date().toISOString().split("T")[0];
-  const summaryDate = reportDate;
+  const reportDate = date || getTodayDateString();
+  const summaryDate = getPreviousDateString(reportDate);
 
   const [dorms, students, notices] = await Promise.all([
     fetchDorms(),

@@ -63,6 +63,7 @@ import {
   Loader2,
   X,
   CalendarDays,
+  Phone,
   CalendarRange,
   Clock,
   FileText,
@@ -414,6 +415,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   // User Form Data
   const [formData, setFormData] = useState({
     name: "",
+    phone: "",
     roleLevel: 2, // 1 = Admin, 2 = Staff, 3 = Teacher
     roleCategory: "STAFF" as "ADMIN" | "STAFF" | "DORM_TEACHER",
     dormId: "",
@@ -904,6 +906,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       if (editingUser) {
         const payload: Partial<UserProfile> = {
           name: formData.name.trim(),
+          phone: formData.phone.trim(),
           roleLevel: level as any,
           roleCategory: formData.roleCategory,
           roleCategoryName,
@@ -925,6 +928,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       } else {
         const newUser = await addUser({
           name: formData.name.trim(),
+          phone: formData.phone.trim(),
           roleLevel: level as any,
           roleCategory: formData.roleCategory,
           roleCategoryName,
@@ -1886,6 +1890,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                 setEditingUser(null);
                 setFormData({
                   name: "",
+                  phone: "",
                   roleLevel: isStaff ? 3 : 2,
                   roleCategory: isStaff ? "DORM_TEACHER" : "STAFF",
                   dormId: "",
@@ -1929,9 +1934,20 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         />
                       </td>
                       <td className="py-3 px-4 font-bold text-gray-900 text-sm">
-                        {u.name}
-                        <div className="text-[10px] text-gray-500 font-medium">
-                          {u.roleLevel === 1 ? "ผู้ดูแล" : u.roleLevel === 2 ? "เจ้าหน้าที่" : "ครูหอพัก"}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{u.name}</span>
+                          {u.phone && u.phone.trim() && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              <Phone className="w-2.5 h-2.5" />
+                              {u.phone}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-gray-500 font-medium flex items-center gap-1.5 mt-0.5">
+                          <span>{u.roleLevel === 1 ? "ผู้ดูแล" : u.roleLevel === 2 ? "เจ้าหน้าที่" : "ครูหอพัก"}</span>
+                          {u.dormPosition && (
+                            <span className="text-purple-600 font-bold">• {u.dormPosition}</span>
+                          )}
                         </div>
                       </td>
                       <td className="py-3 px-4">
@@ -1989,6 +2005,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                                   setEditingUser(u);
                                   setFormData({
                                     name: u.name,
+                                    phone: u.phone || "",
                                     roleLevel: u.roleLevel,
                                     roleCategory: u.roleCategory,
                                     dormId: u.dormId || "",
@@ -3243,16 +3260,31 @@ git push -u origin main`);
             </h3>
 
             <form onSubmit={handleSaveUser} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">ชื่อ - นามสกุล *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="เช่น ครูสมชาย ใจดี"
-                  className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#A05AFF]"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">ชื่อ - นามสกุล *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="เช่น ครูสมชาย ใจดี"
+                    className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#A05AFF]"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>เบอร์โทรศัพท์ติดต่อ</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="เช่น 081-234-5678"
+                    className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2 outline-none font-mono focus:ring-2 focus:ring-[#A05AFF]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -34,7 +34,8 @@ import {
   useUpdateDormMutation,
   useUpdateNoticeMutation,
   useUpdateStudentMutation,
-  useUpdateSystemSettingsMutation
+  useUpdateSystemSettingsMutation,
+  useUsersQuery
 } from "./services/useDormQueries";
 
 // Create TanStack Query Client
@@ -106,6 +107,7 @@ function MainAppContent() {
   // TanStack Query Hooks
   const { data: dorms = [], isLoading: isLoadingDorms } = useDormsQuery();
   const { data: students = [], isLoading: isLoadingStudents } = useStudentsQuery();
+  const { data: users = [] } = useUsersQuery();
   const { data: notices = [] } = useNoticesQuery();
   const { data: todayAttendanceAll } = useAttendanceQuery(todayStr);
   const { data: singleDormAttendance } = useAttendanceQuery(selectedAttendanceDate, selectedDormId);
@@ -213,6 +215,7 @@ function MainAppContent() {
               isLoading={isLoadingReport || isLoadingDorms}
               dorms={dorms}
               students={students}
+              users={users}
               todayAttendance={
                 todayAttendanceAll && typeof todayAttendanceAll === "object" && !("records" in todayAttendanceAll)
                   ? (todayAttendanceAll as any)
@@ -280,6 +283,7 @@ function MainAppContent() {
               currentUser={currentUser}
               students={students}
               dorms={dorms}
+              users={users}
               attendanceRecords={allAttendanceRecords}
             />
           )}
@@ -311,6 +315,7 @@ function MainAppContent() {
             <DormsManagementView
               dorms={dorms}
               students={students}
+              users={users}
               onAddDorm={async (dData) => {
                 await addDormMutation.mutateAsync(dData);
               }}

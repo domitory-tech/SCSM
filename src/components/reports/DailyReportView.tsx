@@ -49,6 +49,7 @@ interface DailyReportViewProps {
   currentUser?: UserProfile | null;
   students?: Student[];
   dorms?: Dormitory[];
+  users?: UserProfile[];
   attendanceRecords?: DailyAttendance[];
 }
 
@@ -62,6 +63,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   currentUser,
   students = [],
   dorms = [],
+  users = [],
   attendanceRecords = []
 }) => {
   const [reportMode, setReportMode] = useState<"daily" | "dorm-summary" | "monthly" | "dashboard">("dorm-summary");
@@ -134,6 +136,27 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const formattedReportDateStr = formatThaiFullDate(reportDate);
   const formattedSummaryDateStr = formatThaiFullDate(summaryDate);
 
+  // Reporter info from logged in user
+  const reporterName = currentUser?.name?.trim() || "";
+  const reporterPosition =
+    currentUser?.dormPosition ||
+    (currentUser?.roleLabel ? currentUser.roleLabel.replace(/\s*\(.*?\)/g, "").trim() : "") ||
+    (currentUser?.roleCategory === "STAFF"
+      ? "เจ้าหน้าที่สำนักงาน"
+      : currentUser?.roleCategory === "ADMIN"
+      ? "ผู้ดูแลระบบ"
+      : "เจ้าหน้าที่สำนักงาน");
+
+  // Sort dorm orientations from low to high (หอพัก 1 -> 6)
+  const sortedDormOrientations = [...dormTeacherOrientations].sort((a, b) => {
+    const numA = parseInt((a.dormName || a.dormId || "").replace(/\D/g, ""), 10);
+    const numB = parseInt((b.dormName || b.dormId || "").replace(/\D/g, ""), 10);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
+    return (a.dormName || "").localeCompare(b.dormName || "", "th", { numeric: true });
+  });
+
   const handleExportSheets = async () => {
     setIsExporting(true);
     setExportResult(null);
@@ -158,17 +181,17 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const sheetInfoMap: Record<string, { title: string; subtitle: string; tag: string }> = {
     sheet1: {
       title: "ใบที่ 1: ตารางสรุปยอดจำนวนนักเรียน",
-      subtitle: `สรุปยอดประจำวัน ${formattedReportDateStr} (ยอดเมื่อคืนนี้ ${formattedSummaryDateStr})`,
+      subtitle: `(สรุปรายงานเช็คยอดประจำวัน ${formattedReportDateStr}) • (สรุปนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr})`,
       tag: "ใบที่ 1 (ตารางสรุปยอด)"
     },
     sheet2: {
       title: "ใบที่ 2: ใบรายงานเรื่องแจ้งอบรมประจำวัน",
-      subtitle: `เรื่องแจ้งอบรมจากหัวหน้างานและครูประจำหอพัก (${formattedSummaryDateStr})`,
+      subtitle: `(สรุปรายงานอบรมประจำวัน ${formattedReportDateStr}) • (สรุปเรื่องแจ้งอบรมนักเรียนคืนวัน ${formattedSummaryDateStr})`,
       tag: "ใบที่ 2 (เรื่องแจ้งอบรม)"
     },
     sheet3: {
       title: "ใบที่ 3: ตารางรายชื่อนักเรียนออกหอพัก",
-      subtitle: `รายชื่อนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr} (${absentStudentsList.length} คน)`,
+      subtitle: `(สรุปรายงานประจำวัน ${formattedReportDateStr}) • (สรุปรายชื่อนักเรียนออกหอพักคืนวัน ${formattedSummaryDateStr})`,
       tag: "ใบที่ 3 (รายชื่อออกหอ)"
     }
   };
@@ -361,6 +384,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
         <DormitorySummaryReportView
           students={students}
           dorms={dorms}
+          users={users}
           attendanceRecords={attendanceRecords}
           systemSettings={systemSettings}
           currentUser={currentUser}
@@ -575,17 +599,20 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
           </div>
 
           {/* Report Header Metadata */}
-          <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
-            <h1 className="text-lg font-black text-gray-900">
+          <div className="border-b border-gray-200 pb-3.5 mb-5 text-center space-y-1.5">
+            <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
               รายงานสรุปยอดจำนวนนักเรียนในหอพักประจำวัน
             </h1>
-            <p className="text-xs font-bold text-gray-700">
+            <p className="text-sm sm:text-base font-bold text-gray-700">
               {systemSettings.schoolNameTh}
             </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 text-[11px] text-gray-700 font-semibold pt-1">
-              <span>(สรุปรายงานเช็คยอดประจำวัน <strong className="text-pink-600">{formattedReportDateStr}</strong>)</span>
-              <span className="hidden sm:inline">•</span>
-              <span>(สรุปนักเรียนอยู่หอพักคืนวัน <strong className="text-purple-600">{formattedSummaryDateStr}</strong>)</span>
+            <div className="flex flex-col items-center justify-center gap-1.5 pt-2">
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปรายงานเช็คยอดประจำวัน  <span className="text-pink-600 font-extrabold">{formattedReportDateStr}</span> )
+              </p>
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปนักเรียนออกหอพักคืนวัน <span className="text-purple-700 font-extrabold">{formattedSummaryDateStr}</span>)
+              </p>
             </div>
           </div>
 
@@ -761,8 +788,11 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
               {/* Row 1 Col 1: ผู้รายงาน (เจ้าหน้าที่สำนักงาน) */}
               <div className="space-y-1">
                 <p className="font-medium text-gray-800">ลงชื่อ.....................................................................</p>
-                <p className="text-gray-600 font-medium">(.....................................................)</p>
-                <p className="font-bold text-gray-900">ผู้รายงาน (เจ้าหน้าที่สำนักงาน)</p>
+                <p className="font-semibold text-gray-900">
+                  ({reporterName ? ` ${reporterName} ` : "....................................................."})
+                </p>
+                <p className="font-bold text-gray-900">ตำแหน่ง เจ้าหน้าที่สำนักงาน</p>
+                <p className="font-bold text-gray-900">ผู้รายงาน</p>
               </div>
 
               {/* Row 1 Col 2: หัวหน้างานหอพัก */}
@@ -814,78 +844,110 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
             </button>
           </div>
 
-          <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
-            <h1 className="text-lg font-black text-gray-900">
+          {/* Report Header Metadata */}
+          <div className="border-b border-gray-200 pb-3.5 mb-5 text-center space-y-1.5">
+            <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
               ใบรายงานเรื่องแจ้งอบรมประจำวัน
             </h1>
-            <p className="text-xs font-bold text-purple-700">
-              สรุปเรื่องแจ้งอบรมเมื่อคืนวัน {formattedSummaryDateStr} (รายงานเช้าวัน {formattedReportDateStr})
-            </p>
-            <div className="text-[11px] text-gray-500 font-medium">
+            <p className="text-sm sm:text-base font-bold text-gray-700">
               {systemSettings.schoolNameTh}
+            </p>
+            <div className="flex flex-col items-center justify-center gap-1.5 pt-2">
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปรายงานอบรมประจำวัน  <span className="text-pink-600 font-extrabold">{formattedReportDateStr}</span> )
+              </p>
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปเรื่องแจ้งอบรมนักเรียนคืนวัน <span className="text-purple-700 font-extrabold">{formattedSummaryDateStr}</span>)
+              </p>
             </div>
           </div>
 
-          {/* 2-COLUMN LAYOUT FOR A4 SINGLE PAGE */}
-          <div className="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-4">
-            {/* 1. เรื่องแจ้งอบรมจากหัวหน้างานหอพัก */}
-            <div className="space-y-2 bg-purple-50/60 p-3.5 rounded-xl border border-purple-200">
-              <h3 className="font-extrabold text-xs text-purple-900 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span>1. เรื่องแจ้งอบรมจากหัวหน้างานหอพัก</span>
-              </h3>
-              {headTeacherNotices && headTeacherNotices.length > 0 ? (
-                <div className="space-y-2">
+          {/* SHEET 2 CONTENT CONTAINER */}
+          <div className="space-y-4">
+            {/* เรื่องแจ้งอบรมจากหัวหน้างานหอพัก (แสดงเป็น 1 คอลัมน์แถวบน และซ่อนอัตโนมัติหากไม่มีข้อมูล) */}
+            {headTeacherNotices && headTeacherNotices.length > 0 && (
+              <div className="w-full space-y-2 bg-purple-50/70 p-3.5 sm:p-4 rounded-xl border border-purple-200 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-purple-200/80 pb-2">
+                  <h3 className="font-extrabold text-xs sm:text-sm text-purple-950 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-purple-600 shrink-0" />
+                    <span>เรื่องแจ้งอบรมจากหัวหน้างานหอพัก</span>
+                  </h3>
+                  <span className="text-[11px] font-bold text-purple-800 bg-purple-100/90 border border-purple-200 px-2.5 py-0.5 rounded-full">
+                    {headTeacherNotices.length} เรื่อง
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                   {headTeacherNotices.map((notice) => (
-                    <div key={notice.id} className="bg-white p-2.5 rounded-lg border border-purple-100 shadow-2xs space-y-1">
-                      <div className="text-[11px] font-bold text-purple-950 flex items-center justify-between">
-                        <span>📌 {notice.title}</span>
-                        <span className="text-[9px] text-purple-600 font-normal">โดย: {notice.createdBy}</span>
+                    <div key={notice.id} className="bg-white p-3 rounded-lg border border-purple-100 shadow-2xs space-y-1.5">
+                      <div className="text-xs font-black text-purple-950 flex items-start justify-between gap-2 border-b border-purple-50 pb-1">
+                        <span className="flex items-center gap-1">📌 {notice.title}</span>
+                        <span className="text-[10px] text-purple-800 font-bold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded shrink-0">
+                          โดย: {notice.createdBy || "หัวหน้างานหอพัก"}
+                        </span>
                       </div>
-                      <ul className="list-disc list-inside text-[11px] text-gray-700 space-y-0.5 pl-1">
+                      <ul className="list-disc list-inside text-[11px] sm:text-xs text-gray-700 space-y-1 pl-1">
                         {notice.topics.map((tp, idx) => (
-                          <li key={idx} className="font-medium">{tp}</li>
+                          <li key={idx} className="font-medium leading-relaxed">{tp}</li>
                         ))}
                       </ul>
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="text-[11px] text-gray-500 italic bg-white p-2.5 rounded-lg border border-purple-100">
-                  ไม่มีเรื่องแจ้งอบรมจากหัวหน้างานหอพักในวันนี้
-                </p>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* 2. เรื่องที่ครูประจำหอพักอบรมนักเรียน */}
-            <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-              <h3 className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>2. เรื่องที่ครูประจำหอพักอบรมนักเรียน</span>
-              </h3>
-              <div className="space-y-2">
-                {dormTeacherOrientations && dormTeacherOrientations.length > 0 ? (
-                  dormTeacherOrientations.map((orient) => (
-                    <div key={orient.dormId} className="bg-white p-2.5 rounded-lg border border-gray-200 shadow-2xs space-y-1">
-                      <div className="flex items-center justify-between gap-1 border-b border-gray-100 pb-1">
-                        <span className="text-[11px] font-extrabold text-gray-900">{orient.dormName}</span>
-                        <span className="text-[9px] font-bold text-purple-800 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded-md shrink-0">
-                          ครู: <span className="text-purple-950 font-black">{orient.checkedBy || "ครูประจำหอพัก"}</span>
-                        </span>
+            {/* เรื่องที่ครูประจำหอพักอบรมนักเรียน (แบ่งเป็น 2 คอลัมน์ เรียงหอพักจากน้อยไปมาก 1-6 พร้อมชื่อครูชัดเจนและเป็นทางการ) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>เรื่องที่ครูประจำหอพักอบรมนักเรียน</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
+                  เรียงตามลำดับหอพัก (หอพัก 1 - 6)
+                </span>
+              </div>
+
+              {/* 2-COLUMN GRID OF SORTED DORM ORIENTATIONS */}
+              <div className="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-3.5">
+                {sortedDormOrientations && sortedDormOrientations.length > 0 ? (
+                  sortedDormOrientations.map((orient) => (
+                    <div
+                      key={orient.dormId}
+                      className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-2xs flex flex-col justify-between space-y-2.5 hover:border-purple-300 transition"
+                    >
+                      {/* Dorm Card Header: Separate lines for Dorm Name and Teacher Name without frame */}
+                      <div className="border-b border-gray-100 pb-2 space-y-1">
+                        <div className="text-xs sm:text-sm font-black text-gray-900 flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                          <span>{orient.dormName}</span>
+                        </div>
+                        <div className="text-[11px] sm:text-xs text-slate-600 font-medium">
+                          <span>ครูผู้บันทึก: </span>
+                          <span className="text-slate-900 font-bold">{orient.checkedBy || "ครูประจำหอพัก"}</span>
+                        </div>
                       </div>
-                      {orient.orientationNotes && orient.orientationNotes.length > 0 ? (
-                        <ul className="list-disc list-inside text-[11px] text-gray-700 space-y-0.5">
-                          {orient.orientationNotes.map((note, idx) => (
-                            <li key={idx} className="font-medium">{note}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-[10px] text-gray-400 italic">ไม่มีบันทึกเรื่องอบรมประจำวัน</p>
-                      )}
+
+                      {/* Orientation Notes */}
+                      <div className="grow">
+                        {orient.orientationNotes && orient.orientationNotes.length > 0 ? (
+                          <ul className="list-disc list-inside text-[11px] sm:text-xs text-gray-700 space-y-1 pl-1">
+                            {orient.orientationNotes.map((note, idx) => (
+                              <li key={idx} className="font-medium leading-relaxed">{note}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 italic py-1 pl-1">
+                            ไม่มีบันทึกเรื่องอบรมประจำวัน
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))
                 ) : (
-                  <p className="text-[11px] text-gray-500 italic">ไม่มีข้อมูลเรื่องอบรมจากครูประจำหอพัก</p>
+                  <div className="col-span-full p-4 text-center text-xs text-gray-500 italic bg-gray-50 rounded-xl border border-gray-200">
+                    ไม่มีข้อมูลเรื่องอบรมจากครูประจำหอพัก
+                  </div>
                 )}
               </div>
             </div>
@@ -916,15 +978,21 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
             </button>
           </div>
 
-          <div className="border-b border-gray-200 pb-3 mb-5 text-center space-y-1">
-            <h1 className="text-lg font-black text-gray-900">
+          {/* Report Header Metadata */}
+          <div className="border-b border-gray-200 pb-3.5 mb-5 text-center space-y-1.5">
+            <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
               ตารางรายชื่อนักเรียนออกหอพัก
             </h1>
-            <p className="text-xs font-bold text-purple-700">
-              รายชื่อนักเรียนออกหอพักคืนวัน {formattedSummaryDateStr}
-            </p>
-            <div className="text-[11px] text-gray-500 font-medium">
+            <p className="text-sm sm:text-base font-bold text-gray-700">
               {systemSettings.schoolNameTh}
+            </p>
+            <div className="flex flex-col items-center justify-center gap-1.5 pt-2">
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปรายงานประจำวัน  <span className="text-pink-600 font-extrabold">{formattedReportDateStr}</span> )
+              </p>
+              <p className="text-xs sm:text-sm md:text-base font-bold text-gray-800 tracking-wide">
+                (สรุปรายชื่อนักเรียนออกหอพักคืนวัน <span className="text-purple-700 font-extrabold">{formattedSummaryDateStr}</span>)
+              </p>
             </div>
           </div>
 
