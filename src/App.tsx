@@ -14,6 +14,7 @@ import { StudentManagementView } from "./components/students/StudentManagementVi
 import { DailyReportView } from "./components/reports/DailyReportView";
 import { DormsManagementView } from "./components/dorms/DormsManagementView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
+import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import {
   useAddDormMutation,
   useAddStudentMutation,
@@ -96,10 +97,39 @@ function MainAppContent() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [targetTabPrompt, setTargetTabPrompt] = useState<string>("");
 
+  // System Maintenance Auto Popup State (Shown 1 time per day)
+  const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState<boolean>(false);
+
   // Active check state
   const [selectedDormId, setSelectedDormId] = useState<string>("dorm-1");
   const todayStr = getTodayDateString();
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(todayStr);
+
+  // Auto trigger popup for system maintenance notice (Once per day)
+  React.useEffect(() => {
+    if (
+      systemSettings.showMaintenancePopup &&
+      Boolean(systemSettings.maintenanceMessage?.trim())
+    ) {
+      try {
+        const lastSeenDate = localStorage.getItem("dorm_maintenance_seen_date");
+        if (lastSeenDate !== todayStr) {
+          setIsMaintenanceModalOpen(true);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [systemSettings.showMaintenancePopup, systemSettings.maintenanceMessage, todayStr]);
+
+  const handleCloseMaintenanceModal = () => {
+    try {
+      localStorage.setItem("dorm_maintenance_seen_date", todayStr);
+    } catch (e) {
+      console.error(e);
+    }
+    setIsMaintenanceModalOpen(false);
+  };
 
   // Active report date state
   const [selectedReportDate, setSelectedReportDate] = useState<string>(todayStr);
@@ -205,6 +235,7 @@ function MainAppContent() {
             setTargetTabPrompt("");
             setIsLoginModalOpen(true);
           }}
+          onOpenMaintenanceModal={() => setIsMaintenanceModalOpen(true)}
         />
 
         {/* Main Content Area */}
@@ -369,6 +400,14 @@ function MainAppContent() {
           setActiveTab("dashboard");
           setIsLoginModalOpen(false);
         }}
+      />
+
+      {/* System Maintenance & Notice Auto Popup Modal */}
+      <MaintenancePopupModal
+        isOpen={isMaintenanceModalOpen}
+        onClose={handleCloseMaintenanceModal}
+        systemSettings={systemSettings}
+        todayStr={todayStr}
       />
     </div>
   );

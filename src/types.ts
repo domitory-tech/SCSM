@@ -144,4 +144,9 @@ export interface SystemSettings {
   systemTitleEn?: string;
   systemIcon: string;
   lastUpdatedDate: string;
+  // System Maintenance & Announcement Settings
+  maintenanceTitle?: string;
+  maintenanceMessage?: string;
+  showMaintenancePopup?: boolean;
+  showMaintenanceBox?: boolean;
 }

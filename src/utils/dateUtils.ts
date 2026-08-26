@@ -11,7 +11,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   systemTitleTh: "ระบบบริหารจัดการหอพักนักเรียน - โรงเรียนพิจิตรปัญญานุกูล",
   systemTitleEn: "Student Dormitory Management System - Pichit Panyanukul School",
   systemIcon: "building",
-  lastUpdatedDate: "24 กรกฎาคม พ.ศ. 2569"
+  lastUpdatedDate: "24 กรกฎาคม พ.ศ. 2569",
+  maintenanceTitle: "แจ้งการปรับปรุงระบบและข่าวสาร",
+  maintenanceMessage: "",
+  showMaintenancePopup: false,
+  showMaintenanceBox: false
 };
 
 export function getTodayDateString(): string {

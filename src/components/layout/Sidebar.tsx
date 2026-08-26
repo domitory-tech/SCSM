@@ -16,7 +16,10 @@ import {
   Building2,
   Sparkles,
   Database,
-  Wifi
+  Wifi,
+  Wrench,
+  AlertTriangle,
+  Bell
 } from "lucide-react";
 
 interface SidebarProps {
@@ -28,6 +31,7 @@ interface SidebarProps {
   currentUser: UserProfile | null;
   systemSettings?: SystemSettings;
   onOpenLogin: () => void;
+  onOpenMaintenanceModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -36,7 +40,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   uncheckedDormsCount = 0,
   currentUser,
   systemSettings = DEFAULT_SYSTEM_SETTINGS,
-  onOpenLogin
+  onOpenLogin,
+  onOpenMaintenanceModal
 }) => {
   const [lastDbSaveTime, setLastDbSaveTime] = useState<string>(() => {
     return (
@@ -214,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* Evening Check Reminder Card */}
-        <div className="p-3 m-3 bg-gradient-to-br from-[#A05AFF]/10 via-[#4BCBEB]/10 to-[#1BCFB4]/10 rounded-2xl border border-[#A05AFF]/20">
+        <div className="p-3 mx-3 mt-3 mb-2 bg-gradient-to-br from-[#A05AFF]/10 via-[#4BCBEB]/10 to-[#1BCFB4]/10 rounded-2xl border border-[#A05AFF]/20 shadow-2xs">
           <div className="flex items-center gap-2 font-bold text-[#A05AFF] text-xs mb-1">
             <ShieldAlert className="w-4 h-4 text-[#A05AFF] shrink-0" />
             <span>เช็คยอดเวลา 20.00 น.</span>
@@ -223,6 +228,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ครูประจำหอพักเช็คชื่อนักเรียนทุกคืนและบันทึกรายงานเรื่องที่อบรม
           </p>
         </div>
+
+        {/* System Maintenance & Announcement Box (แสดงต่อจากกล่องเช็คยอด 20.00 น.) */}
+        {systemSettings.showMaintenanceBox && Boolean(systemSettings.maintenanceMessage?.trim()) && (
+          <div className="p-3 mx-3 mb-3 bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-amber-600/15 rounded-2xl border-2 border-amber-400/60 shadow-xs space-y-1.5 animate-fade-in">
+            <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 font-black text-amber-950 text-xs min-w-0">
+                <Wrench className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
+                <span className="truncate">{systemSettings.maintenanceTitle || "แจ้งการปรับปรุงระบบ"}</span>
+              </div>
+              {onOpenMaintenanceModal && (
+                <button
+                  type="button"
+                  onClick={onOpenMaintenanceModal}
+                  className="w-5 h-5 rounded-md bg-amber-200/80 hover:bg-amber-300 text-amber-900 flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                  title="เปิดดูรายละเอียดแบบเต็ม"
+                >
+                  <Bell className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-amber-900 leading-relaxed font-medium whitespace-pre-line break-words">
+              {systemSettings.maintenanceMessage}
+            </p>
+            {onOpenMaintenanceModal && (
+              <button
+                type="button"
+                onClick={onOpenMaintenanceModal}
+                className="w-full mt-1 py-1 px-2 bg-amber-500/90 hover:bg-amber-600 text-white font-bold text-[10px] rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1"
+              >
+                <span>ดูประกาศเต็ม</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* System & Database Connection Status Footer */}
         <FirebaseStatusBadge variant="sidebar" lastDbSaveTime={lastDbSaveTime} />

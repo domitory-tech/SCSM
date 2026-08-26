@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
 import { matchStudentToDorm, findDormForStudent, countStudentsInDorm } from "../../utils/dormUtils";
+import { deleteSampleData } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
 const parseGradeNum = (grade: string | undefined): number => {
@@ -574,6 +575,25 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
             >
               <UserPlus className="w-4 h-4" />
               <span>เพิ่มนักเรียนใหม่</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                if (window.confirm("ยืนยันการลบข้อมูลตัวอย่างนักเรียนทั้งหมดออกจากระบบหรือไม่?\n(การกระทำนี้จะล้างรายชื่อนักเรียน เพื่อให้ท่านนำเข้าข้อมูลจริงได้อย่างสะอาดเรียบร้อย)")) {
+                  try {
+                    const res = await deleteSampleData({ target: "STUDENTS" });
+                    alert(res.message || "ลบข้อมูลตัวอย่างนักเรียนเรียบร้อยแล้ว");
+                    window.location.reload();
+                  } catch (e: any) {
+                    alert("เกิดข้อผิดพลาด: " + (e?.message || e));
+                  }
+                }
+              }}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="ลบข้อมูลตัวอย่างนักเรียนทั้งหมด"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>ลบข้อมูลตัวอย่างนักเรียน</span>
             </button>
           </div>
 

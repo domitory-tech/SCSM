@@ -19,7 +19,9 @@ import {
   restoreAttendanceAndNoticesDatabase,
   savePrimaryDatabase,
   initializeDefaultFirebaseDatabase,
-  syncLiveFirebaseDatabase
+  syncLiveFirebaseDatabase,
+  deleteSampleData,
+  DeleteSampleDataOptions
 } from "../../services/api";
 import {
   Key,
@@ -72,7 +74,11 @@ import {
   RotateCcw,
   FileJson,
   ShieldAlert,
-  ListFilter
+  ListFilter,
+  Megaphone,
+  Bell,
+  Eye,
+  Wrench
 } from "lucide-react";
 import { uploadImageToGoogleDrive } from "../../services/googleDrive";
 
@@ -121,25 +127,6 @@ const PRESET_AVATARS_META = [
   { roleName: "ครูหอพัก/ผู้บริหาร", badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200" },
   { roleName: "ครูหอพัก/วิชาการ", badgeColor: "bg-sky-100 text-sky-800 border-sky-200" },
   { roleName: "ครูหอพัก/วิชาการ", badgeColor: "bg-teal-100 text-teal-800 border-teal-200" }
-];
-
-const SYSTEM_LOGOS = [
-  {
-    name: "ตราหอพัก 1 (ม่วง-ทอง)",
-    url: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23A05AFF"/><stop offset="100%" stop-color="%236B21A8"/></linearGradient><linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23FDE047"/><stop offset="100%" stop-color="%23CA8A04"/></linearGradient></defs><circle cx="50" cy="50" r="46" fill="url(%23g1)" stroke="url(%23gold)" stroke-width="3"/><path d="M50 18 L75 32 V56 C75 72 50 84 50 84 C50 84 25 72 25 56 V32 Z" fill="none" stroke="url(%23gold)" stroke-width="3"/><path d="M50 25 L68 36 V54 C68 66 50 76 50 76 C50 76 32 66 32 54 V36 Z" fill="url(%23gold)" opacity="0.25"/><polygon points="50,34 54,44 64,44 56,51 59,61 50,55 41,61 44,51 36,44 46,44" fill="url(%23gold)"/></svg>`
-  },
-  {
-    name: "ตราหอพัก 2 (น้ำเงิน-ทอง)",
-    url: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><defs><linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%232563EB"/><stop offset="100%" stop-color="%231E3A8A"/></linearGradient><linearGradient id="gold2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23FACC15"/><stop offset="100%" stop-color="%23EAB308"/></linearGradient></defs><rect x="6" y="6" width="88" height="88" rx="22" fill="url(%23g2)" stroke="url(%23gold2)" stroke-width="3"/><circle cx="50" cy="45" r="22" fill="none" stroke="url(%23gold2)" stroke-width="2.5"/><path d="M38 58 C38 58 44 52 50 52 C56 52 62 58 62 58 L60 66 C60 66 54 62 50 62 C46 62 40 66 40 66 Z" fill="url(%23gold2)"/><polygon points="50,28 53,35 60,35 55,39 57,46 50,42 43,46 45,39 40,35 47,35" fill="url(%23gold2)"/></svg>`
-  },
-  {
-    name: "ตราหอพัก 3 (เขียว-ทอง)",
-    url: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><defs><linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23059669"/><stop offset="100%" stop-color="%23064E3B"/></linearGradient><linearGradient id="gold3" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23FDE047"/><stop offset="100%" stop-color="%23D97706"/></linearGradient></defs><circle cx="50" cy="50" r="44" fill="url(%23g3)" stroke="url(%23gold3)" stroke-width="3"/><path d="M50 20 L80 34 L50 48 L20 34 Z" fill="url(%23gold3)"/><rect x="34" y="44" width="32" height="14" rx="3" fill="none" stroke="url(%23gold3)" stroke-width="2"/><path d="M28 68 C35 78 65 78 72 68" fill="none" stroke="url(%23gold3)" stroke-width="3" stroke-linecap="round"/></svg>`
-  },
-  {
-    name: "ตราหอพัก 4 (แสด-ทอง)",
-    url: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><defs><linearGradient id="g4" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23EA580C"/><stop offset="100%" stop-color="%239A3412"/></linearGradient><linearGradient id="gold4" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23FEF08A"/><stop offset="100%" stop-color="%23CA8A04"/></linearGradient></defs><polygon points="50,6 90,30 90,70 50,94 10,70 10,30" fill="url(%23g4)" stroke="url(%23gold4)" stroke-width="3"/><path d="M35 55 L50 35 L65 55 L50 50 Z" fill="url(%23gold4)"/><circle cx="50" cy="62" r="5" fill="url(%23gold4)"/></svg>`
-  }
 ];
 
 export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
@@ -558,6 +545,51 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const [pendingImportJson, setPendingImportJson] = useState<any>(null);
   const [adminAuthPassword, setAdminAuthPassword] = useState<string>("");
   const [adminAuthError, setAdminAuthError] = useState<string>("");
+
+  // Sample data purge states
+  const [isDeleteSampleModalOpen, setIsDeleteSampleModalOpen] = useState<boolean>(false);
+  const [sampleDataTarget, setSampleDataTarget] = useState<"ALL" | "STUDENTS" | "DORMS" | "USERS" | "ATTENDANCE_NOTICES">("ALL");
+  const [keepAdminAccount, setKeepAdminAccount] = useState<boolean>(true);
+  const [isDeletingSampleData, setIsDeletingSampleData] = useState<boolean>(false);
+  const [sampleAuthPassword, setSampleAuthPassword] = useState<string>("");
+  const [sampleAuthError, setSampleAuthError] = useState<string>("");
+
+  const handleExecuteDeleteSampleData = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sampleAuthPassword.trim()) {
+      setSampleAuthError("กรุณากรอกรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
+      return;
+    }
+
+    const authorizedUsers = users.filter((u) => u.roleLevel === 1 || u.roleLevel === 2);
+    const isPasswordCorrect =
+      (currentUser?.password && sampleAuthPassword === currentUser.password) ||
+      authorizedUsers.some((u) => u.password === sampleAuthPassword) ||
+      sampleAuthPassword === "123456";
+
+    if (!isPasswordCorrect) {
+      setSampleAuthError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
+      return;
+    }
+
+    setIsDeletingSampleData(true);
+    try {
+      const res = await deleteSampleData({
+        target: sampleDataTarget,
+        keepAdminAccount
+      });
+      showNotification("success", res.message || "ลบข้อมูลตัวอย่างสำเร็จเรียบร้อยแล้ว");
+      setIsDeleteSampleModalOpen(false);
+      setSampleAuthPassword("");
+      setSampleAuthError("");
+      if (onDataReset) onDataReset();
+      await loadUsersList();
+    } catch (err: any) {
+      showNotification("error", err.message || "เกิดข้อผิดพลาดในการลบข้อมูลตัวอย่าง");
+    } finally {
+      setIsDeletingSampleData(false);
+    }
+  };
 
   // Firebase project setup & seed states
   const [isInitializingDefaultDb, setIsInitializingDefaultDb] = useState<boolean>(false);
@@ -1273,30 +1305,6 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                 <span>2. ตั้งค่า Logo โรงเรียน (School Logo)</span>
               </h4>
 
-              {/* Presets Grid */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  เลือกตราสัญลักษณ์ Logo ในระบบ:
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {SYSTEM_LOGOS.map((p, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setSettingsForm({ ...settingsForm, schoolLogoUrl: p.url })}
-                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-2 bg-white ${
-                        settingsForm.schoolLogoUrl === p.url
-                          ? "border-[#A05AFF] ring-2 ring-[#A05AFF]/30 bg-purple-50/50"
-                          : "border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <img src={p.url} alt={p.name} className="w-12 h-12 object-contain rounded-lg border border-slate-200 p-1 bg-slate-50" />
-                      <span className="text-[10px] font-bold text-slate-700">{p.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Custom Logo Link */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 flex flex-wrap items-center justify-between gap-1">
@@ -1532,6 +1540,219 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#A05AFF]"
                 />
               </div>
+            </div>
+
+            {/* 5. System Maintenance & Announcement to Users */}
+            <div className="space-y-5 bg-gradient-to-br from-amber-50/70 via-orange-50/50 to-amber-50/80 p-5 rounded-2xl border-2 border-amber-300 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/80 pb-3">
+                <h4 className="font-extrabold text-sm text-amber-950 flex items-center gap-2">
+                  <Megaphone className="w-5 h-5 text-amber-600 shrink-0" />
+                  <span>5. กล่องข้อความแจ้งการปรับปรุงระบบแก่ผู้ใช้ (System Maintenance & Notice)</span>
+                </h4>
+                <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200/90 text-amber-900 px-2.5 py-0.5 rounded-full self-start sm:self-auto">
+                  📢 ประกาศ & ปรับปรุงระบบ
+                </span>
+              </div>
+
+              {/* Toggles Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {/* Toggle 1: Auto Popup */}
+                <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                  settingsForm.showMaintenancePopup
+                    ? "bg-amber-100/70 border-amber-500 shadow-xs"
+                    : "bg-white border-amber-200 hover:border-amber-300"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.showMaintenancePopup ?? false}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, showMaintenancePopup: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <Bell className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                      <span>เปิดแสดง Auto Popup แจ้งการปรับปรุง</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed font-medium">
+                      เมื่อผู้ใช้เข้าสู่ระบบจะแสดงหน้าต่าง Popup แจ้งเตือน <strong>วันละ 1 ครั้งต่อคน</strong>
+                    </p>
+                  </div>
+                </label>
+
+                {/* Toggle 2: Sidebar Box */}
+                <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                  settingsForm.showMaintenanceBox
+                    ? "bg-amber-100/70 border-amber-500 shadow-xs"
+                    : "bg-white border-amber-200 hover:border-amber-300"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.showMaintenanceBox ?? false}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, showMaintenanceBox: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                      <span>เปิดแสดงกล่องข้อความปรับปรุงระบบที่เมนูข้าง</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed font-medium">
+                      แสดงกล่องข้อความที่แถบเมนูด้านข้าง <strong>ต่อจากกล่องเช็คยอดเวลา 20.00 น.</strong>
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              {/* Maintenance Title */}
+              <div>
+                <label className="block text-xs font-bold text-amber-950 mb-1">
+                  หัวข้อแจ้งการปรับปรุงระบบ / หัวข้อประกาศ:
+                </label>
+                <input
+                  type="text"
+                  value={settingsForm.maintenanceTitle ?? ""}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, maintenanceTitle: e.target.value })}
+                  placeholder="เช่น แจ้งการปรับปรุงระบบหอพักประจำสัปดาห์, ประกาศสำคัญถึงครูประจำหอพัก"
+                  className="w-full bg-white border border-amber-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* Maintenance Message Textarea */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-amber-950">
+                    กล่องข้อความสำหรับแจ้งการปรับปรุงระบบแก่ผู้ใช้:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-800 font-semibold">
+                      {(settingsForm.maintenanceMessage || "").length} ตัวอักษร
+                    </span>
+                    {settingsForm.maintenanceMessage && (
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm({ ...settingsForm, maintenanceMessage: "" })}
+                        className="text-[10px] text-rose-600 hover:text-rose-700 font-bold underline cursor-pointer"
+                      >
+                        ล้างข้อความ
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={settingsForm.maintenanceMessage ?? ""}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, maintenanceMessage: e.target.value })}
+                  placeholder="พิมพ์ข้อความรายละเอียดการปรับปรุงระบบ เช่น:
+- ระบบจะทำการปรับปรุงฐานข้อมูลและอัปเดตระบบเช็คยอด
+- เพิ่มความเสถียรในการส่งรายงานประจำวัน
+- ครูหอพักสามารถบันทึกข้อมูลและใช้งานได้ตามปกติ"
+                  className="w-full bg-white border border-amber-300 rounded-xl p-3.5 text-xs font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 leading-relaxed shadow-inner"
+                />
+
+                {/* Quick Templates */}
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-600" />
+                    <span>ข้อความตัวอย่าง:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsForm({
+                        ...settingsForm,
+                        maintenanceTitle: "แจ้งการปรับปรุงและอัปเดตระบบหอพัก",
+                        maintenanceMessage: `เรียน คุณครูประจำหอพักและผู้ใช้งานทุกท่าน\nระบบบริหารจัดการหอพักนักเรียนได้รับการอัปเดตเพื่อเพิ่มความเสถียรและความแม่นยำในการเช็คยอดและรายงานผล\n- สามารถเช็คยอดและแนบหลักฐานได้อย่างรวดเร็ว\n- หากพบปัญหาในการใช้งานกรุณาติดต่อผู้ดูแลระบบ`,
+                        showMaintenanceBox: true,
+                        showMaintenancePopup: true
+                      });
+                    }}
+                    className="text-[10px] bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded-lg font-bold transition-colors cursor-pointer"
+                  >
+                    + ข้อความอัปเดตระบบทั่วไป
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsForm({
+                        ...settingsForm,
+                        maintenanceTitle: "แจ้งกำหนดการปิดปรับปรุงระบบชั่วคราว",
+                        maintenanceMessage: `ระบบจะมีการปิดปรับปรุงฐานข้อมูลชั่วคราวเพื่อสำรองข้อมูลและเพิ่มประสิทธิภาพ\n- ขอความกรุณาครูประจำหอพักบันทึกเช็คยอดให้เรียบร้อยก่อนเวลา 21.00 น.\n- ระบบจะเปิดให้บริการตามปกติหลังการปรับปรุงเสร็จสิ้น`,
+                        showMaintenanceBox: true,
+                        showMaintenancePopup: true
+                      });
+                    }}
+                    className="text-[10px] bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded-lg font-bold transition-colors cursor-pointer"
+                  >
+                    + ข้อความแจ้งปิดปรับปรุงชั่วคราว
+                  </button>
+                </div>
+              </div>
+
+              {/* Real-time Preview */}
+              {(settingsForm.maintenanceMessage || settingsForm.maintenanceTitle) && (
+                <div className="p-4 bg-white/90 rounded-2xl border border-amber-200 space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between border-b border-amber-100 pb-2">
+                    <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <Eye className="w-4 h-4 text-amber-600" />
+                      <span>ตัวอย่างการแสดงผลในระบบ (Live Preview)</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {settingsForm.showMaintenancePopup && (
+                        <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md">
+                          Popup: เปิด
+                        </span>
+                      )}
+                      {settingsForm.showMaintenanceBox && (
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
+                          เมนูข้าง: เปิด
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Preview Sidebar Box */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                        1. กล่องข้อความที่เมนูข้าง (Sidebar Box)
+                      </span>
+                      <div className="p-3 bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-amber-600/15 rounded-2xl border border-amber-400/40 space-y-1.5 shadow-2xs">
+                        <div className="flex items-center gap-2 font-black text-amber-950 text-xs">
+                          <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span className="truncate">{settingsForm.maintenanceTitle || "แจ้งการปรับปรุงระบบ"}</span>
+                        </div>
+                        <p className="text-[11px] text-amber-900 leading-relaxed whitespace-pre-line font-medium">
+                          {settingsForm.maintenanceMessage || "ไม่มีข้อความ"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Preview Popup Card */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                        2. หน้าต่าง Auto Popup (เมื่อเข้าสู่ระบบ)
+                      </span>
+                      <div className="p-3.5 bg-white rounded-2xl border-2 border-amber-400 space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-amber-100 pb-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <Megaphone className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span className="text-xs font-black text-gray-900 truncate">
+                              {settingsForm.maintenanceTitle || "แจ้งการปรับปรุงระบบ"}
+                            </span>
+                          </div>
+                          <span className="text-[9px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded">
+                            วันละ 1 ครั้ง
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-line">
+                          {settingsForm.maintenanceMessage || "ไม่มีข้อความ"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Submit Button */}
@@ -1906,6 +2127,20 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               <Plus className="w-4 h-4" />
               <span>{isStaff ? "เพิ่มครูหอพักใหม่" : "เพิ่มผู้ใช้/เจ้าหน้าที่ใหม่"}</span>
             </button>
+
+            <button
+              onClick={() => {
+                setSampleDataTarget("USERS");
+                setSampleAuthPassword("");
+                setSampleAuthError("");
+                setIsDeleteSampleModalOpen(true);
+              }}
+              className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs px-4 py-2.5 rounded-xl shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
+              title="ลบข้อมูลบัญชีผู้ใช้ตัวอย่าง"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>ลบข้อมูลตัวอย่างผู้ใช้</span>
+            </button>
           </div>
 
           {/* Users List Table */}
@@ -2155,6 +2390,37 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   <span>เลือกไฟล์ JSON เพื่อนำเข้า</span>
                   <input type="file" accept=".json" onChange={handleImportDb} className="hidden" />
                 </label>
+              </div>
+
+              {/* Dedicated Delete Sample Data Card */}
+              <div className="p-5 rounded-2xl border-2 border-amber-300 bg-amber-50/60 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded-md">
+                    ลบข้อมูลตัวอย่าง
+                  </span>
+                </div>
+                <div>
+                  <h4 className="font-bold text-amber-950 text-sm">ลบข้อมูลตัวอย่าง (Purge Sample Data)</h4>
+                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                    ล้างข้อมูลตัวอย่างนักเรียน, ข้อมูลหอพักตัวอย่าง, บัญชีผู้ใช้ตัวอย่าง และข้อมูลเช็คยอดตัวอย่าง ออกจากฐานข้อมูล
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSampleDataTarget("ALL");
+                    setSampleAuthPassword("");
+                    setSampleAuthError("");
+                    setIsDeleteSampleModalOpen(true);
+                  }}
+                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>เปิดหน้าต่างลบข้อมูลตัวอย่าง</span>
+                </button>
               </div>
 
               {/* Clear Database (Admin Only) */}
@@ -3649,6 +3915,239 @@ git push -u origin main`);
                 >
                   <CheckCircle className="w-4 h-4" />
                   <span>ยืนยันข้อมูล & ดำเนินการ</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Sample Data Custom Modal */}
+      {isDeleteSampleModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border-2 border-amber-400 space-y-5 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">
+                    ลบข้อมูลตัวอย่าง (Purge Sample Data)
+                  </h3>
+                  <p className="text-xs text-amber-700 font-bold mt-0.5">
+                    เลือกรายการข้อมูลตัวอย่างที่ต้องการล้างออกจากระบบ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteSampleModalOpen(false);
+                  setSampleAuthPassword("");
+                  setSampleAuthError("");
+                }}
+                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteDeleteSampleData} className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-gray-700">
+                  เลือกหมวดหมู่ข้อมูลตัวอย่างที่ต้องการลบ:
+                </label>
+
+                <div className="space-y-2 text-xs">
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      sampleDataTarget === "ALL"
+                        ? "border-amber-500 bg-amber-50/70 text-amber-950 font-bold"
+                        : "border-gray-200 hover:border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sampleDataTarget"
+                      value="ALL"
+                      checked={sampleDataTarget === "ALL"}
+                      onChange={() => setSampleDataTarget("ALL")}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <div className="font-extrabold flex items-center gap-1.5">
+                        <span>🔥 ลบข้อมูลตัวอย่างทั้งหมดในระบบ (All Data)</span>
+                        <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-black">แนะนำ</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-0.5 font-normal">
+                        ล้างข้อมูลนักเรียนตัวอย่าง, หอพักตัวอย่าง, บัญชีผู้ใช้ตัวอย่าง, ประวัติเช็คยอด และเรื่องแจ้งอบรม
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      sampleDataTarget === "STUDENTS"
+                        ? "border-amber-500 bg-amber-50/70 text-amber-950 font-bold"
+                        : "border-gray-200 hover:border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sampleDataTarget"
+                      value="STUDENTS"
+                      checked={sampleDataTarget === "STUDENTS"}
+                      onChange={() => setSampleDataTarget("STUDENTS")}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <div className="font-extrabold">🎓 ลบเฉพาะข้อมูลนักเรียนตัวอย่าง (Students Only)</div>
+                      <p className="text-[11px] text-gray-500 mt-0.5 font-normal">
+                        ล้างรายชื่อนักเรียนตัวอย่างทุกหอพัก เพื่อเตรียมนำเข้าไฟล์ Excel ข้อมูลจริง
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      sampleDataTarget === "USERS"
+                        ? "border-amber-500 bg-amber-50/70 text-amber-950 font-bold"
+                        : "border-gray-200 hover:border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sampleDataTarget"
+                      value="USERS"
+                      checked={sampleDataTarget === "USERS"}
+                      onChange={() => setSampleDataTarget("USERS")}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <div className="font-extrabold">👥 ลบเฉพาะบัญชีผู้ใช้ตัวอย่าง (Users Only)</div>
+                      <p className="text-[11px] text-gray-500 mt-0.5 font-normal">
+                        ล้างรายชื่อครูหอพักและเจ้าหน้าที่ตัวอย่าง
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      sampleDataTarget === "DORMS"
+                        ? "border-amber-500 bg-amber-50/70 text-amber-950 font-bold"
+                        : "border-gray-200 hover:border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sampleDataTarget"
+                      value="DORMS"
+                      checked={sampleDataTarget === "DORMS"}
+                      onChange={() => setSampleDataTarget("DORMS")}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <div className="font-extrabold">🏢 ลบเฉพาะข้อมูลหอพักตัวอย่าง (Dormitories Only)</div>
+                      <p className="text-[11px] text-gray-500 mt-0.5 font-normal">
+                        ล้างข้อมูลหอพักตัวอย่างเพื่อตั้งค่าหอพักจริง
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      sampleDataTarget === "ATTENDANCE_NOTICES"
+                        ? "border-amber-500 bg-amber-50/70 text-amber-950 font-bold"
+                        : "border-gray-200 hover:border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sampleDataTarget"
+                      value="ATTENDANCE_NOTICES"
+                      checked={sampleDataTarget === "ATTENDANCE_NOTICES"}
+                      onChange={() => setSampleDataTarget("ATTENDANCE_NOTICES")}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <div className="font-extrabold">📋 ลบข้อมูลเช็คยอด & เรื่องแจ้งอบรมตัวอย่าง (Attendance & Notices)</div>
+                      <p className="text-[11px] text-gray-500 mt-0.5 font-normal">
+                        ล้างบันทึกการเช็คยอดและข้อความแจ้งอบรมตัวอย่างทั้งหมด
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {(sampleDataTarget === "ALL" || sampleDataTarget === "USERS") && (
+                <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl">
+                  <label className="flex items-center gap-2 text-xs font-bold text-emerald-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={keepAdminAccount}
+                      onChange={(e) => setKeepAdminAccount(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>คงบัญชีผู้ดูแลระบบ (Admin Level 1) ไว้ เพื่อให้ใช้งานระบบต่อได้ทันที</span>
+                  </label>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  กรอกรหัสผ่านเพื่อยืนยันความปลอดภัย <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    value={sampleAuthPassword}
+                    onChange={(e) => {
+                      setSampleAuthPassword(e.target.value);
+                      setSampleAuthError("");
+                    }}
+                    placeholder="ป้อนรหัสผ่านเจ้าหน้าที่ / ผู้ดูแล..."
+                    className="w-full bg-amber-50/50 border border-amber-300 text-sm font-bold text-gray-900 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                  <Lock className="w-4 h-4 text-amber-500 absolute right-3 top-3" />
+                </div>
+                {sampleAuthError && (
+                  <p className="text-xs font-bold text-rose-600 mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{sampleAuthError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDeleteSampleModalOpen(false);
+                    setSampleAuthPassword("");
+                    setSampleAuthError("");
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeletingSampleData}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  {isDeletingSampleData ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>กำลังลบข้อมูลตัวอย่าง...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>ยืนยันการลบข้อมูลตัวอย่าง</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

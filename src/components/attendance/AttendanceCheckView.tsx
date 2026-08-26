@@ -23,14 +23,17 @@ const parseStudentNo = (no: string | number | undefined): number => {
 };
 import {
   AlertCircle,
+  Bell,
   BookOpen,
   Calendar,
+  Check,
   CheckCircle2,
   Clock,
   Copy,
   Home,
   Loader2,
   Lock,
+  Megaphone,
   Plus,
   Save,
   Search,
@@ -38,7 +41,8 @@ import {
   Trash2,
   UserCheck,
   UserMinus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 
 interface AttendanceCheckViewProps {
@@ -112,6 +116,25 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState<boolean>(false);
   const [isCopyingYesterday, setIsCopyingYesterday] = useState<boolean>(false);
   const [copyNoticeMsg, setCopyNoticeMsg] = useState<{ type: "success" | "warning" | "info"; text: string } | null>(null);
+
+  // Active notices for current selected date
+  const activeDateNotices = useMemo(() => {
+    return notices.filter((n) => n.date === selectedDate && n.topics && n.topics.length > 0);
+  }, [notices, selectedDate]);
+
+  // Head teacher notices auto popup states
+  const [isAutoNoticePopupOpen, setIsAutoNoticePopupOpen] = useState<boolean>(false);
+  const [hasDismissedPopupToday, setHasDismissedPopupToday] = useState<boolean>(false);
+
+  // Auto trigger popup on page entry when today has head teacher notices
+  useEffect(() => {
+    if (isToday && activeDateNotices.length > 0 && !hasDismissedPopupToday) {
+      setIsAutoNoticePopupOpen(true);
+    } else if (!isToday) {
+      // If date is changed to a past/future date, close popup immediately and show normal view
+      setIsAutoNoticePopupOpen(false);
+    }
+  }, [isToday, activeDateNotices.length, hasDismissedPopupToday]);
 
   const accessibleDorms = React.useMemo(() => {
     if (!currentUser) return dorms;
@@ -547,19 +570,46 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       </div>
 
       {/* Head Notice Alert Banner */}
-      {notices.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-900">
-          <div className="flex items-center gap-2 font-bold text-sm text-amber-800 mb-1">
-            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
-            <span>เรื่องแจ้งเน้นย้ำจากหัวหน้างานหอพักก่อนเวลา 20.00 น.</span>
+      {activeDateNotices.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 text-amber-950 shadow-2xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/80 pb-2">
+            <div className="flex items-center gap-2 font-black text-sm text-amber-900">
+              <Megaphone className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>เรื่องแจ้งเน้นย้ำจากหัวหน้างานหอพัก ({formatThaiFullDate(selectedDate)})</span>
+              {isToday && (
+                <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  วันนี้
+                </span>
+              )}
+            </div>
+            {isToday && (
+              <button
+                type="button"
+                onClick={() => setIsAutoNoticePopupOpen(true)}
+                className="self-start sm:self-auto px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>เปิดดูการแจ้งเตือน (Popup)</span>
+              </button>
+            )}
           </div>
-          <div className="text-xs space-y-1 ml-7">
-            {notices.map((n) => (
-              <div key={n.id}>
-                <strong className="text-amber-950">{n.title}:</strong>
-                <ul className="list-disc list-inside mt-0.5 space-y-0.5 text-amber-800">
+          <div className="text-xs space-y-2.5">
+            {activeDateNotices.map((n) => (
+              <div key={n.id} className="bg-white/90 rounded-xl p-3.5 border border-amber-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between gap-2 border-b border-amber-100 pb-1.5">
+                  <strong className="text-amber-950 font-bold text-sm flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>{n.title}</span>
+                  </strong>
+                  {n.createdBy && (
+                    <span className="text-[10px] text-amber-800 font-semibold bg-amber-100 px-2 py-0.5 rounded-md">
+                      ผู้แจ้ง: {n.createdBy}
+                    </span>
+                  )}
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-amber-900 font-medium pl-1">
                   {n.topics.map((tp, idx) => (
-                    <li key={idx}>{tp}</li>
+                    <li key={idx} className="leading-relaxed">{tp}</li>
                   ))}
                 </ul>
               </div>
@@ -996,6 +1046,103 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               >
                 <Save className="w-4 h-4" />
                 <span>ยืนยันบันทึกข้อมูล</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto Popup: Head Teacher Notices Modal (แสดงเตือนก่อนเช็คยอดเมื่อมีประกาศประจำวัน) */}
+      {isAutoNoticePopupOpen && isToday && activeDateNotices.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border-2 border-amber-400 space-y-5 animate-scale-up relative overflow-hidden">
+            {/* Background Glow */}
+            <div className="absolute -top-12 -right-12 w-40 h-40 bg-amber-400/20 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-12 -left-12 w-40 h-40 bg-orange-400/20 rounded-full blur-2xl pointer-events-none" />
+
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-amber-100 pb-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shrink-0 shadow-md">
+                  <Megaphone className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
+                      ⚡ เรื่องแจ้งเน้นย้ำด่วน
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md">
+                      {formatThaiFullDate(todayStr)}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-black text-gray-900 mt-1">
+                    เรื่องแจ้งเน้นย้ำจากหัวหน้างานหอพัก
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAutoNoticePopupOpen(false);
+                  setHasDismissedPopupToday(true);
+                }}
+                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700 flex items-center justify-center text-sm font-bold transition-colors cursor-pointer shrink-0"
+                title="ปิดหน้าต่าง"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Notice Items List */}
+            <div className="space-y-3.5 max-h-[55vh] overflow-y-auto pr-1">
+              {activeDateNotices.map((n) => (
+                <div key={n.id} className="p-4 rounded-2xl bg-amber-50/90 border border-amber-200 space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-200/70 pb-2">
+                    <h4 className="font-black text-sm text-amber-950 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{n.title}</span>
+                    </h4>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-200/70 px-2.5 py-0.5 rounded-full">
+                      ผู้แจ้ง: {n.createdBy || "หัวหน้างานหอพัก"}
+                    </span>
+                  </div>
+                  <div className="space-y-2 pt-1">
+                    {n.topics.map((topic, tIdx) => (
+                      <div
+                        key={tIdx}
+                        className="flex items-start gap-2.5 p-3 rounded-xl bg-white/95 border border-amber-200/80 text-amber-950 font-semibold text-xs leading-relaxed shadow-2xs"
+                      >
+                        <span className="w-5 h-5 rounded-full bg-amber-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 mt-0.5">
+                          {tIdx + 1}
+                        </span>
+                        <span className="flex-1">{topic}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Teacher Guidance Note */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 text-slate-700 text-xs leading-relaxed">
+              <span className="text-amber-500 text-lg leading-none shrink-0 mt-0.5">💡</span>
+              <div>
+                <strong>คำแนะนำสำหรับครูประจำหอพัก:</strong> โปรดนำหัวข้อที่ได้รับแจ้งเน้นย้ำไปอบรมสั่งสอนนักเรียนในหอพักประจำวันนี้ และบันทึกผลการอบรมในส่วน <em>"บันทึกเรื่องที่ครูประจำหอพักอบรมนักเรียน"</em> ก่อนกดยืนยันบันทึกยอด
+              </div>
+            </div>
+
+            {/* Modal Primary Action Button */}
+            <div className="pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAutoNoticePopupOpen(false);
+                  setHasDismissedPopupToday(true);
+                }}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-sm rounded-xl shadow-lg shadow-amber-500/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                <span>รับทราบเรื่องแจ้งอบรม (เริ่มเช็คยอดนักเรียน)</span>
               </button>
             </div>
           </div>

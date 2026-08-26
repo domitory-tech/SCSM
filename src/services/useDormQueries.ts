@@ -5,6 +5,8 @@ import {
   addUser,
   batchDeleteStudents,
   deleteNotice,
+  deleteSampleData,
+  DeleteSampleDataOptions,
   deleteStudent,
   deleteUser,
   exportToGoogleSheets,
@@ -291,3 +293,21 @@ export function useUpdateSystemSettingsMutation() {
     }
   });
 }
+
+export function useDeleteSampleDataMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (options?: DeleteSampleDataOptions) => deleteSampleData(options),
+    onSuccess: () => {
+      recordLastDbSave();
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["dorms"] });
+      queryClient.invalidateQueries({ queryKey: ["students"] });
+      queryClient.invalidateQueries({ queryKey: ["notices"] });
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+    }
+  });
+}
+

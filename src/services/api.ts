@@ -407,6 +407,104 @@ export async function changeUserPassword(
 // ----------------------------------------------------------------------
 // Database Management API (Firebase Firestore Exclusive with Local Cache)
 // ----------------------------------------------------------------------
+export interface DeleteSampleDataOptions {
+  target: "ALL" | "USERS" | "DORMS" | "STUDENTS" | "ATTENDANCE_NOTICES";
+  keepAdminAccount?: boolean;
+}
+
+export async function deleteSampleData(options: DeleteSampleDataOptions = { target: "ALL" }) {
+  const { target, keepAdminAccount } = options;
+  const deletedCounts = {
+    users: 0,
+    dorms: 0,
+    students: 0,
+    attendance: 0,
+    notices: 0
+  };
+
+  // 1. Delete Students
+  if (target === "ALL" || target === "STUDENTS") {
+    try {
+      const snap = await getDocs(collection(db, "students"));
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.length > 0) {
+        deletedCounts.students = await commitChunkedDeleteDocs("students", ids);
+      }
+    } catch (e) {
+      console.warn("Cleared students offline:", e);
+    }
+    setLocalCache(CACHE_KEYS.STUDENTS, []);
+  }
+
+  // 2. Delete Dorms
+  if (target === "ALL" || target === "DORMS") {
+    try {
+      const snap = await getDocs(collection(db, "dorms"));
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.length > 0) {
+        deletedCounts.dorms = await commitChunkedDeleteDocs("dorms", ids);
+      }
+    } catch (e) {
+      console.warn("Cleared dorms offline:", e);
+    }
+    setLocalCache(CACHE_KEYS.DORMS, []);
+  }
+
+  // 3. Delete Users
+  if (target === "ALL" || target === "USERS") {
+    try {
+      const snap = await getDocs(collection(db, "users"));
+      let docsToDelete = snap.docs;
+      if (keepAdminAccount) {
+        docsToDelete = docsToDelete.filter((d) => {
+          const uData = d.data() as UserProfile;
+          return uData.roleLevel !== 1 && uData.role !== "SYSTEM_ADMIN";
+        });
+      }
+      const ids = docsToDelete.map((d) => d.id);
+      if (ids.length > 0) {
+        deletedCounts.users = await commitChunkedDeleteDocs("users", ids);
+      }
+    } catch (e) {
+      console.warn("Cleared users offline:", e);
+    }
+    if (!keepAdminAccount) {
+      setLocalCache(CACHE_KEYS.USERS, []);
+    } else {
+      const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+      setLocalCache(CACHE_KEYS.USERS, cached.filter((u) => u.roleLevel === 1 || u.role === "SYSTEM_ADMIN"));
+    }
+  }
+
+  // 4. Delete Attendance & Notices
+  if (target === "ALL" || target === "ATTENDANCE_NOTICES") {
+    try {
+      const attSnap = await getDocs(collection(db, "attendance"));
+      const attIds = attSnap.docs.map((d) => d.id);
+      if (attIds.length > 0) {
+        deletedCounts.attendance = await commitChunkedDeleteDocs("attendance", attIds);
+      }
+      const notSnap = await getDocs(collection(db, "notices"));
+      const notIds = notSnap.docs.map((d) => d.id);
+      if (notIds.length > 0) {
+        deletedCounts.notices = await commitChunkedDeleteDocs("notices", notIds);
+      }
+    } catch (e) {
+      console.warn("Cleared attendance & notices offline:", e);
+    }
+    setLocalCache(CACHE_KEYS.ATTENDANCE, []);
+    setLocalCache(CACHE_KEYS.NOTICES, []);
+  }
+
+  const total = deletedCounts.students + deletedCounts.dorms + deletedCounts.users + deletedCounts.attendance + deletedCounts.notices;
+  return {
+    success: true,
+    message: `ลบข้อมูลตัวอย่างเรียบร้อยแล้ว รวมทั้งหมด ${total} รายการ (นักเรียน: ${deletedCounts.students}, หอพัก: ${deletedCounts.dorms}, ผู้ใช้: ${deletedCounts.users}, เช็คยอด: ${deletedCounts.attendance}, เรื่องแจ้งอบรม: ${deletedCounts.notices})`,
+    deletedCounts,
+    total
+  };
+}
+
 export async function clearDatabase() {
   const collections = ["dorms", "students", "users", "notices", "attendance"];
   let totalDeleted = 0;
