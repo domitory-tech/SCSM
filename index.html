@@ -11,23 +11,38 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
     <script type="text/javascript">
-      // GitHub Pages SPA decoder & trailing-slash handler
+      // GitHub Pages SPA decoder & trailing-slash immediate redirect
       (function() {
         var l = window.location;
-        // Fix trailing slash if opened without one on GitHub pages
+        // If accessed on a repo path without trailing slash (e.g. /SCSM), immediately redirect to /SCSM/ so relative ./assets/ work properly
         if (l.pathname && !l.pathname.endsWith('/') && !l.pathname.split('/').pop().includes('.')) {
-          window.history.replaceState(null, '', l.pathname + '/' + l.search + l.hash);
+          l.replace(l.protocol + '//' + l.host + l.pathname + '/' + l.search + l.hash);
+          return;
         }
         // Decode SPA redirect from 404.html if present
         if (l.search && l.search.indexOf('p=') !== -1) {
           var params = new URLSearchParams(l.search);
           var redirectPath = params.get('p');
           if (redirectPath) {
-            var newUrl = l.pathname.replace(/\/$/, '') + '/' + decodeURIComponent(redirectPath).replace(/^\//, '');
+            var cleanPath = decodeURIComponent(redirectPath).replace(/^\//, '');
+            var baseDir = l.pathname.replace(/\/$/, '');
+            var newUrl = baseDir + '/' + cleanPath;
             window.history.replaceState(null, '', newUrl + l.hash);
           }
         }
       })();
+
+      // Catch top-level module evaluation or script loading errors
+      window.addEventListener('error', function(e) {
+        var fb = document.getElementById('loading-fallback-box');
+        var st = document.getElementById('loading-status-text');
+        if (fb && document.getElementById('root')) {
+          fb.style.display = 'block';
+          if (st) {
+            st.innerHTML = '<span style="color:#dc2626;font-weight:600;">พบปัญหาในการโหลดระบบ: ' + (e.message || 'Script error') + '</span>';
+          }
+        }
+      });
     </script>
   </head>
   <body class="bg-[#f2f4f9]">
