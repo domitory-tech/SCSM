@@ -1,17 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
   <head>
     <meta charset="utf-8" />
-    <title>Student Counting System</title>
+    <title>ระบบบริหารจัดการหอพักนักเรียน</title>
     <script type="text/javascript">
-      // Single Page Apps for GitHub Pages redirection fix
-      var segmentCount = 0;
+      // GitHub Pages SPA redirect script for project repositories (username.github.io/repo-name)
       var l = window.location;
+      // Determine if repository is on github.io (1 segment) or custom domain (0 segments)
+      var segmentCount = l.hostname.endsWith('github.io') ? 1 : 0;
+      var repoPrefix = l.pathname.split('/').slice(0, 1 + segmentCount).join('/');
+      var redirectPath = l.pathname.slice(1).split('/').slice(segmentCount).join('/');
+      var query = l.search ? (redirectPath ? '&' : '') + l.search.slice(1) : '';
+      
       l.replace(
         l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/?p=' +
-        l.pathname.slice(1).split('/').slice(segmentCount).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        repoPrefix + '/?p=' + encodeURIComponent(redirectPath + (query ? '?' + query : '')) +
         l.hash
       );
     </script>

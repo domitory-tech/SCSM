@@ -12,7 +12,8 @@ import {
   db,
   commitChunkedSetDocs,
   commitChunkedDeleteDocs,
-  FIREBASE_PROJECT_INFO
+  FIREBASE_PROJECT_INFO,
+  withTimeout
 } from "../lib/firebase";
 import {
   DailyAttendance,
@@ -95,7 +96,7 @@ export function updateLocalCacheList<T extends { id: string }>(
 // ----------------------------------------------------------------------
 export async function fetchDorms(): Promise<Dormitory[]> {
   try {
-    const snapshot = await getDocs(collection(db, "dorms"));
+    const snapshot = await withTimeout(getDocs(collection(db, "dorms")), 3500);
     if (!snapshot.empty) {
       const dorms = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Dormitory));
       const sorted = dorms.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -168,7 +169,7 @@ export async function fetchStudents(params?: {
   room?: number;
 }): Promise<Student[]> {
   try {
-    const snapshot = await getDocs(collection(db, "students"));
+    const snapshot = await withTimeout(getDocs(collection(db, "students")), 3500);
     let students: Student[] = [];
 
     if (!snapshot.empty) {
@@ -314,7 +315,7 @@ export async function batchDeleteStudents(ids: string[]) {
 // ----------------------------------------------------------------------
 export async function fetchUsers(): Promise<UserProfile[]> {
   try {
-    const snapshot = await getDocs(collection(db, "users"));
+    const snapshot = await withTimeout(getDocs(collection(db, "users")), 3500);
     if (!snapshot.empty) {
       const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserProfile));
       const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
@@ -980,7 +981,7 @@ export async function savePrimaryDatabase() {
 // ----------------------------------------------------------------------
 export async function fetchNotices(date?: string): Promise<Notice[]> {
   try {
-    const snap = await getDocs(collection(db, "notices"));
+    const snap = await withTimeout(getDocs(collection(db, "notices")), 3500);
     if (!snap.empty) {
       let notices = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Notice));
       setLocalCache(CACHE_KEYS.NOTICES, notices);
@@ -1066,7 +1067,7 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
 
 export async function fetchAllAttendanceRecords(): Promise<DailyAttendance[]> {
   try {
-    const snap = await getDocs(collection(db, "attendance"));
+    const snap = await withTimeout(getDocs(collection(db, "attendance")), 3500);
     const records = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
     return records;
@@ -1082,7 +1083,7 @@ export async function fetchAttendance(
 ): Promise<Record<string, DailyAttendance> | DailyAttendance> {
   let allRecords: DailyAttendance[] = [];
   try {
-    const snap = await getDocs(collection(db, "attendance"));
+    const snap = await withTimeout(getDocs(collection(db, "attendance")), 3500);
     allRecords = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
   } catch (err: any) {
@@ -1176,7 +1177,7 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
 // ----------------------------------------------------------------------
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   try {
-    const snap = await getDoc(doc(db, "system_settings", "config"));
+    const snap = await withTimeout(getDoc(doc(db, "system_settings", "config")), 3500);
     if (snap.exists()) {
       const settings = snap.data() as SystemSettings;
       setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settings);

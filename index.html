@@ -10,13 +10,53 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <script type="text/javascript">
+      // GitHub Pages SPA decoder & trailing-slash handler
+      (function() {
+        var l = window.location;
+        // Fix trailing slash if opened without one on GitHub pages
+        if (l.pathname && !l.pathname.endsWith('/') && !l.pathname.split('/').pop().includes('.')) {
+          window.history.replaceState(null, '', l.pathname + '/' + l.search + l.hash);
+        }
+        // Decode SPA redirect from 404.html if present
+        if (l.search && l.search.indexOf('p=') !== -1) {
+          var params = new URLSearchParams(l.search);
+          var redirectPath = params.get('p');
+          if (redirectPath) {
+            var newUrl = l.pathname.replace(/\/$/, '') + '/' + decodeURIComponent(redirectPath).replace(/^\//, '');
+            window.history.replaceState(null, '', newUrl + l.hash);
+          }
+        }
+      })();
+    </script>
   </head>
   <body class="bg-[#f2f4f9]">
     <div id="root">
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Sarabun', sans-serif; background-color: #f2f4f9; color: #334155;">
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Sarabun', sans-serif; background-color: #f2f4f9; color: #334155; padding: 16px; text-align: center;">
         <div style="width: 48px; height: 48px; border: 4px solid #e2e8f0; border-top-color: #A05AFF; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-        <div style="margin-top: 16px; font-weight: 700; font-size: 15px; color: #4c1d95;">ระบบบริหารจัดการหอพักนักเรียน</div>
-        <div style="margin-top: 4px; font-size: 12px; color: #64748b;">กำลังเริ่มต้นระบบ กรุณารอสักครู่...</div>
+        <div style="margin-top: 16px; font-weight: 700; font-size: 16px; color: #4c1d95;">ระบบบริหารจัดการหอพักนักเรียน</div>
+        <div id="loading-status-text" style="margin-top: 6px; font-size: 13px; color: #64748b;">กำลังเริ่มต้นระบบ กรุณารอสักครู่...</div>
+        
+        <div id="loading-fallback-box" style="display: none; margin-top: 20px; max-width: 380px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+          <div style="font-size: 12px; color: #b45309; font-weight: 600; margin-bottom: 8px;">⚡ ใช้เวลาโหลดนานกว่าปกติ หรือ ออฟไลน์</div>
+          <div style="font-size: 11px; color: #64748b; line-height: 1.5; margin-bottom: 12px;">หากเปิดบน GitHub Pages เป็นครั้งแรก หรือพบปัญหาการเชื่อมต่อ สามารถกดปุ่มด้านล่างเพื่อเริ่มใหม่</div>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button onclick="window.location.reload()" style="padding: 6px 14px; background: #7c3aed; color: #fff; border: none; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">รีโหลดหน้าเว็บ</button>
+            <button onclick="try{localStorage.clear();sessionStorage.clear();}catch(e){}window.location.reload();" style="padding: 6px 14px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">ล้างแคชและโหลดใหม่</button>
+          </div>
+        </div>
+
+        <script>
+          // Show recovery controls if app initialization takes longer than 4.5 seconds
+          setTimeout(function() {
+            var fb = document.getElementById('loading-fallback-box');
+            var st = document.getElementById('loading-status-text');
+            if (fb && document.getElementById('root') && document.getElementById('root').contains(fb)) {
+              fb.style.display = 'block';
+              if (st) st.innerText = 'กำลังเชื่อมต่อฐานข้อมูล...';
+            }
+          }, 4500);
+        </script>
         <style>
           @keyframes spin {
             to { transform: rotate(360deg); }
