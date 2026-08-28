@@ -19,7 +19,8 @@ import {
   Wifi,
   Wrench,
   AlertTriangle,
-  Bell
+  Bell,
+  Search
 } from "lucide-react";
 
 interface SidebarProps {
@@ -75,6 +76,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badgeColor: "bg-[#1BCFB4] text-white font-extrabold"
     },
     {
+      id: "student-search",
+      label: "ค้นหานักเรียน",
+      fullLabel: "ค้นหานักเรียน",
+      icon: Search,
+      badge: "ค้นหา",
+      badgeColor: "bg-[#A05AFF] text-white font-extrabold"
+    },
+    {
       id: "check-attendance",
       label: "เช็คยอด",
       fullLabel: "เช็คยอดหอพัก",
@@ -119,6 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ? menuItems.filter(
           (item) =>
             item.id === "dashboard" ||
+            item.id === "student-search" ||
             item.id === "check-attendance" ||
             item.id === "reports" ||
             item.id === "users-db"

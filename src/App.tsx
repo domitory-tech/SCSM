@@ -11,6 +11,7 @@ import { DashboardView } from "./components/dashboard/DashboardView";
 import { AttendanceCheckView } from "./components/attendance/AttendanceCheckView";
 import { NoticeManagerView } from "./components/notices/NoticeManagerView";
 import { StudentManagementView } from "./components/students/StudentManagementView";
+import { StudentSearchView } from "./components/students/StudentSearchView";
 import { DailyReportView } from "./components/reports/DailyReportView";
 import { DormsManagementView } from "./components/dorms/DormsManagementView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
@@ -177,6 +178,7 @@ function MainAppContent() {
     // Require login for other tabs
     if (!currentUser) {
       const tabLabels: Record<string, string> = {
+        "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก (20.00 น.)",
         "notices": "เรื่องแจ้งอบรม",
         "reports": "รายงานสรุปประจำวัน",
@@ -256,6 +258,17 @@ function MainAppContent() {
               onNavigateToCheck={handleNavigateToCheck}
               onNavigateToReports={handleNavigateToReports}
               currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === "student-search" && (
+            <StudentSearchView
+              students={students}
+              dorms={dorms}
+              attendanceRecords={allAttendanceRecords}
+              currentUser={currentUser}
+              systemSettings={systemSettings}
+              onNavigateToCheck={handleNavigateToCheck}
             />
           )}
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { UserProfile, SystemSettings } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS } from "../../utils/dateUtils";
-import { Calendar, ChevronDown, FileSpreadsheet, LayoutDashboard, CheckCircle2, Megaphone, FileText, Users, Home, LogIn, Shield } from "lucide-react";
+import { Calendar, ChevronDown, FileSpreadsheet, LayoutDashboard, CheckCircle2, Megaphone, FileText, Users, Home, LogIn, Shield, Search } from "lucide-react";
 import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
 
 interface NavbarProps {
@@ -28,6 +28,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const getTabInfo = () => {
     switch (activeTab) {
+      case "student-search":
+        return { label: "ค้นหานักเรียน", icon: Search };
       case "check-attendance":
         return { label: "เช็คยอดหอพัก", icon: CheckCircle2 };
       case "notices":

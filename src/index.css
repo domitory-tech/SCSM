@@ -85,4 +85,37 @@
     box-shadow: none !important;
     border-radius: 0 !important;
   }
+
+  /* Specific styles for print preview modals */
+  #print-preview-modal {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  #print-preview-modal > div {
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  #print-preview-modal header,
+  #print-preview-modal .bg-slate-900,
+  #print-preview-modal .bg-slate-50:last-child {
+    display: none !important;
+  }
+
+  #printable-search-report {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
 }
