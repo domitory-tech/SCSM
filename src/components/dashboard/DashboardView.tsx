@@ -4,7 +4,7 @@ import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile } from "../../types";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
 import { getDashboardDefaultDate, getTodayDateString, detectStudentGender } from "../../utils/dateUtils";
-import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor } from "../../utils/dormUtils";
+import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
 import { ThaiCalendarPicker } from "./ThaiCalendarPicker";
 import {
   exportDailyReportToExcel,
@@ -594,7 +594,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 2. Dormitory Statistics (สรุปสถิติข้อมูลแยกตามหอพัก หอพัก 1 - 6) สำหรับวันปัจจุบัน/วันที่เลือก
   const dashboardDormStats = React.useMemo(() => {
     const stats = dorms.map((d) => {
-      const isMale = d.type === "male" || d.gender === "male" || d.name?.includes("ชาย") || d.id.includes("1") || d.id.includes("2") || d.id.includes("3");
+      const dormType = getDormType(d);
       const dTotal = countStudentsInDorm(students, d);
       const dPresent = realtimeDormTotals[d.id]?.remaining ?? dTotal;
       const dOut = realtimeDormTotals[d.id]?.out ?? 0;
@@ -604,7 +604,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return {
         dormId: d.id,
         dormName: d.name,
-        type: isMale ? "male" : "female",
+        type: dormType,
+        dormTypeBadge: getDormTypeBadgeStyle(d),
+        dormTypeLabel: getDormTypeLabel(d, false),
         capacity: dCapacity,
         studentCount: dTotal,
         presentCount: dPresent,
@@ -869,6 +871,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       startOfWeek.setDate(now.getDate() - currentDowIdx);
 
       const weekDates: string[] = [];
+      const prevWeekDates: string[] = [];
       const labels: string[] = [];
       for (let i = 0; i < 7; i++) {
         const d = new Date(startOfWeek);
@@ -879,6 +882,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         const dateStr = `${y}-${m}-${day}`;
         weekDates.push(dateStr);
         labels.push(`${dayNamesShort[i]} ${day}/${m}`);
+
+        // Previous week date (7 days earlier)
+        const prevD = new Date(d);
+        prevD.setDate(d.getDate() - 7);
+        const py = prevD.getFullYear();
+        const pm = String(prevD.getMonth() + 1).padStart(2, "0");
+        const pday = String(prevD.getDate()).padStart(2, "0");
+        prevWeekDates.push(`${py}-${pm}-${pday}`);
       }
 
       const actualData = weekDates.map((dStr) => {
@@ -898,24 +909,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return 0;
       });
 
+      // Previous week actual departure data
+      const prevWeekActualData = prevWeekDates.map((dStr) => {
+        if (dStr in historicalStats.dateTotalOutMap) {
+          return historicalStats.dateTotalOutMap[dStr];
+        }
+        return 0;
+      });
+
       const predictedData = [0, 1, 2, 3, 4, 5, 6].map((i) => historicalStats.avgDow[i] || 0);
 
       const actualSum = actualData.reduce((a, b) => a + b, 0);
+      const prevWeekSum = prevWeekActualData.reduce((a, b) => a + b, 0);
       const predictedSum = predictedData.reduce((a, b) => a + b, 0);
 
-      const maxVal = Math.max(...actualData, ...predictedData);
+      const maxVal = Math.max(...actualData, ...prevWeekActualData, ...predictedData);
       let peakIdx = actualData.indexOf(maxVal);
       if (peakIdx === -1) peakIdx = predictedData.indexOf(maxVal);
       const peakDayText = peakIdx >= 0 && maxVal > 0 ? `วัน${dayNamesShort[peakIdx]} (${maxVal} คน)` : "ไม่มีข้อมูล";
-
-      const accuracy = actualSum > 0 || predictedSum > 0 ? "100%" : "0%";
 
       return {
         chartType: "line",
         labels,
         datasets: [
           {
-            label: "สถิตินักเรียนออกหอพัก (ยอดจริง 7 วัน)",
+            label: "สถิตินักเรียนออกหอพัก (ยอดจริงสัปดาห์นี้)",
             data: actualData,
             borderColor: "#FE9496",
             backgroundColor: "rgba(254, 148, 150, 0.15)",
@@ -927,13 +945,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             pointRadius: 5
           },
           {
+            label: "นักเรียนออกสัปดาห์ที่แล้ว (ยอดจริง)",
+            data: prevWeekActualData,
+            borderColor: "#0284C7",
+            backgroundColor: "rgba(2, 132, 199, 0.08)",
+            borderDash: [4, 4],
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: "#0284C7",
+            pointBorderColor: "#ffffff",
+            pointBorderWidth: 2,
+            pointRadius: 5
+          },
+          {
             label: "คาดการณ์ออกหอพัก (อ้างอิงประวัติเฉลี่ย)",
             data: predictedData,
             borderColor: "#A05AFF",
             backgroundColor: "rgba(160, 90, 255, 0.05)",
             borderDash: [6, 6],
             tension: 0.35,
-            fill: true,
+            fill: false,
             pointBackgroundColor: "#A05AFF",
             pointBorderColor: "#ffffff",
             pointBorderWidth: 2,
@@ -946,19 +977,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         card2Val: `${predictedSum} คน`,
         card3Title: "วันพีคออกบ้านสูงสุด",
         card3Val: peakDayText,
-        card4Title: "ความแม่นยำคาดการณ์",
-        card4Val: accuracy
+        card4Title: "ออกจริงสัปดาห์ที่แล้ว",
+        card4Val: `${prevWeekSum} คน`
       };
     }
 
     if (trendTab === "monthly") {
       const weekLabels = ["สัปดาห์ที่ 1", "สัปดาห์ที่ 2", "สัปดาห์ที่ 3", "สัปดาห์ที่ 4 (สัปดาห์นี้)"];
       const actualData = [0, 0, 0, 0];
+      const prevMonthActualData = [0, 0, 0, 0];
       const predictedData = [0, 0, 0, 0];
 
       const weeklyAvgSum = historicalStats.avgDow.reduce((a, b) => a + b, 0);
 
       for (let w = 0; w < 4; w++) {
+        // Current month 4 weeks (w: 0 = สัปดาห์ที่ 1, 1 = สัปดาห์ที่ 2, 2 = สัปดาห์ที่ 3, 3 = สัปดาห์ที่ 4)
         let wActual = 0;
         for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
           const daysAgo = (3 - w) * 7 + (6 - dayOffset);
@@ -974,45 +1007,85 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
         actualData[w] = wActual;
         predictedData[w] = weeklyAvgSum;
+
+        // Previous month 4 weeks (28 days earlier)
+        let wPrevActual = 0;
+        for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+          const daysAgo = (3 - w) * 7 + (6 - dayOffset) + 28;
+          const d = new Date(now);
+          d.setDate(now.getDate() - daysAgo);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          const dateStr = `${y}-${m}-${day}`;
+          if (dateStr in historicalStats.dateTotalOutMap) {
+            wPrevActual += historicalStats.dateTotalOutMap[dateStr];
+          }
+        }
+        prevMonthActualData[w] = wPrevActual;
       }
 
       const actualSum = actualData.reduce((a, b) => a + b, 0);
+      const prevMonthSum = prevMonthActualData.reduce((a, b) => a + b, 0);
       const predictedSum = predictedData.reduce((a, b) => a + b, 0);
 
-      const maxVal = Math.max(...actualData);
-      const peakIdx = actualData.indexOf(maxVal);
-      const peakWeekText = maxVal > 0 ? `${weekLabels[peakIdx]} (${maxVal} คน)` : "ไม่มีข้อมูล";
-      const avgPerWeek = Math.round(actualSum / 4);
+      const maxVal = Math.max(...actualData, ...prevMonthActualData, ...predictedData);
+      let peakIdx = actualData.indexOf(maxVal);
+      if (peakIdx === -1) peakIdx = prevMonthActualData.indexOf(maxVal);
+      if (peakIdx === -1) peakIdx = predictedData.indexOf(maxVal);
+      const peakWeekText = peakIdx >= 0 && maxVal > 0 ? `${weekLabels[peakIdx]} (${maxVal} คน)` : "ไม่มีข้อมูล";
 
       return {
-        chartType: "bar",
+        chartType: "line",
         labels: weekLabels,
         datasets: [
           {
-            label: "ยอดออกหอพักจริง (รายสัปดาห์)",
+            label: "สถิตินักเรียนออกหอพัก (ยอดจริงเดือนนี้)",
             data: actualData,
-            backgroundColor: "rgba(254, 148, 150, 0.85)",
             borderColor: "#FE9496",
-            borderWidth: 1.5,
-            borderRadius: 8
+            backgroundColor: "rgba(254, 148, 150, 0.15)",
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: "#FE9496",
+            pointBorderColor: "#ffffff",
+            pointBorderWidth: 2,
+            pointRadius: 5
+          },
+          {
+            label: "นักเรียนออกเดือนที่ผ่านมา (ยอดจริง)",
+            data: prevMonthActualData,
+            borderColor: "#0284C7",
+            backgroundColor: "rgba(2, 132, 199, 0.08)",
+            borderDash: [4, 4],
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: "#0284C7",
+            pointBorderColor: "#ffffff",
+            pointBorderWidth: 2,
+            pointRadius: 5
           },
           {
             label: "คาดการณ์ออกหอพัก (อ้างอิงประวัติเฉลี่ย)",
             data: predictedData,
-            backgroundColor: "rgba(160, 90, 255, 0.4)",
             borderColor: "#A05AFF",
-            borderWidth: 1.5,
-            borderRadius: 8
+            backgroundColor: "rgba(160, 90, 255, 0.05)",
+            borderDash: [6, 6],
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: "#A05AFF",
+            pointBorderColor: "#ffffff",
+            pointBorderWidth: 2,
+            pointRadius: 5
           }
         ],
-        card1Title: "รวมสถิติตามจริง (4 สัปดาห์)",
+        card1Title: "รวมสถิติตามจริง (4 สัปดาห์นี้)",
         card1Val: `${actualSum} คน`,
         card2Title: "รวมคาดการณ์ (4 สัปดาห์)",
         card2Val: `${predictedSum} คน`,
         card3Title: "สัปดาห์พีคสูงสุด",
         card3Val: peakWeekText,
-        card4Title: "เฉลี่ยสัปดาห์ละ",
-        card4Val: `${avgPerWeek} คน`
+        card4Title: "ออกจริงเดือนที่ผ่านมา",
+        card4Val: `${prevMonthSum} คน`
       };
     }
 
@@ -1408,8 +1481,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <tr key={d.dormId} className="hover:bg-purple-50/40 transition-colors">
                       <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{d.dormName}</td>
                       <td className="py-2.5 px-2.5 text-center border-r border-slate-100">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${d.type === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}`}>
-                          {d.type === "male" ? "ชาย" : "หญิง"}
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${d.dormTypeBadge}`}>
+                          {d.dormTypeLabel}
                         </span>
                       </td>
                       <td className="py-2.5 px-2.5 text-center font-semibold text-slate-600 border-r border-slate-100">{d.capacity}</td>
@@ -1994,9 +2067,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {trendChartConfig.card3Val}
             </span>
           </div>
-          <div className="p-2.5 rounded-xl bg-teal-50/60 border border-teal-100 flex items-center justify-between">
-            <span className="text-teal-900 font-bold">{trendChartConfig.card4Title}:</span>
-            <span className="font-black text-teal-700 bg-teal-100 px-2 py-0.5 rounded-md">
+          <div className="p-2.5 rounded-xl bg-sky-50/80 border border-sky-200 flex items-center justify-between">
+            <span className="text-sky-900 font-bold">{trendChartConfig.card4Title}:</span>
+            <span className="font-black text-sky-800 bg-sky-100/90 px-2 py-0.5 rounded-md">
               {trendChartConfig.card4Val}
             </span>
           </div>
@@ -2021,7 +2094,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
           <div>
             <h3 className="font-bold text-slate-900 text-base flex flex-wrap items-center gap-2">
-              <span>สรุปยอดนักเรียนตามหอพัก (เวลา 20.00 น.)</span>
+              <span>สรุปยอดนักเรียนตามหอพัก</span>
               {new Date().getHours() >= 20 && (
                 <span className="bg-purple-100 text-purple-800 border border-purple-300 text-[11px] px-2.5 py-0.5 rounded-full font-extrabold flex items-center gap-1 shadow-2xs animate-pulse">
                   <Sparkles className="w-3.5 h-3.5 text-[#A05AFF]" />
@@ -2029,7 +2102,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               )}
             </h3>
-            <p className="text-xs text-slate-400">สถานะการส่งข้อมูลและสถิตินักเรียนแยกตามหอพัก 1 - 6</p>
+            <p className="text-xs text-slate-400">สถานะการส่งข้อมูลและสถิตินักเรียนแยกตามหอพัก 1 - 6 (รอบเวลา 20.00 น.)</p>
           </div>
           <button
             onClick={() => onNavigateToCheck(undefined, effectiveDashboardDate)}
@@ -2075,12 +2148,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div>
                       <div className="flex items-center gap-2">
                         <h4 className="font-black text-slate-900 text-base">{dorm.name}</h4>
-                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
-                          dorm.gender === "female" || dorm.type === "female"
-                            ? "bg-pink-100 text-pink-700 border border-pink-200"
-                            : "bg-blue-100 text-blue-700 border border-blue-200"
-                        }`}>
-                          {dorm.gender === "female" || dorm.type === "female" ? "หญิง" : "ชาย"}
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${getDormTypeBadgeStyle(dorm)}`}>
+                          {getDormTypeLabel(dorm, true)}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
@@ -2111,19 +2180,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     )}
                   </div>
 
-                  {/* Teachers Section: Display ALL teachers and HIGHLIGHT the checker */}
+                  {/* Teachers Section: Display ALL teachers and highlight the checker */}
                   <div className="mt-3.5 bg-white/95 rounded-2xl p-3 border border-slate-200/90 shadow-2xs space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-bold pb-1.5 border-b border-slate-100">
                       <span className="flex items-center gap-1.5 text-slate-700">
                         <Users className="w-3.5 h-3.5 text-purple-600" />
                         <span>คณะครูประจำหอพัก ({dormTeachers.length} ท่าน)</span>
                       </span>
-                      {isTodayChecked && checkedBy && (
-                        <span className="text-[10px] text-emerald-700 font-extrabold flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                          <UserCheck className="w-3 h-3 text-emerald-600" />
-                          <span>ไฮไลท์ผู้เช็คยอด</span>
-                        </span>
-                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -2166,7 +2229,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             {isChecker && (
                               <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-2xs shrink-0 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3" />
-                                <span>ผู้เช็คยอดวันนี้</span>
+                                <span>ผู้เช็คยอด</span>
                               </span>
                             )}
                           </div>
@@ -2191,7 +2254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </div>
                           <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-2xs shrink-0 flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3" />
-                            <span>ผู้เช็คยอดวันนี้</span>
+                            <span>ผู้เช็คยอด</span>
                           </span>
                         </div>
                       )}

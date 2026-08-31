@@ -144,7 +144,7 @@ export function exportDashboardReportHtml(
     <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/70"} hover:bg-purple-50/50">
       <td class="py-2 px-3 font-bold text-slate-800 border-r border-slate-200">${d.dormName}</td>
       <td class="py-2 px-3 text-center text-slate-600 border-r border-slate-200 font-medium">
-        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${d.type === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}">
+        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${d.type === "female" ? "bg-pink-100 text-pink-700" : d.type === "mixed" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}">
           ${d.type === "male" ? "ชาย" : d.type === "female" ? "หญิง" : "รวม"}
         </span>
       </td>

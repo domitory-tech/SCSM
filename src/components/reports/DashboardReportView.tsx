@@ -12,7 +12,7 @@ import {
   THAI_DAYS_SHORT,
   THAI_MONTHS
 } from "../../utils/dateUtils";
-import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch } from "../../utils/dormUtils";
+import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
 import {
   exportDashboardReportHtml,
   DashboardReportExportData
@@ -215,6 +215,8 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
         dormId: string;
         dormName: string;
         type: string;
+        typeBadge?: string;
+        typeLabel?: string;
         capacity: number;
         studentCount: number;
         presentSum: number;
@@ -228,7 +230,9 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
       dormStatMap[d.id] = {
         dormId: d.id,
         dormName: d.name,
-        type: d.type,
+        type: getDormType(d),
+        typeBadge: getDormTypeBadgeStyle(d),
+        typeLabel: getDormTypeLabel(d, false),
         capacity: d.capacity,
         studentCount: dormStudents.length,
         presentSum: 0,
@@ -514,6 +518,8 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
         dormId: d.dormId,
         dormName: d.dormName,
         type: d.type,
+        typeBadge: d.typeBadge,
+        typeLabel: d.typeLabel,
         capacity: d.capacity,
         studentCount: d.studentCount,
         presentCount: avgPresent,
@@ -1072,8 +1078,8 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                   <tr key={d.dormId} className="hover:bg-purple-50/40 transition-colors">
                     <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{d.dormName}</td>
                     <td className="py-2.5 px-2.5 text-center border-r border-slate-100">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${d.type === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}`}>
-                        {d.type === "male" ? "ชาย" : "หญิง"}
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${d.typeBadge || (d.type === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700")}`}>
+                        {d.typeLabel || (d.type === "male" ? "ชาย" : "หญิง")}
                       </span>
                     </td>
                     <td className="py-2.5 px-2.5 text-center font-semibold text-slate-600 border-r border-slate-100">{d.capacity}</td>

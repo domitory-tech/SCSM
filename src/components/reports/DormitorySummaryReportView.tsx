@@ -804,7 +804,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               {attendanceForDate?.checkedBy ? (
                 <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-lg border border-emerald-300 flex items-center gap-1">
                   <UserCheck className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>ผู้เช็คยอดวันนี้: {attendanceForDate.checkedBy}</span>
+                  <span>ผู้เช็คยอด: {attendanceForDate.checkedBy}</span>
                 </span>
               ) : (
                 <span className="text-[11px] font-medium text-slate-400">ยังไม่มีการเช็คยอดสำหรับวันที่เลือก</span>

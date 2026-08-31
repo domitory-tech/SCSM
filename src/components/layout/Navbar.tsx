@@ -1,8 +1,19 @@
 import React from "react";
 import { UserProfile, SystemSettings } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS } from "../../utils/dateUtils";
-import { Calendar, ChevronDown, FileSpreadsheet, LayoutDashboard, CheckCircle2, Megaphone, FileText, Users, Home, LogIn, Shield, Search } from "lucide-react";
-import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
+import {
+  Calendar,
+  ChevronDown,
+  LayoutDashboard,
+  CheckCircle2,
+  Megaphone,
+  FileText,
+  Users,
+  Home,
+  LogIn,
+  Shield,
+  Search
+} from "lucide-react";
 
 interface NavbarProps {
   currentUser: UserProfile | null;
@@ -16,15 +27,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   systemSettings = DEFAULT_SYSTEM_SETTINGS,
   onOpenSwitchUser,
-  activeTab,
-  onExportSheetsClick,
+  activeTab
 }) => {
-  const todayFormatted = new Date().toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long"
-  });
+  const now = new Date();
+  const thaiWeekdays = ["วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"];
+  const thaiMonths = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+  ];
+  const formattedThaiDate = `${thaiWeekdays[now.getDay()]} ที่ ${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543}`;
 
   const getTabInfo = () => {
     switch (activeTab) {
@@ -54,67 +65,66 @@ export const Navbar: React.FC<NavbarProps> = ({
   const TabIcon = currentTab.icon;
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
-      <div className="px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4">
-        {/* Left Breadcrumb Badge */}
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+      <div className="px-4 lg:px-8 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+        {/* Left Side: 1. System Name <h1> */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-[#A05AFF] text-white rounded-xl flex items-center justify-center shadow-md shadow-[#A05AFF]/30 shrink-0">
+          <div className="w-10 h-10 bg-[#A05AFF] text-white rounded-xl flex items-center justify-center shadow-md shadow-[#A05AFF]/25 shrink-0">
             <TabIcon className="w-5 h-5" />
           </div>
           <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <h1 className="text-base lg:text-lg font-extrabold text-slate-900 leading-tight">
-                {currentTab.label}
-              </h1>
-              <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">Overview</span>
-            </div>
-            <div className="text-[11px] text-slate-500 font-medium hidden md:flex flex-col leading-tight mt-1 space-y-0.5">
-              <span className="font-semibold text-slate-700">{systemSettings.systemNameTh}</span>
-              <span className="text-slate-500">{systemSettings.schoolNameTh}</span>
+            <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+              {systemSettings.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน"}
+              <span className="text-xs font-bold text-[#A05AFF] ml-2 font-normal hidden md:inline">
+                ({currentTab.label})
+              </span>
+            </h1>
+            <div className="text-xs text-slate-500 font-medium leading-tight mt-0.5">
+              {systemSettings.schoolNameTh || "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย"}
             </div>
           </div>
         </div>
 
-
-        {/* Right Info & Role Switcher */}
-        <div className="flex items-center gap-2.5">
-          {/* Firebase Connection Status Badge */}
-          <FirebaseStatusBadge compact={true} />
-
-          {/* Date Indicator */}
-          <div className="hidden md:flex items-center gap-2 text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
-            <Calendar className="w-4 h-4 text-[#A05AFF]" />
-            <span>{todayFormatted}</span>
+        {/* Right Side: 2. Date <div> and 3. Login Status <button> on Separate Lines */}
+        <div className="flex flex-col sm:items-end gap-1.5 shrink-0">
+          {/* 2. <div> วันที่ (คนละบรรทัด) */}
+          <div
+            id="navbar-today-date"
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1 rounded-xl self-start sm:self-end"
+          >
+            <Calendar className="w-3.5 h-3.5 text-[#A05AFF]" />
+            <span>{formattedThaiDate}</span>
           </div>
 
-          {/* Login / User Switch Profile Button */}
+          {/* 3. <button> สถานะ Login (คนละบรรทัด) */}
           {currentUser ? (
             <button
+              type="button"
+              id="btn-user-profile-status"
               onClick={onOpenSwitchUser}
-              className="flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer text-left shadow-2xs"
+              className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 active:scale-98 border border-slate-200 px-3 py-1 rounded-xl transition-all cursor-pointer text-left shadow-2xs self-start sm:self-end"
             >
               <img
                 src={currentUser.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"}
                 alt={currentUser.name}
-                className="w-8 h-8 rounded-full object-cover border-2 border-white ring-2 ring-[#A05AFF]/30 shrink-0"
+                className="w-6 h-6 rounded-full object-cover border border-white ring-1 ring-[#A05AFF]/40 shrink-0"
               />
-              <div className="hidden md:block text-xs">
-                <div className="font-extrabold text-slate-800 line-clamp-1">{currentUser.name}</div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-[#A05AFF] text-white rounded-md">
-                    ระดับ {currentUser.roleLevel}
-                  </span>
-                  <span className="text-[#9E58FF] font-semibold text-[10px]">{currentUser.roleCategoryName}</span>
-                </div>
+              <div className="text-xs">
+                <span className="font-extrabold text-slate-800">{currentUser.name}</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 bg-[#A05AFF] text-white rounded-md ml-1.5">
+                  ระดับ {currentUser.roleLevel} ({currentUser.roleCategoryName || "ผู้ใช้งาน"})
+                </span>
               </div>
-              <ChevronDown className="w-4 h-4 text-slate-400" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </button>
           ) : (
             <button
+              type="button"
+              id="btn-login-status"
               onClick={onOpenSwitchUser}
-              className="flex items-center gap-2 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-90 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer"
+              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-90 active:scale-98 text-white px-4 py-1.5 rounded-xl text-xs font-extrabold shadow-sm shadow-[#A05AFF]/25 transition-all cursor-pointer self-start sm:self-end"
             >
-              <LogIn className="w-4 h-4" />
+              <LogIn className="w-3.5 h-3.5" />
               <span>เข้าสู่ระบบ</span>
             </button>
           )}

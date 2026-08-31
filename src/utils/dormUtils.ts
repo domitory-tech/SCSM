@@ -310,3 +310,41 @@ export function isTeacherCheckedBy(
   return false;
 }
 
+/**
+ * Accurately determines dormitory type ("male" | "female" | "mixed").
+ * Checks dorm.type, dorm.gender, and analyzes the dorm name if missing.
+ */
+export function getDormType(dorm: Dormitory | null | undefined): "male" | "female" | "mixed" {
+  if (!dorm) return "male";
+  if (dorm.type === "female" || dorm.gender === "female") return "female";
+  if (dorm.type === "mixed" || dorm.gender === "mixed") return "mixed";
+  if (dorm.type === "male" || dorm.gender === "male") return "male";
+
+  // Name based deduction
+  const name = String(dorm.name || "").toLowerCase();
+  if (name.includes("หญิง") || name.includes("female") || name.includes("ญ")) return "female";
+  if (name.includes("รวม") || name.includes("mixed")) return "mixed";
+  return "male";
+}
+
+/**
+ * Returns formatted Thai label for dormitory type.
+ */
+export function getDormTypeLabel(dorm: Dormitory | null | undefined, full: boolean = false): string {
+  const t = getDormType(dorm);
+  if (t === "female") return full ? "หอพักหญิง" : "หญิง";
+  if (t === "mixed") return full ? "หอพักรวม" : "รวม";
+  return full ? "หอพักชาย" : "ชาย";
+}
+
+/**
+ * Returns Tailwind CSS badge classes for dormitory type.
+ */
+export function getDormTypeBadgeStyle(dorm: Dormitory | null | undefined): string {
+  const t = getDormType(dorm);
+  if (t === "female") return "bg-pink-100 text-pink-700 border border-pink-200";
+  if (t === "mixed") return "bg-purple-100 text-purple-700 border border-purple-200";
+  return "bg-blue-100 text-blue-700 border border-blue-200";
+}
+
+

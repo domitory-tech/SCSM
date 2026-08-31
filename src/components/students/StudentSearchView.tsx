@@ -15,7 +15,7 @@ import {
   detectStudentGender,
   formatGradeRoomShort
 } from "../../utils/dateUtils";
-import { matchStudentToDorm, findDormForStudent } from "../../utils/dormUtils";
+import { matchStudentToDorm, findDormForStudent, getDormTypeLabel } from "../../utils/dormUtils";
 import {
   printStudentSearchReport,
   printIndividualStudentHistory
@@ -915,7 +915,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                 <option value="ALL">🏢 ทุกหอพัก ({dorms.length} หอ)</option>
                 {dorms.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name} ({d.gender === "male" || d.type === "male" ? "ชาย" : "หญิง"})
+                    {d.name} ({getDormTypeLabel(d, false)})
                   </option>
                 ))}
               </select>
