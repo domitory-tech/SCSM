@@ -11,51 +11,78 @@ export function setSessionUser(user: UserProfile): void {
   try {
     const jsonStr = encodeURIComponent(JSON.stringify(user));
     // Session cookie: no Expires or Max-Age directive
-    document.cookie = `${SESSION_KEY}=${jsonStr}; path=/; SameSite=Lax`;
-    // Backup in sessionStorage for iframe or tab navigation
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    try {
+      document.cookie = `${SESSION_KEY}=${jsonStr}; path=/; SameSite=Lax`;
+    } catch (_) {}
+    // Backup in sessionStorage and localStorage
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    } catch (_) {}
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    } catch (_) {}
   } catch (e) {
-    console.error("Error setting session cookie:", e);
+    console.error("Error setting session user:", e);
   }
 }
 
 /**
- * Retrieves the logged-in user from the active Session Cookie or sessionStorage.
+ * Retrieves the logged-in user from the active Session Cookie, sessionStorage, or localStorage.
  * Returns null if the user logged out or if the browser was closed.
  */
 export function getSessionUser(): UserProfile | null {
   try {
     // 1. Check Session Cookie
-    const cookies = document.cookie.split(";");
-    for (let cookie of cookies) {
-      const [key, value] = cookie.trim().split("=");
-      if (key === SESSION_KEY && value) {
-        const decoded = decodeURIComponent(value);
-        const parsed = JSON.parse(decoded) as UserProfile;
-        if (parsed && parsed.id) return parsed;
+    try {
+      const cookies = document.cookie.split(";");
+      for (let cookie of cookies) {
+        const [key, value] = cookie.trim().split("=");
+        if (key === SESSION_KEY && value) {
+          const decoded = decodeURIComponent(value);
+          const parsed = JSON.parse(decoded) as UserProfile;
+          if (parsed && parsed.id) return parsed;
+        }
       }
-    }
+    } catch (_) {}
 
     // 2. Check sessionStorage
-    const sessionSaved = sessionStorage.getItem(SESSION_KEY);
-    if (sessionSaved) {
-      const parsed = JSON.parse(sessionSaved) as UserProfile;
-      if (parsed && parsed.id) return parsed;
-    }
+    try {
+      const sessionSaved = sessionStorage.getItem(SESSION_KEY);
+      if (sessionSaved) {
+        const parsed = JSON.parse(sessionSaved) as UserProfile;
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch (_) {}
+
+    // 3. Check localStorage
+    try {
+      const localSaved = localStorage.getItem(SESSION_KEY);
+      if (localSaved) {
+        const parsed = JSON.parse(localSaved) as UserProfile;
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch (_) {}
   } catch (e) {
-    console.error("Error reading session cookie:", e);
+    console.error("Error reading session:", e);
   }
   return null;
 }
 
 /**
- * Clears the user session cookie and sessionStorage upon explicit Logout.
+ * Clears the user session cookie, sessionStorage, and localStorage upon explicit Logout.
  */
 export function clearSessionUser(): void {
   try {
-    document.cookie = `${SESSION_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-    sessionStorage.removeItem(SESSION_KEY);
+    try {
+      document.cookie = `${SESSION_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    } catch (_) {}
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch (_) {}
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch (_) {}
   } catch (e) {
-    console.error("Error clearing session cookie:", e);
+    console.error("Error clearing session:", e);
   }
 }

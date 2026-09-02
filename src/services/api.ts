@@ -28,6 +28,7 @@ import {
 import { getTodayDateString, getPreviousDateString } from "../utils/dateUtils";
 
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
+import { DEFAULT_SYSTEM_USERS } from "../data/userProfiles";
 
 // Default System Settings for Firestore Initialization
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -318,19 +319,20 @@ export async function batchDeleteStudents(ids: string[]) {
 // ----------------------------------------------------------------------
 export async function fetchUsers(): Promise<UserProfile[]> {
   try {
-    const snapshot = await withTimeout(getDocs(collection(db, "users")), 3500);
+    const snapshot = await withTimeout(getDocs(collection(db, "users")), 2500);
     if (!snapshot.empty) {
       const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserProfile));
       const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
       setLocalCache(CACHE_KEYS.USERS, sorted);
       return sorted;
     }
-    // If empty in Firestore, return empty array (do NOT seed mock data)
-    setLocalCache(CACHE_KEYS.USERS, []);
-    return [];
+    const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
+    if (cached && cached.length > 0) return cached;
+    setLocalCache(CACHE_KEYS.USERS, DEFAULT_SYSTEM_USERS);
+    return DEFAULT_SYSTEM_USERS;
   } catch (err: any) {
     console.warn("Firestore fetchUsers offline fallback:", err?.message || err);
-    return getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+    return getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || DEFAULT_SYSTEM_USERS;
   }
 }
 

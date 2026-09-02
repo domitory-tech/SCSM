@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { UserProfile } from "../../types";
 import { Check, Shield, UserCheck, X } from "lucide-react";
 import { fetchUsers } from "../../services/api";
+import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 
 interface UserSwitchModalProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ export const UserSwitchModal: React.FC<UserSwitchModalProps> = ({
   currentUser,
   onSelectUser
 }) => {
-  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [usersList, setUsersList] = useState<UserProfile[]>(DEFAULT_SYSTEM_USERS);
 
   useEffect(() => {
     if (isOpen) {
@@ -24,8 +25,6 @@ export const UserSwitchModal: React.FC<UserSwitchModalProps> = ({
         .then((users) => {
           if (users && users.length > 0) {
             setUsersList(users);
-          } else {
-            setUsersList([]);
           }
         })
         .catch((err) => {

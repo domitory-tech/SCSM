@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { UserProfile } from "../../types";
 import { fetchUsers } from "../../services/api";
+import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 import {
   ShieldCheck,
   User,
@@ -38,9 +39,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [selectedLevel, setSelectedLevel] = useState<1 | 2 | 3>(1);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [usersList, setUsersList] = useState<UserProfile[]>(DEFAULT_SYSTEM_USERS);
+  const [selectedUserId, setSelectedUserId] = useState<string>("user-admin");
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
 
   // Direct login form fields
@@ -50,27 +51,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setIsLoadingUsers(true);
+      // Background sync from Firestore without blocking the UI
       fetchUsers()
         .then((users) => {
           if (users && users.length > 0) {
             setUsersList(users);
             const firstUser = users.find((u) => u.roleLevel === selectedLevel) || users[0];
-            if (firstUser) {
+            if (firstUser && !selectedUserId) {
               setSelectedUserId(firstUser.id);
               setSelectedLevel(firstUser.roleLevel as 1 | 2 | 3);
             }
-          } else {
-            setUsersList([]);
-            setLoginMode("DIRECT");
           }
         })
         .catch((err) => {
-          console.warn("fetchUsers error in LoginModal:", err);
-          setUsersList([]);
-        })
-        .finally(() => {
-          setIsLoadingUsers(false);
+          console.warn("fetchUsers background sync:", err);
         });
     }
   }, [isOpen]);

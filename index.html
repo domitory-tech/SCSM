@@ -11,24 +11,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
     <script>
-      // 1. Ensure trailing slash on GitHub Pages repository subpaths (e.g. /my-repo -> /my-repo/)
-      // This is essential so relative asset URLs like ./assets/index.js resolve to /my-repo/assets/ instead of /assets/ (404)
+      // Ensure trailing slash on GitHub Pages repository subpaths (e.g. /SCSM -> /SCSM/)
+      // This is essential so relative asset URLs resolve correctly to /SCSM/assets/
       (function() {
         var p = window.location.pathname;
         if (p && !p.endsWith('/') && !p.split('/').pop().includes('.')) {
           window.location.replace(window.location.protocol + '//' + window.location.host + p + '/' + window.location.search + window.location.hash);
         }
       })();
-
-      // 2. Global script loading error listener
-      window.addEventListener('error', function(e) {
-        var el = document.getElementById('loading-status-text');
-        var rec = document.getElementById('loading-recovery');
-        if (el && document.getElementById('root') && document.getElementById('root').contains(el)) {
-          el.innerHTML = '<span style="color:#ef4444;font-weight:600;">ไม่สามารถโหลดไฟล์ระบบได้</span>';
-          if (rec) rec.style.display = 'block';
-        }
-      }, true);
     </script>
   </head>
   <body class="bg-[#f2f4f9]">
@@ -36,14 +26,14 @@
       <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Sarabun', sans-serif; background-color: #f2f4f9; color: #334155; padding: 16px; text-align: center;">
         <div style="width: 44px; height: 44px; border: 3px solid #e2e8f0; border-top-color: #A05AFF; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
         <div style="margin-top: 16px; font-weight: 700; font-size: 15px; color: #4c1d95;">ระบบบริหารจัดการหอพักนักเรียน</div>
-        <div id="loading-status-text" style="margin-top: 4px; font-size: 12px; color: #64748b;">กำลังโหลดข้อมูล...</div>
+        <div id="loading-status-text" style="margin-top: 4px; font-size: 12px; color: #64748b;">กำลังโหลดระบบ...</div>
         
         <div id="loading-recovery" style="display: none; margin-top: 16px; max-width: 360px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
           <div style="font-size: 11px; color: #64748b; line-height: 1.5; margin-bottom: 10px;">
-            หากเปิดบน GitHub Pages ให้ตรวจสอบว่า URL ลงท้ายด้วย <code style="background:#f1f5f9;padding:2px 4px;border-radius:4px;">/</code> (เช่น <code style="background:#f1f5f9;padding:2px 4px;border-radius:4px;">https://username.github.io/repo/</code>)
+            หากหน้านี้ไม่แสดงผล กรุณากดปุ่มเพื่อรีโหลดหรือล้างข้อมูลแคช
           </div>
           <div style="display: flex; gap: 8px; justify-content: center;">
-            <button onclick="window.location.reload()" style="padding: 6px 12px; background: #7c3aed; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">รีโหลด</button>
+            <button onclick="window.location.reload()" style="padding: 6px 12px; background: #7c3aed; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">รีโหลดหน้านี้</button>
             <button onclick="try{localStorage.clear();sessionStorage.clear();}catch(e){}window.location.reload();" style="padding: 6px 12px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">ล้างแคช</button>
           </div>
         </div>
@@ -54,7 +44,7 @@
             if (rec && document.getElementById('root') && document.getElementById('root').contains(rec)) {
               rec.style.display = 'block';
             }
-          }, 5000);
+          }, 4000);
         </script>
         <style>
           @keyframes spin {
