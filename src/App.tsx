@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { UserProfile, SystemSettings } from "./types";
 import { DEFAULT_SYSTEM_SETTINGS, getTodayDateString } from "./utils/dateUtils";
 import { matchStudentToDorm } from "./utils/dormUtils";
+import { isMenuAccessible } from "./utils/permissionUtils";
 import { clearSessionUser, getSessionUser, setSessionUser } from "./utils/session";
 import { Navbar } from "./components/layout/Navbar";
 import { Sidebar } from "./components/layout/Sidebar";
@@ -168,17 +169,18 @@ function MainAppContent() {
     });
   }
 
-  // Navigation with 3-Level Permission Check
+  // Navigation with Dynamic Role-Based Permission Check
   const handleSelectTab = (tabId: string) => {
-    // Dashboard is open to everyone
-    if (tabId === "dashboard") {
-      setActiveTab("dashboard");
-      return;
-    }
+    // Check if the target tab is accessible for the current user/guest according to configured settings
+    const hasAccess = isMenuAccessible(tabId, currentUser, systemSettings.navigationPermissions);
 
-    // Require login for other tabs
     if (!currentUser) {
+      if (hasAccess) {
+        setActiveTab(tabId);
+        return;
+      }
       const tabLabels: Record<string, string> = {
+        "dashboard": "ภาพรวมหอพัก",
         "dorm-layout": "ผังการจัดหอพัก",
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก (20.00 น.)",
@@ -193,9 +195,20 @@ function MainAppContent() {
       return;
     }
 
-    // Check specific role level rules
-    if (tabId === "dorms" && currentUser.roleLevel !== 1 && currentUser.roleLevel !== 2) {
-      setTargetTabPrompt("จัดการหอพัก (เฉพาะระดับ 1: ผู้ดูแล หรือ ระดับ 2: เจ้าหน้าที่)");
+    // If user is logged in but the menu is not permitted for their role level
+    if (!hasAccess) {
+      const tabLabels: Record<string, string> = {
+        "dashboard": "ภาพรวมหอพัก",
+        "dorm-layout": "ผังการจัดหอพัก",
+        "student-search": "ค้นหานักเรียน",
+        "check-attendance": "เช็คยอดหอพัก",
+        "notices": "เรื่องแจ้งอบรม",
+        "reports": "รายงานสรุปประจำวัน",
+        "students": "จัดการรายชื่อนักเรียน",
+        "dorms": "จัดการหอพัก",
+        "users-db": "ตั้งค่าระบบ & ฐานข้อมูล"
+      };
+      setTargetTabPrompt(`${tabLabels[tabId] || tabId} (บัญชีของคุณระดับ ${currentUser.roleLevel} ไม่มีสิทธิ์เข้าถึงเมนูนี้ตามที่ผู้ดูแลระบบกำหนด)`);
       setIsLoginModalOpen(true);
       return;
     }

@@ -1,4 +1,5 @@
 import { SystemSettings } from "../types";
+import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "./permissionUtils";
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   schoolNameTh: "โรงเรียนพิจิตรปัญญานุกูล",
@@ -15,7 +16,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   maintenanceTitle: "แจ้งการปรับปรุงระบบและข่าวสาร",
   maintenanceMessage: "",
   showMaintenancePopup: false,
-  showMaintenanceBox: false
+  showMaintenanceBox: false,
+  navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS
 };
 
 export function getTodayDateString(): string {

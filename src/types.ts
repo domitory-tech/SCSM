@@ -134,6 +134,14 @@ export interface DailyReportData {
   }>;
 }
 
+export interface RoleNavigationPermissions {
+  // Array of accessible menu IDs for each role level or guest
+  guest?: string[]; // ผู้เยี่ยมชม (ยังไม่ล็อกอิน)
+  level3?: string[]; // ครูหอพัก / ผู้ใช้งาน
+  level2?: string[]; // เจ้าหน้าที่ส่วนกลาง
+  level1?: string[]; // ผู้ดูแลระบบ (Admin)
+}
+
 export interface SystemSettings {
   schoolNameTh: string;
   schoolNameEn: string;
@@ -151,4 +159,6 @@ export interface SystemSettings {
   maintenanceMessage?: string;
   showMaintenancePopup?: boolean;
   showMaintenanceBox?: boolean;
+  // Dynamic Navigation Access Permissions
+  navigationPermissions?: RoleNavigationPermissions;
 }

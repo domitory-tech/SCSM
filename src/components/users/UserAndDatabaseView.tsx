@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition } from "../../types";
-
+import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition, RoleNavigationPermissions } from "../../types";
+import { NavigationPermissionsTab } from "./NavigationPermissionsTab";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
 import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
@@ -28,6 +28,7 @@ import {
   Key,
   User,
   Shield,
+  ShieldCheck,
   Trash2,
   Edit,
   Plus,
@@ -143,15 +144,18 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const isStaff = currentUser?.roleLevel === 2;
   const canAccessSettings = isAdmin || isStaff;
 
-  const [activeTab, setActiveTab] = useState<"SYSTEM_SETTINGS" | "MANAGE_USERS" | "CHANGE_PASSWORD" | "CHANGE_PROFILE" | "DATABASE">(
+  const [activeTab, setActiveTab] = useState<"SYSTEM_SETTINGS" | "MANAGE_USERS" | "PERMISSIONS" | "CHANGE_PASSWORD" | "CHANGE_PROFILE" | "DATABASE">(
     canAccessSettings ? "SYSTEM_SETTINGS" : "CHANGE_PASSWORD"
   );
 
   useEffect(() => {
-    if (!canAccessSettings && (activeTab === "SYSTEM_SETTINGS" || activeTab === "MANAGE_USERS" || activeTab === "DATABASE")) {
+    if (!canAccessSettings && (activeTab === "SYSTEM_SETTINGS" || activeTab === "MANAGE_USERS" || activeTab === "PERMISSIONS" || activeTab === "DATABASE")) {
       setActiveTab("CHANGE_PASSWORD");
     }
-  }, [canAccessSettings, activeTab]);
+    if (!isAdmin && activeTab === "PERMISSIONS") {
+      setActiveTab("SYSTEM_SETTINGS");
+    }
+  }, [canAccessSettings, isAdmin, activeTab]);
 
   // System Settings Form State
   const [settingsForm, setSettingsForm] = useState<SystemSettings>(systemSettings);
@@ -1123,13 +1127,15 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             >
               {(isAdmin || isStaff) && <option value="SYSTEM_SETTINGS">1. การตั้งค่าระบบ (System Configuration)</option>}
               {(isAdmin || isStaff) && <option value="MANAGE_USERS">2. จัดการเจ้าหน้าที่ & ผู้ใช้</option>}
-              <option value="CHANGE_PASSWORD">{isAdmin || isStaff ? "3. เปลี่ยนรหัสผ่าน" : "1. เปลี่ยนรหัสผ่าน"}</option>
-              <option value="CHANGE_PROFILE">{isAdmin || isStaff ? "4. เปลี่ยนรูปโปรไฟล์" : "2. เปลี่ยนรูปโปรไฟล์"}</option>
-              {(isAdmin || isStaff) && <option value="DATABASE">5. จัดการฐานข้อมูล</option>}
+              {isAdmin && <option value="PERMISSIONS">3. การอนุญาตเข้าถึง (Access Control - เฉพาะ Admin)</option>}
+              <option value="CHANGE_PASSWORD">{isAdmin ? "4. เปลี่ยนรหัสผ่าน" : (isStaff ? "3. เปลี่ยนรหัสผ่าน" : "1. เปลี่ยนรหัสผ่าน")}</option>
+              <option value="CHANGE_PROFILE">{isAdmin ? "5. เปลี่ยนรูปโปรไฟล์" : (isStaff ? "4. เปลี่ยนรูปโปรไฟล์" : "2. เปลี่ยนรูปโปรไฟล์")}</option>
+              {(isAdmin || isStaff) && <option value="DATABASE">{isAdmin ? "6. จัดการฐานข้อมูล" : "5. จัดการฐานข้อมูล"}</option>}
             </select>
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#A05AFF]">
               {activeTab === "SYSTEM_SETTINGS" && <Settings className="w-4 h-4" />}
               {activeTab === "MANAGE_USERS" && <UserCheck className="w-4 h-4" />}
+              {activeTab === "PERMISSIONS" && <ShieldCheck className="w-4 h-4 text-[#A05AFF]" />}
               {activeTab === "CHANGE_PASSWORD" && <Key className="w-4 h-4" />}
               {activeTab === "CHANGE_PROFILE" && <ImageIcon className="w-4 h-4" />}
               {activeTab === "DATABASE" && <Database className="w-4 h-4" />}
@@ -1173,6 +1179,25 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             </button>
           )}
 
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab("PERMISSIONS")}
+              className={`px-3 lg:px-4 py-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "PERMISSIONS"
+                  ? "border-[#A05AFF] text-[#A05AFF] bg-white rounded-t-xl shadow-xs"
+                  : "border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-100/70 rounded-t-xl"
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 shrink-0 text-[#A05AFF]" />
+              <span className="flex items-center gap-1.5">
+                <span>3. การอนุญาตเข้าถึง</span>
+                <span className="text-[9px] font-black px-1.5 py-0.2 bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                  Admin
+                </span>
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => setActiveTab("CHANGE_PASSWORD")}
             className={`px-3 lg:px-4 py-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
@@ -1182,7 +1207,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             }`}
           >
             <Key className="w-4 h-4 shrink-0" />
-            <span>{isAdmin || isStaff ? "3. เปลี่ยนรหัสผ่าน" : "1. เปลี่ยนรหัสผ่าน"}</span>
+            <span>{isAdmin ? "4. เปลี่ยนรหัสผ่าน" : (isStaff ? "3. เปลี่ยนรหัสผ่าน" : "1. เปลี่ยนรหัสผ่าน")}</span>
           </button>
 
           <button
@@ -1194,7 +1219,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             }`}
           >
             <ImageIcon className="w-4 h-4 shrink-0" />
-            <span>{isAdmin || isStaff ? "4. เปลี่ยนรูปโปรไฟล์" : "2. เปลี่ยนรูปโปรไฟล์"}</span>
+            <span>{isAdmin ? "5. เปลี่ยนรูปโปรไฟล์" : (isStaff ? "4. เปลี่ยนรูปโปรไฟล์" : "2. เปลี่ยนรูปโปรไฟล์")}</span>
           </button>
 
           {(isAdmin || isStaff) && (
@@ -1207,7 +1232,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               }`}
             >
               <Database className="w-4 h-4 shrink-0" />
-              <span>5. จัดการฐานข้อมูล</span>
+              <span>{isAdmin ? "6. จัดการฐานข้อมูล" : "5. จัดการฐานข้อมูล"}</span>
             </button>
           )}
         </div>
@@ -1784,7 +1809,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           <div className="border-b border-gray-100 pb-4">
             <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <Key className="w-5 h-5 text-[#A05AFF]" />
-              <span>{isAdmin || isStaff ? "3. เปลี่ยนรหัสผ่าน (Change Password)" : "1. เปลี่ยนรหัสผ่าน (Change Password)"}</span>
+              <span>{isAdmin ? "4. เปลี่ยนรหัสผ่าน (Change Password)" : (isStaff ? "3. เปลี่ยนรหัสผ่าน (Change Password)" : "1. เปลี่ยนรหัสผ่าน (Change Password)")}</span>
             </h3>
             <p className="text-xs text-gray-500 mt-1">
               {isAdmin
@@ -1896,7 +1921,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           <div className="border-b border-gray-100 pb-4">
             <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <ImageIcon className="w-5 h-5 text-[#A05AFF]" />
-              <span>{isAdmin || isStaff ? "4. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : "2. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)"}</span>
+              <span>{isAdmin ? "5. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : (isStaff ? "4. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : "2. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)")}</span>
             </h3>
             <p className="text-xs text-gray-500 mt-1">
               เลือกรูปภาพไอคอนประจำตัว หรืออัปโหลดรูปภาพใหม่จากเครื่องลง Google Drive อัตโนมัติ
@@ -2314,14 +2339,33 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
         </div>
       )}
 
-      {/* TAB 4: Database Management (Admin & Staff) */}
+      {/* TAB 3: Access Permissions / Navigation Role Access Control (Admin Level 1 Only) */}
+      {activeTab === "PERMISSIONS" && isAdmin && (
+        <NavigationPermissionsTab
+          systemSettings={settingsForm}
+          isAdmin={isAdmin}
+          showNotification={showNotification}
+          onSavePermissions={(newPerms: RoleNavigationPermissions) => {
+            const updated = {
+              ...settingsForm,
+              navigationPermissions: newPerms
+            };
+            setSettingsForm(updated);
+            if (onUpdateSystemSettings) {
+              onUpdateSystemSettings(updated);
+            }
+          }}
+        />
+      )}
+
+      {/* TAB: Database Management (Admin & Staff) */}
       {activeTab === "DATABASE" && (isAdmin || isStaff) && (
         <div className="space-y-6">
           <div className="space-y-4">
             <div className="border-b border-gray-100 pb-3">
               <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
                 <Database className="w-5 h-5 text-[#A05AFF]" />
-                <span>4. จัดการฐานข้อมูล</span>
+                <span>{isAdmin ? "6. จัดการฐานข้อมูล" : "5. จัดการฐานข้อมูล"}</span>
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 สำรองข้อมูล กู้คืนฐานข้อมูลจากไฟล์ JSON และจัดการล้างข้อมูลในระบบ

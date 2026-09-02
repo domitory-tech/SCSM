@@ -27,6 +27,8 @@ import {
 } from "../types";
 import { getTodayDateString, getPreviousDateString } from "../utils/dateUtils";
 
+import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
+
 // Default System Settings for Firestore Initialization
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   schoolNameTh: "โรงเรียนพิจิตรปัญญานุกูล",
@@ -37,7 +39,8 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   systemNameTh: "ระบบบริหารจัดการหอพักนักเรียน",
   systemNameEn: "Student Dormitory Management System",
   systemIcon: "building",
-  lastUpdatedDate: "8 สิงหาคม พ.ศ. 2569"
+  lastUpdatedDate: "8 สิงหาคม พ.ศ. 2569",
+  navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS
 };
 
 // ----------------------------------------------------------------------

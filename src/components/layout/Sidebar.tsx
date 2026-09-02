@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { UserProfile, SystemSettings } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS, getDirectImageUrl } from "../../utils/dateUtils";
+import { isMenuAccessible } from "../../utils/permissionUtils";
 import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
 import {
   BarChart3,
@@ -127,19 +128,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  const displayedMenuItems = currentUser
-    ? currentUser.roleLevel === 3
-      ? menuItems.filter(
-          (item) =>
-            item.id === "dashboard" ||
-            item.id === "dorm-layout" ||
-            item.id === "student-search" ||
-            item.id === "check-attendance" ||
-            item.id === "reports" ||
-            item.id === "users-db"
-        )
-      : menuItems
-    : menuItems.filter((item) => item.id === "dashboard");
+  const displayedMenuItems = menuItems.filter((item) =>
+    isMenuAccessible(item.id, currentUser, systemSettings.navigationPermissions)
+  );
 
   return (
     <>
