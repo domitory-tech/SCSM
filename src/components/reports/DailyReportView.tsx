@@ -106,7 +106,29 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
     }
   };
 
-  if (isLoading || !reportData) {
+  const safeReportData: DailyReportData = reportData || {
+    success: true,
+    reportDate: selectedReportDate || getTodayDateString(),
+    summaryDate: selectedReportDate || getTodayDateString(),
+    dormitories: dorms || [],
+    grades: ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"],
+    totalMatrix: {},
+    outMatrix: {},
+    remainingMatrix: {},
+    dormTotals: {},
+    gradeTotals: {},
+    grandTotals: { total: 0, out: 0, remaining: 0 },
+    absentStudentsList: [],
+    signatories: {
+      creator: "เจ้าหน้าที่งานหอพัก",
+      headTeacher: "หัวหน้างานหอพัก",
+      deputyDirector: "รองผู้อำนวยการฝ่ายบริหารกิจการนักเรียน"
+    },
+    headTeacherNotices: [],
+    dormTeacherOrientations: []
+  };
+
+  if (isLoading && !reportData) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="flex flex-col items-center gap-3 p-6 bg-white/60 backdrop-blur-xs rounded-2xl border border-gray-100 shadow-xs max-w-sm text-center">
@@ -138,10 +160,10 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
     absentStudentsList,
     headTeacherNotices = [],
     dormTeacherOrientations = []
-  } = reportData;
+  } = safeReportData;
 
-  const formattedReportDateStr = formatThaiFullDate(reportDate);
-  const formattedSummaryDateStr = formatThaiFullDate(summaryDate);
+  const formattedReportDateStr = formatThaiFullDate(reportDate || selectedReportDate);
+  const formattedSummaryDateStr = formatThaiFullDate(summaryDate || selectedReportDate);
 
   // Reporter info from logged in user
   const reporterName = currentUser?.name?.trim() || "";
