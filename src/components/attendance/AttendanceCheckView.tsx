@@ -479,8 +479,15 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
             <h2 className="text-xl font-black text-gray-900 mt-1">
               เช็ครายชื่อนักเรียน {currentDorm?.name}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              ครูผู้เช็คยอด: <strong className="text-gray-800">{currentDorm?.teacherName}</strong> • ความจุหอพัก: {currentDorm?.capacity} คน
+            <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span>ครูผู้เช็คยอด:</span>
+              <strong className="text-gray-800">{currentDorm?.teacherName || currentUser?.name || "ยังไม่ระบุ"}</strong>
+              {(currentDorm?.teacherPhone || (currentUser?.name === currentDorm?.teacherName ? currentUser?.phone : "")) && (
+                <span className="text-purple-700 font-mono font-bold">
+                  • โทร. {currentDorm?.teacherPhone || currentUser?.phone}
+                </span>
+              )}
+              <span>• ความจุหอพัก: {currentDorm?.capacity || 80} คน</span>
             </p>
           </div>
 

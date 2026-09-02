@@ -1329,7 +1329,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
   const headTeacherNotices = notices.filter((n) => n.date === summaryDate || n.date === reportDate);
   const dormTeacherOrientations = dorms.map((dorm) => {
     const attendance = attendanceMap[dorm.id];
-    const defaultTeacherName = dorm.teachers?.[0]?.name || dorm.teacherName || "ครูประจำหอพัก";
+    const defaultTeacherName = dorm.teachers?.[0]?.name || dorm.teacherName || "";
     const ownNotes = (attendance?.teacherOrientationNotes || []).filter((n: string) => n.trim().length > 0);
     return {
       dormId: dorm.id,

@@ -149,7 +149,10 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
                   <span class="truncate ${isChecker ? "font-black text-emerald-950" : "text-slate-800"}">${t.name}</span>
                   <span class="text-[9px] px-1.5 py-0.2 rounded shrink-0 ${styleInfo.badgeClass}">${styleInfo.label}</span>
                 </div>
-                ${isChecker ? `<span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full shrink-0">ผู้เช็คยอด</span>` : ""}
+                <div class="flex items-center gap-1.5 shrink-0">
+                  ${t.phone && t.phone !== "-" ? `<span class="text-[10px] text-slate-500 font-mono">📞 ${t.phone}</span>` : ""}
+                  ${isChecker ? `<span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full">ผู้เช็คยอด</span>` : ""}
+                </div>
               </div>
             `;
           }).join("")}

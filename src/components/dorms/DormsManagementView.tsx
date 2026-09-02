@@ -86,8 +86,8 @@ export const DormsManagementView: React.FC<DormsManagementViewProps> = ({
     const teacherNameSummary =
       derivedTeachers.length > 0
         ? `${headTeacher.name}${derivedTeachers.length > 1 ? ` (และทีมงานอีก ${derivedTeachers.length - 1} ท่าน)` : ""}`
-        : "ครูประจำหอพัก";
-    const teacherPhoneSummary = headTeacher?.phone || "-";
+        : "";
+    const teacherPhoneSummary = headTeacher?.phone && headTeacher.phone !== "-" ? headTeacher.phone : "";
 
     setIsSubmitting(true);
     try {

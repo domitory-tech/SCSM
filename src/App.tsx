@@ -14,6 +14,7 @@ import { StudentManagementView } from "./components/students/StudentManagementVi
 import { StudentSearchView } from "./components/students/StudentSearchView";
 import { DailyReportView } from "./components/reports/DailyReportView";
 import { DormsManagementView } from "./components/dorms/DormsManagementView";
+import { DormLayoutView } from "./components/dorms/DormLayoutView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import {
@@ -178,6 +179,7 @@ function MainAppContent() {
     // Require login for other tabs
     if (!currentUser) {
       const tabLabels: Record<string, string> = {
+        "dorm-layout": "ผังการจัดหอพัก",
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก (20.00 น.)",
         "notices": "เรื่องแจ้งอบรม",
@@ -257,6 +259,16 @@ function MainAppContent() {
               latestNotice={notices[0]}
               onNavigateToCheck={handleNavigateToCheck}
               onNavigateToReports={handleNavigateToReports}
+              onNavigateToDormLayout={() => handleSelectTab("dorm-layout")}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === "dorm-layout" && (
+            <DormLayoutView
+              dorms={dorms}
+              students={students}
+              users={users}
               currentUser={currentUser}
             />
           )}

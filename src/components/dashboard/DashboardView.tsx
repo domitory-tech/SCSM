@@ -2,6 +2,7 @@ import React from "react";
 import { Bar, Doughnut, Line, Radar } from "react-chartjs-2";
 import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile } from "../../types";
+import { useUsersQuery } from "../../services/useDormQueries";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
 import { getDashboardDefaultDate, getTodayDateString, detectStudentGender } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
@@ -12,6 +13,7 @@ import {
 } from "../../utils/excelReportExport";
 import { exportHtmlDocument } from "../../utils/htmlReportExporter";
 import { ReasonAnalyticsCard } from "./ReasonAnalyticsCard";
+import { DormLayoutOverviewModal } from "../dorms/DormLayoutOverviewModal";
 import {
   AlertCircle,
   ArrowRight,
@@ -47,6 +49,7 @@ interface DashboardViewProps {
   latestNotice?: Notice;
   onNavigateToCheck: (dormId?: string, date?: string) => void;
   onNavigateToReports: () => void;
+  onNavigateToDormLayout?: () => void;
   currentUser?: UserProfile | null;
 }
 
@@ -60,8 +63,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   latestNotice,
   onNavigateToCheck,
   onNavigateToReports,
+  onNavigateToDormLayout,
   currentUser
 }) => {
+  const { data: queriedUsers = [] } = useUsersQuery();
+  const effectiveUsers = users && users.length > 0 ? users : queriedUsers;
+
   const [selectedDormIdsForChart, setSelectedDormIdsForChart] = React.useState<string[]>([]);
   const [chartViewMode, setChartViewMode] = React.useState<"bar" | "radar">("bar");
   const [isDormLayoutModalOpen, setIsDormLayoutModalOpen] = React.useState<boolean>(false);
@@ -1672,6 +1679,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             type="button"
             onClick={() => setIsDormLayoutModalOpen(true)}
             className="px-3.5 py-1.5 bg-[#A05AFF] hover:bg-[#8E3CFF] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ml-auto"
+            title="เปิดดูผังการจัดหอพักรวม (Popup)"
           >
             <Table className="w-4 h-4" />
             <span>ผังการจัดหอพัก</span>
@@ -2125,7 +2133,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             const checkedBy = att?.checkedBy;
             const checkedAt = att?.checkedAt;
 
-            const dormTeachers = getDormTeachers(dorm, users);
+            const dormTeachers = getDormTeachers(dorm, effectiveUsers);
             const anyTeacherMatched = Boolean(checkedBy && dormTeachers.some((t) => isTeacherCheckedBy(t.name, checkedBy)));
 
             const currentHour = new Date().getHours();
@@ -2190,6 +2198,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
 
                     <div className="space-y-1.5">
+                      {dormTeachers.length === 0 && (!isTodayChecked || !checkedBy) && (
+                        <div className="p-2.5 text-center text-xs text-slate-400 italic bg-slate-50/80 rounded-xl border border-dashed border-slate-200 font-medium">
+                          ยังไม่มีข้อมูลครูที่เพิ่มในหอพักนี้
+                        </div>
+                      )}
                       {dormTeachers.map((teacher, tIdx) => {
                         const isChecker = isTodayChecked && isTeacherCheckedBy(teacher.name, checkedBy);
                         return (
@@ -2296,239 +2309,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Modal: ผังการจัดหอพัก (Dormitory Layout Table) */}
-      {isDormLayoutModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-6xl w-full p-6 shadow-2xl border border-purple-100 space-y-4 max-h-[90vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#A05AFF] text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <Table className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">ผังการจัดหอพัก (Dormitory Layout Statistics)</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    ตารางแสดงจำนวนนักเรียนแยกตามระดับชั้น/ห้อง และเพศ (ช/ญ) ของแต่ละหอพัก
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {currentUser && (
-                  <button
-                    type="button"
-                    onClick={handleExportDormLayoutHtml}
-                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-                    title="ส่งออกผังการจัดหอพักเป็นไฟล์ HTML/CSS สำหรับเปิดดู พิมพ์ และบันทึก (.html)"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-indigo-100" />
-                    <span>ส่งออกรายงาน / พิมพ์ (HTML/CSS)</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setIsDormLayoutModalOpen(false)}
-                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Printable Container for HTML Export & Printing */}
-            <div id="dorm-layout-printable" className="overflow-y-auto max-h-[68vh] p-2 space-y-3 bg-white rounded-2xl">
-              {/* Header Component with mb-3 margin bottom */}
-              <div className="border-b border-slate-200 pb-3 mb-3 text-center space-y-1">
-                <h1 className="text-lg font-black text-slate-900">
-                  ผังการจัดหอพัก (Dormitory Layout Statistics)
-                </h1>
-                <p className="text-xs text-slate-600 font-medium">
-                  ตารางแสดงสถิติจำนวนนักเรียนแยกตามระดับชั้น/ห้อง และเพศ (ช/ญ) ของแต่ละหอพัก
-                </p>
-              </div>
-
-              {/* Table Container */}
-              <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-2xs bg-white">
-              <table className="w-full border-collapse text-xs text-slate-700">
-                <thead className="sticky top-0 z-10 text-[11px]">
-                  {/* Header Row 1: Dorm Names with Individual Colors */}
-                  <tr>
-                    {dorms.map((d, dIdx) => {
-                      const scheme = DORM_COLOR_SCHEMES[dIdx % DORM_COLOR_SCHEMES.length];
-                      return (
-                        <th
-                          key={d.id}
-                          colSpan={2}
-                          className={`py-2.5 px-3 text-center border-b border-r ${scheme.headerBg}`}
-                        >
-                          <div className="font-extrabold text-sm">{d.name}</div>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                  {/* Header Row 2: Sub-columns (ระดับชั้น, จำนวน) */}
-                  <tr className="text-[10px] uppercase tracking-wider font-extrabold">
-                    {dorms.flatMap((d, dIdx) => {
-                      const scheme = DORM_COLOR_SCHEMES[dIdx % DORM_COLOR_SCHEMES.length];
-                      return [
-                        <th
-                          key={`${d.id}-col1`}
-                          className={`py-2 px-3 text-left border-b border-r w-28 ${scheme.subHeaderBg}`}
-                        >
-                          ระดับชั้น
-                        </th>,
-                        <th
-                          key={`${d.id}-col2`}
-                          className={`py-2 px-3 text-center border-b border-r w-16 ${scheme.subHeaderBg}`}
-                        >
-                          จำนวน
-                        </th>
-                      ];
-                    })}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dormLayoutData.maxRows === 0 ? (
-                    <tr>
-                      <td colSpan={dorms.length * 2} className="py-12 text-center text-slate-400">
-                        ไม่พบข้อมูลรายชื่อนักเรียนที่มีระดับชั้นในระบบ
-                      </td>
-                    </tr>
-                  ) : (
-                    Array.from({ length: dormLayoutData.maxRows }).map((_, rIdx) => (
-                      <tr key={rIdx} className={rIdx % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
-                        {dorms.flatMap((d, dIdx) => {
-                          const scheme = DORM_COLOR_SCHEMES[dIdx % DORM_COLOR_SCHEMES.length];
-                          const item = dormLayoutData.dormActiveKeysMap[d.id]?.[rIdx];
-                          return [
-                            <td
-                              key={`${d.id}-r${rIdx}-lbl`}
-                              className={`py-2 px-3 font-semibold text-slate-800 border-r ${
-                                item ? "bg-white" : "bg-slate-50/10 opacity-30"
-                              }`}
-                            >
-                              {item ? item.key : ""}
-                            </td>,
-                            <td
-                              key={`${d.id}-r${rIdx}-val`}
-                              className={`py-2 px-3 text-center border-r ${
-                                item ? scheme.cellActive : "bg-slate-50/10 opacity-30"
-                              }`}
-                            >
-                              {item ? item.count : ""}
-                            </td>
-                          ];
-                        })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                <tfoot className="sticky bottom-0 z-10 font-black text-xs shadow-md">
-                  <tr>
-                    {dorms.flatMap((d, dIdx) => {
-                      const scheme = DORM_COLOR_SCHEMES[dIdx % DORM_COLOR_SCHEMES.length];
-                      const total = dormLayoutData.dormTotalsMap[d.id] || 0;
-                      return [
-                        <td key={`${d.id}-tot-lbl`} className={`py-2.5 px-3 border-r ${scheme.footerBg}`}>
-                          รวมทั้งหมด
-                        </td>,
-                        <td key={`${d.id}-tot-val`} className={`py-2.5 px-3 text-center border-r ${scheme.footerBg}`}>
-                          {total}
-                        </td>
-                      ];
-                    })}
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            {/* Bottom Summary Cards (Outside Table): Gender Totals & School Breakdown */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-              {/* Card 1: Total Gender Breakdown */}
-              <div className="bg-slate-900 text-white rounded-2xl p-3.5 space-y-2 shadow-sm">
-                <div className="text-xs font-black flex items-center justify-between border-b border-slate-700 pb-1.5">
-                  <span className="flex items-center gap-1.5 text-slate-100">
-                    <Users className="w-4 h-4 text-purple-400" />
-                    <span>สรุปนักเรียนในหอพักทั้งหมด</span>
-                  </span>
-                  <span className="bg-purple-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                    รวม {dormLayoutData.totalStudents} คน
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-blue-300 font-bold">นักเรียนชาย (ช)</div>
-                    <div className="text-sm font-black text-blue-100">{dormLayoutData.totalMale} คน</div>
-                  </div>
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-rose-300 font-bold">นักเรียนหญิง (ญ)</div>
-                    <div className="text-sm font-black text-rose-100">{dormLayoutData.totalFemale} คน</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: จภ.ชร. Breakdown */}
-              <div className="bg-purple-50/80 border border-purple-200 rounded-2xl p-3.5 space-y-2 shadow-xs">
-                <div className="text-xs font-extrabold text-purple-950 flex items-center justify-between border-b border-purple-200 pb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-purple-600" />
-                    <span>นักเรียน จภ.ชร. (เชียงราย)</span>
-                  </span>
-                  <span className="bg-purple-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                    รวม {dormLayoutData.pccCR_Total} คน
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-white/90 border border-purple-200 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-purple-700 font-bold">ชาย (ช)</div>
-                    <div className="text-sm font-black text-purple-900">{dormLayoutData.pccCR_Male} คน</div>
-                  </div>
-                  <div className="bg-white/90 border border-purple-200 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-purple-700 font-bold">หญิง (ญ)</div>
-                    <div className="text-sm font-black text-purple-900">{dormLayoutData.pccCR_Female} คน</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 3: จภ.ลป. Breakdown */}
-              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3.5 space-y-2 shadow-xs">
-                <div className="text-xs font-extrabold text-emerald-950 flex items-center justify-between border-b border-emerald-200 pb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                    <span>นักเรียน จภ.ลป. (ลำปาง)</span>
-                  </span>
-                  <span className="bg-emerald-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                    รวม {dormLayoutData.pccLP_Total} คน
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-white/90 border border-emerald-200 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-emerald-700 font-bold">ชาย (ช)</div>
-                    <div className="text-sm font-black text-emerald-900">{dormLayoutData.pccLP_Male} คน</div>
-                  </div>
-                  <div className="bg-white/90 border border-emerald-200 rounded-xl p-2 text-center">
-                    <div className="text-[10px] text-emerald-700 font-bold">หญิง (ญ)</div>
-                    <div className="text-sm font-black text-emerald-900">{dormLayoutData.pccLP_Female} คน</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Modal Footer */}
-            <div className="flex items-center justify-end pt-1">
-              <button
-                type="button"
-                onClick={() => setIsDormLayoutModalOpen(false)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-              >
-                ปิดหน้าต่าง
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DormLayoutOverviewModal
+        isOpen={isDormLayoutModalOpen}
+        onClose={() => setIsDormLayoutModalOpen(false)}
+        dorms={dorms}
+        students={students}
+        users={effectiveUsers}
+        currentUser={currentUser}
+      />
     </div>
   );
 };

@@ -20,7 +20,9 @@ import {
   Wrench,
   AlertTriangle,
   Bell,
-  Search
+  Search,
+  BedDouble,
+  LayoutGrid
 } from "lucide-react";
 
 interface SidebarProps {
@@ -71,17 +73,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: "dashboard",
       label: "ภาพรวมหอพัก",
       fullLabel: "ภาพรวมหอพัก",
-      icon: BarChart3,
-      badge: "เปิดทุกคน",
-      badgeColor: "bg-[#1BCFB4] text-white font-extrabold"
+      icon: BarChart3
+    },
+    {
+      id: "dorm-layout",
+      label: "ผังการจัดหอพัก",
+      fullLabel: "ผังการจัดหอพัก",
+      icon: BedDouble
     },
     {
       id: "student-search",
       label: "ค้นหานักเรียน",
       fullLabel: "ค้นหานักเรียน",
-      icon: Search,
-      badge: "ค้นหา",
-      badgeColor: "bg-[#A05AFF] text-white font-extrabold"
+      icon: Search
     },
     {
       id: "check-attendance",
@@ -128,6 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ? menuItems.filter(
           (item) =>
             item.id === "dashboard" ||
+            item.id === "dorm-layout" ||
             item.id === "student-search" ||
             item.id === "check-attendance" ||
             item.id === "reports" ||
@@ -168,15 +173,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Desktop Navigation Links - ENLARGED BEAUTIFUL FONT & TYPOGRAPHY */}
+        {/* Desktop Navigation Links */}
         <nav className="flex-1 p-3.5 space-y-1.5 overflow-y-auto">
-          <div className="px-3 py-2 text-xs font-black text-purple-900 tracking-wider uppercase flex items-center justify-between border-b border-purple-100/80 pb-2 mb-2">
-            <span className="flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-[#A05AFF]" />
-              <span>{currentUser ? "เมนูระบบ (NAVIGATION)" : "ภาพรวมหอพัก (OPEN DASHBOARD)"}</span>
-            </span>
-          </div>
-
           {displayedMenuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;

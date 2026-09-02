@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition } from "../../types";
 
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
@@ -137,6 +138,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   onDataReset,
   onUserUpdated
 }) => {
+  const queryClient = useQueryClient();
   const isAdmin = currentUser?.roleLevel === 1;
   const isStaff = currentUser?.roleLevel === 2;
   const canAccessSettings = isAdmin || isStaff;
@@ -816,6 +818,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
         await deleteUser(targetUserToDelete.id);
         showNotification("success", `ลบบัญชีผู้ใช้ ${targetUserToDelete.name} เรียบร้อยแล้ว`);
         setTargetUserToDelete(null);
+        queryClient.invalidateQueries({ queryKey: ["users"] });
+        queryClient.invalidateQueries({ queryKey: ["dorms"] });
+        queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
         loadUsersList();
       } catch (err: any) {
         showNotification("error", err.message || "เกิดข้อผิดพลาดในการลบบัญชีผู้ใช้");
@@ -980,6 +985,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       setModalSelectedFile(null);
       if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
       setModalFilePreview(null);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["dorms"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
       await loadUsersList();
     } catch (err: any) {
       console.error("Error saving user:", err);
@@ -2686,7 +2694,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         <option value="ALL">-- สำรองข้อมูลทุกหอพัก (All Dormitories) --</option>
                         {dorms.map((d) => (
                           <option key={d.id} value={d.id}>
-                            {d.name} ({d.teacherName || "ครูประจำหอพัก"})
+                            {d.name} {d.teacherName ? `(${d.teacherName})` : ""}
                           </option>
                         ))}
                       </select>
@@ -2930,7 +2938,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                             <option value="ALL">-- กู้คืนทุกหอพัก (All Dormitories) --</option>
                             {dorms.map((d) => (
                               <option key={d.id} value={d.id}>
-                                {d.name} ({d.teacherName || "ครูประจำหอพัก"})
+                                {d.name} {d.teacherName ? `(${d.teacherName})` : ""}
                               </option>
                             ))}
                           </select>
@@ -3180,7 +3188,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         <option value="ALL">-- ล้างทุกหอพัก (All Dormitories) --</option>
                         {dorms.map((d) => (
                           <option key={d.id} value={d.id}>
-                            {d.name} ({d.teacherName || "ครูประจำหอพัก"})
+                            {d.name} {d.teacherName ? `(${d.teacherName})` : ""}
                           </option>
                         ))}
                       </select>
@@ -3285,7 +3293,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                       >
                         {dorms.map((d) => (
                           <option key={d.id} value={d.id}>
-                            {d.name} ({d.teacherName || "ครูประจำหอพัก"})
+                            {d.name} {d.teacherName ? `(${d.teacherName})` : ""}
                           </option>
                         ))}
                       </select>

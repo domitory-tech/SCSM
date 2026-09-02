@@ -51,6 +51,8 @@ export interface Student {
   room: number;
   dormId: string;
   dormRoom: string;
+  dormBed?: string | number;
+  bed?: string | number;
   gender: "male" | "female";
 }
 

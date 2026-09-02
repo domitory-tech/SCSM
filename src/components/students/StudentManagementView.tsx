@@ -95,17 +95,18 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     nickname: "",
     grade: "ม.1",
     room: 1,
-    dormRoom: "101"
+    dormRoom: "101",
+    dormBed: "1"
   });
 
   // Handle Download Excel Template
   const handleDownloadExcelTemplate = () => {
-    const headers = ["เลขที่", "รหัสนักเรียน", "คำนำหน้า", "ชื่อ", "นามสกุล", "ชื่อเล่น", "ระดับชั้น", "ห้อง", "ห้องพักหอ"];
+    const headers = ["เลขที่", "รหัสนักเรียน", "คำนำหน้า", "ชื่อ", "นามสกุล", "ชื่อเล่น", "ระดับชั้น", "ห้อง", "ห้องพักหอ", "เตียง"];
     const sampleRows = [
-      [1, "66001", "นาย", "กิตติพงษ์", "สุขเจริญ", "กิต", "ม.1", 1, "101"],
-      [2, "66002", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "102"],
-      [3, "66003", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201"],
-      [4, "66004", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103"]
+      [1, "66001", "นาย", "กิตติพงษ์", "สุขเจริญ", "กิต", "ม.1", 1, "101", "1"],
+      [2, "66002", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "101", "1"],
+      [3, "66003", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201", "1"],
+      [4, "66004", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103", "2"]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
@@ -118,7 +119,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       { wch: 12 },
       { wch: 12 },
       { wch: 8 },
-      { wch: 12 }
+      { wch: 12 },
+      { wch: 10 }
     ];
 
     const wb = XLSX.utils.book_new();
@@ -145,7 +147,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         "ระดับชั้น": s.grade,
         "ห้อง": s.room,
         "หอพัก": dormObj?.name || s.dormId,
-        "ห้องพักหอ": s.dormRoom
+        "ห้องพักหอ": s.dormRoom,
+        "เตียง": s.dormBed || "-"
       };
     });
 
@@ -159,8 +162,9 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       { wch: 12 },
       { wch: 12 },
       { wch: 8 },
-      { wch: 18 },
-      { wch: 12 }
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 10 }
     ];
 
     const wb = XLSX.utils.book_new();
@@ -218,6 +222,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           let grade = "ม.1";
           let room = 1;
           let dormRoom = "101";
+          let dormBed = "";
 
           // If row has 9 or more columns or header contains "ชื่อเล่น"
           if (hasNicknameHeader || colStr.length >= 9) {
@@ -225,12 +230,14 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
             grade = colStr[6] || "ม.1";
             room = parseInt(colStr[7]) || 1;
             dormRoom = colStr[8] || "101";
+            dormBed = colStr[9] ? colStr[9].trim() : "";
           } else {
             // Legacy 8-column layout without nickname
             nickname = "";
             grade = colStr[5] || "ม.1";
             room = parseInt(colStr[6]) || 1;
             dormRoom = colStr[7] || "101";
+            dormBed = colStr[8] ? colStr[8].trim() : "";
           }
 
           if (!lastName && firstName.includes(" ")) {
@@ -249,7 +256,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               nickname,
               grade,
               room,
-              dormRoom
+              dormRoom,
+              dormBed
             });
           }
         });
@@ -292,17 +300,20 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         let grade = "ม.1";
         let room = 1;
         let dormRoom = "101";
+        let dormBed = "";
 
         if (parts.length >= 9) {
           nickname = parts[5] || "";
           grade = parts[6] || "ม.1";
           room = parseInt(parts[7]) || 1;
           dormRoom = parts[8] || "101";
+          dormBed = parts[9] ? parts[9].trim() : "";
         } else {
           nickname = "";
           grade = parts[5] || "ม.1";
           room = parseInt(parts[6]) || 1;
           dormRoom = parts[7] || "101";
+          dormBed = parts[8] ? parts[8].trim() : "";
         }
 
         parsed.push({
@@ -314,7 +325,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           nickname,
           grade,
           room,
-          dormRoom
+          dormRoom,
+          dormBed
         });
       }
     });
@@ -731,13 +743,14 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                 <th className="py-3 px-4">ระดับชั้น/ห้อง</th>
                 <th className="py-3 px-4">หอพัก</th>
                 <th className="py-3 px-4">ห้องหอ</th>
+                <th className="py-3 px-3 text-center">เตียง</th>
                 <th className="py-3 px-4 text-right">จัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-400">
+                  <td colSpan={10} className="py-12 text-center text-gray-400">
                     <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                     <span>ไม่พบรายชื่อนักเรียนในเงื่อนไขการค้นหานี้</span>
                   </td>
@@ -788,6 +801,9 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         {dormObj?.name || s.dormId}
                       </td>
                       <td className="py-3 px-4 text-gray-600">ห้อง {s.dormRoom}</td>
+                      <td className="py-3 px-3 text-center font-bold text-purple-800">
+                        {s.dormBed ? `เตียง ${s.dormBed}` : "-"}
+                      </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
@@ -992,6 +1008,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         <th className="p-2">ชื่อเล่น</th>
                         <th className="p-2">ระดับชั้น</th>
                         <th className="p-2">ห้องหอ</th>
+                        <th className="p-2 text-center">เตียง</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
@@ -1003,6 +1020,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                           <td className="p-2 font-bold text-purple-700">{st.nickname || "-"}</td>
                           <td className="p-2">{st.grade}/{st.room}</td>
                           <td className="p-2">ห้อง {st.dormRoom}</td>
+                          <td className="p-2 text-center font-bold text-purple-800">{st.dormBed ? `เตียง ${st.dormBed}` : "-"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1122,7 +1140,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1">
                     ชื่อเล่น <span className="text-gray-400 font-normal">(ถ้ามี)</span>
@@ -1131,7 +1149,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                     type="text"
                     value={newStudent.nickname || ""}
                     onChange={(e) => setNewStudent({ ...newStudent, nickname: e.target.value })}
-                    placeholder="เช่น บาส, พลอย, กิต"
+                    placeholder="เช่น บาส, กิต"
                     className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
                   />
                 </div>
@@ -1141,6 +1159,17 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                     type="text"
                     value={newStudent.dormRoom || "101"}
                     onChange={(e) => setNewStudent({ ...newStudent, dormRoom: e.target.value })}
+                    placeholder="เช่น 101"
+                    className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">เตียง</label>
+                  <input
+                    type="text"
+                    value={newStudent.dormBed || ""}
+                    onChange={(e) => setNewStudent({ ...newStudent, dormBed: e.target.value })}
+                    placeholder="เช่น 1, 2, 3"
                     className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
                   />
                 </div>

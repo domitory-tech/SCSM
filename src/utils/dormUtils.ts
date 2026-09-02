@@ -160,105 +160,103 @@ export function getPositionDotColor(pos?: string): string {
 }
 
 /**
+ * Checks if a name is a generic placeholder or system-generated text.
+ */
+export function isPlaceholderTeacherName(name?: string | null): boolean {
+  if (!name) return true;
+  const cleaned = String(name).trim();
+  if (!cleaned || cleaned === "-" || cleaned === "ยังไม่ระบุ" || cleaned === "ยังไม่มี" || cleaned === "default-1") return true;
+  if (cleaned === "ครูประจำหอพัก" || cleaned === "ครูหอพัก" || cleaned === "ผู้ดูแลหอพัก" || cleaned === "เจ้าหน้าที่หอพัก" || cleaned === "ผู้ใช้งานใหม่") return true;
+  if (cleaned.toLowerCase() === "admin" || cleaned.toLowerCase() === "administrator" || cleaned.toLowerCase() === "staff") return true;
+  if (cleaned.includes("ตัวอย่าง") || cleaned.includes("ทดสอบ") || cleaned.toLowerCase().includes("sample") || cleaned.toLowerCase().includes("demo") || cleaned.toLowerCase().includes("mock") || cleaned.toLowerCase().includes("placeholder") || cleaned.toLowerCase().includes("test")) return true;
+  if (cleaned.startsWith("ครูประจำหอ") || cleaned.startsWith("ครูหอพัก") || cleaned.startsWith("ผู้ดูแลหอ")) return true;
+  return false;
+}
+
+/**
  * Extracts and cleans the list of all teachers for a given dormitory.
- * Automatically derives teachers from User Management based on assigned dormitory permissions (allowedDormIds / dormId).
- * If no users are provided or matched, gracefully falls back to dorm.teachers or dorm.teacherName.
+ * ONLY includes real teachers from User Profiles (ชื่อผู้ใช้จากฐานข้อมูลผู้ใช้) who are assigned to this dorm.
+ * Never creates or returns system-generated fallback teacher names, and does not show unlinked teacher strings.
+ * Accurately cross-references and verifies phone numbers and positions with User Profile data.
  */
 export function getDormTeachers(dorm: Dormitory | null | undefined, users?: UserProfile[]): DormTeacher[] {
   if (!dorm) return [];
+  if (!Array.isArray(users) || users.length === 0) return [];
 
-  // 1. Derive from User Profile Management based on dorm access permissions
-  if (Array.isArray(users) && users.length > 0) {
-    const matchingUsers = users.filter((u) => {
-      if (!u || !u.name || !u.name.trim()) return false;
-      const isPrimaryDorm = u.dormId === dorm.id || (u.dormId ? isDormMatch(dorm, u.dormId) : false);
-      const isAllowedDorm = Array.isArray(u.allowedDormIds) && u.allowedDormIds.some((dId) => dId === dorm.id || isDormMatch(dorm, dId));
-      return isPrimaryDorm || isAllowedDorm;
-    });
+  const teacherMap = new Map<string, DormTeacher>();
 
-    if (matchingUsers.length > 0) {
-      // Sort in hierarchical position order:
-      // 1. ครูประธานหอพัก / HEAD_TEACHER
-      // 2. ครูรองประธานหอพัก
-      // 3. ครูหัวหน้าหอพัก
-      // 4. ครูประจำหอพัก
-      // 5. others
-      const positionWeight = (pos?: string, role?: string): number => {
-        const p = (pos || "").trim();
-        if (p.includes("ประธาน") && !p.includes("รอง")) return 1;
-        if (role === "HEAD_TEACHER") return 1;
-        if (p.includes("รองประธาน")) return 2;
-        if (p.includes("หัวหน้า")) return 3;
-        if (p.includes("ประจำ")) return 4;
-        return 5;
-      };
-
-      const sortedUsers = [...matchingUsers].sort((a, b) => {
-        const wA = positionWeight(a.dormPosition, a.role);
-        const wB = positionWeight(b.dormPosition, b.role);
-        if (wA !== wB) return wA - wB;
-        return (a.roleLevel || 3) - (b.roleLevel || 3);
-      });
-
-      return sortedUsers.map((u, index) => {
-        const rawPos = (u.dormPosition || "").trim();
-        const pos = normalizeDormPosition(rawPos, undefined, false);
-        const isHead = pos === "ครูประธานหอพัก" || u.role === "HEAD_TEACHER";
-        return {
-          id: u.id || `u-t-${index}`,
-          name: u.name.trim(),
-          phone: u.phone || dorm.teacherPhone || "-",
-          position: pos,
-          isHead
-        };
-      });
+  // Format/sanitize phone number
+  const resolvePhone = (userPhone?: string): string => {
+    if (userPhone && userPhone.trim() && userPhone.trim() !== "-") {
+      return userPhone.trim();
     }
-  }
+    return "-";
+  };
 
-  // 2. If explicit teachers array exists with valid entries
-  if (Array.isArray(dorm.teachers) && dorm.teachers.length > 0) {
-    const valid = dorm.teachers.filter((t) => t && t.name && t.name.trim().length > 0);
-    if (valid.length > 0) {
-      return valid.map((t, index) => {
-        const rawPos = (t.position || "").trim();
-        const pos = normalizeDormPosition(rawPos, t.isHead, index === 0 && t.isHead !== false);
-        const isHead = t.isHead ?? (pos === "ครูประธานหอพัก");
-        return {
-          id: t.id || `t-${index}`,
-          name: t.name.trim(),
-          phone: t.phone || dorm.teacherPhone || "-",
-          position: pos,
-          isHead
-        };
-      });
-    }
-  }
+  // Derive ONLY from real User Profiles assigned to this dormitory
+  const matchingUsers = users.filter((u) => {
+    if (!u || !u.name || isPlaceholderTeacherName(u.name)) return false;
 
-  // 3. Fallback: Parse from dorm.teacherName
-  const rawTeacherName = (dorm.teacherName || "").trim();
-  if (rawTeacherName) {
-    // If it contains multiple names separated by comma or semicolon
-    const cleanPrimaryName = rawTeacherName.replace(/\(และทีมงาน.*?\)/, "").trim();
-    return [
-      {
-        id: "head-1",
-        name: cleanPrimaryName || "ครูประจำหอพัก",
-        phone: dorm.teacherPhone || "-",
-        position: "ครูประธานหอพัก",
-        isHead: true
+    // Check if user is associated with this dorm
+    const isPrimaryDorm = u.dormId === dorm.id || (u.dormId ? isDormMatch(dorm, u.dormId) : false);
+    const isAllowedDorm = Array.isArray(u.allowedDormIds) && u.allowedDormIds.some((dId) => dId === dorm.id || isDormMatch(dorm, dId));
+
+    if (!isPrimaryDorm && !isAllowedDorm) return false;
+
+    // Must be a Dorm Teacher user (Level 3 or DORM_TEACHER role or users with teacher positions)
+    // Exclude Admin Level 1 / Staff Level 2 if they are not dorm teachers
+    if (u.roleLevel === 1 || u.roleLevel === 2) {
+      if (u.roleCategory !== "DORM_TEACHER" && !u.dormPosition) {
+        return false;
       }
-    ];
+    }
+
+    return true;
+  });
+
+  matchingUsers.forEach((u, index) => {
+    const cleanKey = cleanThaiTeacherName(u.name) || `user-${u.id || index}`;
+    const rawPos = (u.dormPosition || "").trim();
+    const pos = normalizeDormPosition(rawPos, undefined, false);
+    const isHead = pos === "ครูประธานหอพัก" || u.role === "HEAD_TEACHER" || rawPos.includes("ประธาน");
+    const phone = resolvePhone(u.phone);
+
+    teacherMap.set(cleanKey, {
+      id: u.id || `u-t-${index}`,
+      name: u.name.trim(),
+      phone,
+      position: pos,
+      isHead
+    });
+  });
+
+  // If no user-added teachers were found, return empty array (do NOT generate default fake names)
+  if (teacherMap.size === 0) {
+    return [];
   }
 
-  return [
-    {
-      id: "default-1",
-      name: "ครูประจำหอพัก",
-      phone: dorm.teacherPhone || "-",
-      position: "ครูประจำหอพัก",
-      isHead: true
-    }
-  ];
+  // Sort in hierarchical position order:
+  // 1. ครูประธานหอพัก / HEAD_TEACHER / ประธาน
+  // 2. ครูรองประธานหอพัก
+  // 3. ครูหัวหน้าหอพัก
+  // 4. ครูประจำหอพัก
+  // 5. others
+  const positionWeight = (pos?: string, isHead?: boolean): number => {
+    const p = (pos || "").trim();
+    if (p.includes("ประธาน") && !p.includes("รอง")) return 1;
+    if (isHead) return 1;
+    if (p.includes("รองประธาน")) return 2;
+    if (p.includes("หัวหน้า")) return 3;
+    if (p.includes("ประจำ")) return 4;
+    return 5;
+  };
+
+  return Array.from(teacherMap.values()).sort((a, b) => {
+    const wA = positionWeight(a.position, a.isHead);
+    const wB = positionWeight(b.position, b.isHead);
+    if (wA !== wB) return wA - wB;
+    return a.name.localeCompare(b.name, "th");
+  });
 }
 
 /**

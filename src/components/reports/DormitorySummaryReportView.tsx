@@ -227,7 +227,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
         name: "หอพัก 1",
         type: "male",
         capacity: 80,
-        teacherName: "ครูประจำหอพัก",
+        teacherName: "",
         teacherPhone: "-",
         teachers: []
       }
@@ -812,6 +812,11 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-0.5">
+              {dormTeachers.length === 0 && !attendanceForDate?.checkedBy && (
+                <div className="col-span-full p-2.5 text-center text-xs text-slate-400 italic bg-white rounded-xl border border-dashed border-slate-200 font-medium">
+                  ยังไม่มีข้อมูลครูที่เพิ่มในหอพักนี้
+                </div>
+              )}
               {dormTeachers.map((teacher, tIdx) => {
                 const isChecker = Boolean(
                   attendanceForDate?.checkedBy && isTeacherCheckedBy(teacher.name, attendanceForDate.checkedBy)

@@ -12,7 +12,8 @@ import {
   Home,
   LogIn,
   Shield,
-  Search
+  Search,
+  BedDouble
 } from "lucide-react";
 
 interface NavbarProps {
@@ -39,6 +40,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const getTabInfo = () => {
     switch (activeTab) {
+      case "dorm-layout":
+        return { label: "ผังการจัดหอพัก", icon: BedDouble };
       case "student-search":
         return { label: "ค้นหานักเรียน", icon: Search };
       case "check-attendance":

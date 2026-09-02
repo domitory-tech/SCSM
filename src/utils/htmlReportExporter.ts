@@ -112,6 +112,19 @@ export function exportHtmlDocument(
   fileName: string = "รายงานสรุปหอพักประจำวัน.html",
   orientation: "portrait" | "landscape" = "portrait"
 ): void {
+  printOrSaveElementAsPdf(elementId, fileName.replace(".html", ""), orientation);
+}
+
+/**
+ * Universal Print & PDF trigger: Opens a dedicated, pristine print preview window
+ * with auto-triggered browser Print dialog (where users can choose "Save as PDF" or print directly).
+ * Preserves all Thai fonts, background colors, custom borders, and responsive tables without distortion.
+ */
+export function printOrSaveElementAsPdf(
+  elementId: string,
+  documentTitle: string = "ผังการจัดหอพัก",
+  orientation: "portrait" | "landscape" = "portrait"
+): void {
   const element = document.getElementById(elementId);
   if (!element) {
     throw new Error(`Element with id "${elementId}" not found`);
@@ -119,19 +132,17 @@ export function exportHtmlDocument(
 
   const isLandscape = orientation === "landscape";
   const pageSize = isLandscape ? "A4 landscape" : "A4 portrait";
-  const pageMargin = isLandscape ? "6mm 8mm" : "10mm 12mm";
-  const containerWidth = isLandscape ? "297mm" : "210mm";
-  const containerMinHeight = isLandscape ? "210mm" : "297mm";
-  const containerPadding = isLandscape ? "8mm" : "12mm";
+  const pageMargin = isLandscape ? "8mm 10mm" : "10mm 12mm";
+  const containerMaxWidth = isLandscape ? "297mm" : "210mm";
 
   const htmlContent = `<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileName.replace(".html", "")}</title>
+  <title>${documentTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     @page {
       size: ${pageSize};
@@ -141,63 +152,216 @@ export function exportHtmlDocument(
       box-sizing: border-box;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      color-adjust: exact !important;
     }
     body {
       font-family: 'Sarabun', sans-serif;
-      background-color: #f1f5f9;
+      background-color: #0f172a;
       margin: 0;
-      padding: 15px;
+      padding: 0;
       color: #0f172a;
+      -webkit-font-smoothing: antialiased;
     }
-    .a4-container {
-      width: ${containerWidth};
-      max-width: 100%;
-      min-height: ${containerMinHeight};
-      margin: 0 auto;
+    .print-toolbar {
+      position: sticky;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      z-index: 9999;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .print-canvas {
+      width: 100%;
+      max-width: ${containerMaxWidth};
+      margin: 24px auto;
       background: white;
-      padding: ${containerPadding};
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-      border-radius: 8px;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
     }
     thead {
       display: table-header-group;
     }
-    tbody tr, .avoid-break {
-      page-break-inside: avoid;
-      break-inside: avoid;
+    tbody tr, .break-inside-avoid, [class*="break-inside-avoid"] {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .dorm-rooms-grid {
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 16px !important;
+    }
+    /* ในรูปแบบการพิมพ์: ย่อขนาดเฉพาะชื่อที่ยาวเกินคอลัมน์ ส่วนชื่อความยาวปกติใช้ขนาดปกติ */
+    .print-canvas .student-name-normal,
+    @media print .student-name-normal {
+      font-size: 11.5px !important;
+      line-height: 1.3 !important;
+    }
+    .print-canvas .student-name-long,
+    @media print .student-name-long {
+      font-size: 10px !important;
+      line-height: 1.15 !important;
+      letter-spacing: -0.2px !important;
+    }
+    .print-canvas .student-name-very-long,
+    @media print .student-name-very-long {
+      font-size: 8.8px !important;
+      line-height: 1.1 !important;
+      letter-spacing: -0.3px !important;
+    }
+    .print-canvas .student-nick-normal,
+    @media print .student-nick-normal {
+      font-size: 9.5px !important;
+      padding: 1px 4px !important;
+    }
+    .print-canvas .student-nick-long,
+    @media print .student-nick-long {
+      font-size: 8.5px !important;
+      padding: 1px 2.5px !important;
+    }
+    .print-canvas .student-nick-very-long,
+    @media print .student-nick-very-long {
+      font-size: 7.5px !important;
+      padding: 0.5px 2px !important;
     }
     @media print {
       body {
         background: white !important;
         padding: 0 !important;
+        margin: 0 !important;
       }
-      .a4-container {
+      .print-toolbar {
+        display: none !important;
+      }
+      .print-canvas {
         width: 100% !important;
-        min-height: auto !important;
-        box-shadow: none !important;
-        border-radius: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
         padding: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+      }
+      .dorm-rooms-grid {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 14px !important;
       }
     }
   </style>
 </head>
 <body>
-  <div class="a4-container">
+  <!-- Print Control Bar (Hidden during actual printing/PDF saving) -->
+  <div class="print-toolbar">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-500 to-indigo-500 flex items-center justify-center text-white font-black text-xs shadow-md">
+        PDF
+      </div>
+      <div>
+        <h1 class="text-white text-sm font-extrabold leading-tight">${documentTitle}</h1>
+        <p class="text-slate-400 text-xs font-medium">รูปแบบกระดาษ: ${isLandscape ? "A4 แนวนอน (Landscape)" : "A4 แนวตั้ง (Portrait)"} • ปรับแต่งสีและแบบอักษรสำหรับพิมพ์คมชัด</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <button
+        onclick="window.print()"
+        class="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-lg cursor-pointer transition-all active:scale-95"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+          <rect x="6" y="14" width="12" height="8"></rect>
+        </svg>
+        <span>พิมพ์ / บันทึกเป็น PDF (Print / Save as PDF)</span>
+      </button>
+
+      <button
+        onclick="window.close()"
+        class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+      >
+        ปิดหน้านี้
+      </button>
+    </div>
+  </div>
+
+  <!-- Printable Content Canvas -->
+  <div class="print-canvas">
     ${element.innerHTML}
   </div>
+
+  <script>
+    // Auto-launch browser print dialog after content loads
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        try {
+          window.print();
+        } catch (e) {
+          console.error("Auto print failed:", e);
+        }
+      }, 500);
+    });
+  </script>
 </body>
 </html>`;
 
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+
+  // 1. Try opening new window/tab for native print
+  const printWindow = window.open(url, "_blank");
+  if (printWindow) {
+    printWindow.focus();
+  } else {
+    // 2. If popup is blocked by browser sandbox/iframe, use invisible print iframe
+    try {
+      const existingFrame = document.getElementById("dorm-layout-print-iframe");
+      if (existingFrame) {
+        document.body.removeChild(existingFrame);
+      }
+      const iframe = document.createElement("iframe");
+      iframe.id = "dorm-layout-print-iframe";
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (e) {
+            console.error("Iframe print error", e);
+          }
+        }, 500);
+      };
+    } catch (e) {
+      // 3. Fallback: Download HTML file
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${documentTitle}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
 }
+
 
 /**
  * Combines all 3 Daily Report sheets (ใบที่ 1, ใบที่ 2, ใบที่ 3) into a single standalone HTML document.

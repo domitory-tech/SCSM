@@ -18,10 +18,13 @@ export interface Student {
   title: string;
   firstName: string;
   lastName: string;
+  nickname?: string;
   grade: string; // ม.1, ม.2, ม.3, ม.4, ม.5, ม.6
   room: number; // 1, 2, 3...
   dormId: string; // dorm-1 to dorm-6
   dormRoom: string; // e.g., 101, 102
+  dormBed?: string;
+  bed?: string | number;
   gender: "male" | "female";
 }
 

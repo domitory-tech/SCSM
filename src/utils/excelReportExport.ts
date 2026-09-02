@@ -245,7 +245,7 @@ export function exportDailyReportToExcel(
         orient.orientationNotes && orient.orientationNotes.length > 0
           ? orient.orientationNotes.join("; ")
           : "ไม่มีบันทึกเรื่องอบรม";
-      sheet3Data.push([orient.dormName, orient.checkedBy || "ครูประจำหอพัก", notes]);
+      sheet3Data.push([orient.dormName, orient.checkedBy || "-", notes]);
     });
   } else {
     sheet3Data.push(["-", "-", "ไม่มีข้อมูลเรื่องอบรมจากครูประจำหอพัก"]);
