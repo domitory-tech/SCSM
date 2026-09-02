@@ -128,24 +128,6 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
     dormTeacherOrientations: []
   };
 
-  if (isLoading && !reportData) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="flex flex-col items-center gap-3 p-6 bg-white/60 backdrop-blur-xs rounded-2xl border border-gray-100 shadow-xs max-w-sm text-center">
-          <div className="w-10 h-10 border-4 border-[#A05AFF] border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-sm font-semibold text-gray-700">กำลังประมวลผลสรุปรายงาน...</span>
-          <p className="text-xs text-gray-400">ระบบกำลังคำนวณยอดสถิติและข้อมูลการเช็คชื่อ</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-2 px-3 py-1.5 bg-[#A05AFF] hover:bg-[#8e44eb] text-white text-xs font-bold rounded-lg cursor-pointer transition-all"
-          >
-            โหลดข้อมูลใหม่
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const {
     reportDate,
     summaryDate,
