@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ระบบบริหารจัดการหอพักนักเรียน</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="alternate icon" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <script>
+      // Single Page Apps for GitHub Pages URL decode
+      (function(l) {
+        if (l.search && l.search[1] === '/' ) {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&');
+          }).join('?');
+          window.history.replaceState(null, null,
+              l.pathname.slice(0, -1) + decoded + l.hash
+          );
+        }
+      }(window.location));
+
+      // Ensure trailing slash on GitHub Pages repository subpaths (e.g. /SCSM -> /SCSM/)
+      // This is essential so relative asset URLs resolve correctly to /SCSM/assets/
+      (function() {
+        var p = window.location.pathname;
+        if (p && !p.endsWith('/') && !p.split('/').pop().includes('.')) {
+          window.location.replace(window.location.protocol + '//' + window.location.host + p + '/' + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-DQVQ-p3x.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-cSoK2Tb_.css">
+  </head>
+  <body class="bg-[#f2f4f9]">
+    <div id="root">
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Sarabun', sans-serif; background-color: #f2f4f9; color: #334155; padding: 16px; text-align: center;">
+        <div style="width: 44px; height: 44px; border: 3px solid #e2e8f0; border-top-color: #A05AFF; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <div style="margin-top: 16px; font-weight: 700; font-size: 15px; color: #4c1d95;">ระบบบริหารจัดการหอพักนักเรียน</div>
+        <div id="loading-status-text" style="margin-top: 4px; font-size: 12px; color: #64748b;">กำลังโหลดระบบ...</div>
+        
+        <div id="loading-recovery" style="display: none; margin-top: 16px; max-width: 440px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); text-align: left;">
+          <div id="loading-recovery-detail" style="font-size: 12px; color: #64748b; line-height: 1.6; margin-bottom: 12px;">
+            หากหน้านี้ไม่แสดงผล กรุณากดปุ่มเพื่อรีโหลดหรือล้างข้อมูลแคช
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button onclick="window.location.reload()" style="padding: 6px 14px; background: #7c3aed; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">รีโหลดหน้านี้</button>
+            <button onclick="try{localStorage.clear();sessionStorage.clear();}catch(e){}window.location.reload();" style="padding: 6px 14px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">ล้างแคช</button>
+          </div>
+        </div>
+
+        <script>
+          function checkGitHubPagesIssue(targetEl) {
+            var rawScript = document.querySelector('script[src*="main.tsx"]');
+            if (rawScript && targetEl) {
+              targetEl.innerHTML = '<div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; color: #991b1b; font-size: 12px; line-height: 1.6;">' +
+                '<div style="font-weight: 700; font-size: 13px; margin-bottom: 6px; color: #b91c1c;">⚠️ สาเหตุที่ระบบไม่แสดงผลบน GitHub Pages:</div>' +
+                'ขณะนี้ GitHub Pages กำลังดึงไฟล์จาก <b>Source Code ดิบ (main branch)</b> โดยตรง ซึ่งเว็บบราวเซอร์ไม่สามารถรันไฟล์ TypeScript (.tsx) ได้ครับ<br><br>' +
+                '<strong>วิธีแก้ไขให้ระบบแสดงผลได้ทันที (ตั้งค่าครั้งเดียว):</strong><br>' +
+                '1. ไปที่หน้า GitHub Repository: <code>domitory-tech/SCSM</code><br>' +
+                '2. กดแท็บ <b>Settings</b> &gt; เลือกเมนู <b>Pages</b> ทางซ้ายมือ<br>' +
+                '3. ใต้หัวข้อ <b>Build and deployment</b> &gt; ที่ช่อง <b>Source</b><br>' +
+                '&nbsp;&nbsp;&nbsp;&nbsp;ให้เปลี่ยนจาก <code>Deploy from a branch</code> เป็น <b><code>GitHub Actions</code></b><br>' +
+                '4. รอ GitHub Actions รันประมาณ 30 วินาที แล้วรีเฟรชหน้านี้ จะเปิดใช้งานได้สมบูรณ์ทันทีครับ' +
+                '</div>';
+            }
+          }
+
+          window.addEventListener('error', function(event) {
+            var rec = document.getElementById('loading-recovery');
+            var recDetail = document.getElementById('loading-recovery-detail');
+            if (rec && document.getElementById('root') && document.getElementById('root').contains(rec)) {
+              rec.style.display = 'block';
+              if (recDetail && window.location.hostname.includes('github.io')) {
+                checkGitHubPagesIssue(recDetail);
+              }
+            }
+          });
+
+          setTimeout(function() {
+            var rec = document.getElementById('loading-recovery');
+            var recDetail = document.getElementById('loading-recovery-detail');
+            if (rec && document.getElementById('root') && document.getElementById('root').contains(rec)) {
+              rec.style.display = 'block';
+              if (window.location.hostname.includes('github.io')) {
+                checkGitHubPagesIssue(recDetail);
+              }
+            }
+          }, 3500);
+        </script>
+        <style>
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        </style>
+      </div>
+    </div>
+  </body>
+</html>
+
+
