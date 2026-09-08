@@ -54,6 +54,7 @@ const REASON_CONFIGS: Record<string, { label: string; color: string; bg: string;
   SICK: { label: "ป่วย/รักษา", color: "#f43f5e", bg: "bg-rose-100", text: "text-rose-700" },
   SKILL_COMP: { label: "แข่งขันทักษะ", color: "#a855f7", bg: "bg-purple-100", text: "text-purple-700" },
   EXCHANGE: { label: "แลกเปลี่ยน", color: "#0ea5e9", bg: "bg-sky-100", text: "text-sky-700" },
+  WALK_STUDY: { label: "เดินเรียน", color: "#0d9488", bg: "bg-teal-100", text: "text-teal-700" },
   OTHER: { label: "อื่นๆ/กิจธุระ", color: "#d97706", bg: "bg-amber-100", text: "text-amber-700" }
 };
 
@@ -184,6 +185,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
       SICK: 0,
       SKILL_COMP: 0,
       EXCHANGE: 0,
+      WALK_STUDY: 0,
       OTHER: 0
     };
 

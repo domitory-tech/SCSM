@@ -1289,6 +1289,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
               if (stdRec.status === "SICK") statusLabel = "ป่วย";
               if (stdRec.status === "SKILL_COMP") statusLabel = "แข่งทักษะ";
               if (stdRec.status === "EXCHANGE") statusLabel = "นักเรียนแลกเปลี่ยน";
+              if (stdRec.status === "WALK_STUDY") statusLabel = "เดินเรียน";
               if (stdRec.status === "OTHER") statusLabel = "อื่น";
 
               absentStudentsList.push({

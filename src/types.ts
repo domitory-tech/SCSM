@@ -56,7 +56,7 @@ export interface Student {
   gender: "male" | "female";
 }
 
-export type AttendanceStatus = "ROUND_HOME" | "PRESENT" | "HOME" | "CAMP" | "SICK" | "SKILL_COMP" | "EXCHANGE" | "OTHER";
+export type AttendanceStatus = "ROUND_HOME" | "PRESENT" | "HOME" | "CAMP" | "SICK" | "SKILL_COMP" | "EXCHANGE" | "WALK_STUDY" | "OTHER";
 
 export interface StudentAttendanceRecord {
   studentId: string;

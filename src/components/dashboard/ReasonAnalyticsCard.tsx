@@ -15,7 +15,8 @@ import {
   Award,
   ArrowUpRight,
   Info,
-  Tent
+  Tent,
+  Footprints
 } from "lucide-react";
 import { DailyAttendance, Dormitory, Student } from "../../types";
 import { countStudentsInDorm } from "../../utils/dormUtils";
@@ -84,6 +85,13 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       badge: "bg-sky-100 text-sky-800",
       icon: Globe
     },
+    "เดินเรียน": {
+      bg: "#0D9488", // Teal
+      border: "border-teal-200",
+      text: "text-teal-700",
+      badge: "bg-teal-100 text-teal-800",
+      icon: Footprints
+    },
     "อื่นๆ": {
       bg: "#64748B", // Slate / Gray
       border: "border-slate-200",
@@ -112,7 +120,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       const dormId = att.dormId;
 
       if (!dateReasonMap[dStr]) {
-        dateReasonMap[dStr] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+        dateReasonMap[dStr] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
       }
       if (!dateDormOutMap[dStr]) dateDormOutMap[dStr] = {};
 
@@ -126,6 +134,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
           else if (r.status === "SICK") { dateReasonMap[dStr]["ป่วย"]++; dormOut++; }
           else if (r.status === "SKILL_COMP") { dateReasonMap[dStr]["แข่งทักษะ"]++; dormOut++; }
           else if (r.status === "EXCHANGE") { dateReasonMap[dStr]["แลกเปลี่ยน"]++; dormOut++; }
+          else if (r.status === "WALK_STUDY") { dateReasonMap[dStr]["เดินเรียน"]++; dormOut++; }
           else if (r.status === "OTHER") { dateReasonMap[dStr]["อื่นๆ"]++; dormOut++; }
         });
       }
@@ -136,7 +145,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
     const effDate = effectiveDashboardDate || new Date().toISOString().split("T")[0];
     if (todayAttendance) {
       if (!dateReasonMap[effDate]) {
-        dateReasonMap[effDate] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+        dateReasonMap[effDate] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
       }
       if (!dateDormOutMap[effDate]) dateDormOutMap[effDate] = {};
 
@@ -144,7 +153,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         const att = todayAttendance[d.id];
         if (!att) return;
         let dOut = 0;
-        const dReasons = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+        const dReasons = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
         if (att.isHomeBreak || att.status === "HOME_BREAK") {
           // Exclude round-trip home break
         } else if (att.records && Array.isArray(att.records)) {
@@ -154,6 +163,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
             else if (r.status === "SICK") { dReasons["ป่วย"]++; dOut++; }
             else if (r.status === "SKILL_COMP") { dReasons["แข่งทักษะ"]++; dOut++; }
             else if (r.status === "EXCHANGE") { dReasons["แลกเปลี่ยน"]++; dOut++; }
+            else if (r.status === "WALK_STUDY") { dReasons["เดินเรียน"]++; dOut++; }
             else if (r.status === "OTHER") { dReasons["อื่นๆ"]++; dOut++; }
           });
         }
@@ -167,13 +177,13 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
     // Day of Week historical averages calculation (0=Mon, 1=Tue, ..., 6=Sun)
     const dowReasonLists: Record<number, Record<string, number[]>> = {
-      0: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      1: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      2: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      3: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      4: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      5: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
-      6: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] },
+      0: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      1: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      2: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      3: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      4: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      5: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
+      6: { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] },
     };
 
     const dowDormOutLists: Record<string, Record<number, number[]>> = {};
@@ -189,7 +199,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
       Object.entries(rMap).forEach(([reason, cnt]) => {
         if (!dowReasonLists[dow]) {
-          dowReasonLists[dow] = { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "อื่นๆ": [] };
+          dowReasonLists[dow] = { "กลับบ้าน": [], "เข้าค่าย": [], "ป่วย": [], "แข่งทักษะ": [], "แลกเปลี่ยน": [], "เดินเรียน": [], "อื่นๆ": [] };
         }
         if (!dowReasonLists[dow][reason]) {
           dowReasonLists[dow][reason] = [];
@@ -208,7 +218,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
     const dowAvgReasons: Record<number, Record<string, number>> = {};
     for (let i = 0; i < 7; i++) {
-      dowAvgReasons[i] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+      dowAvgReasons[i] = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
       Object.keys(dowAvgReasons[i]).forEach((reason) => {
         const list = dowReasonLists[i]?.[reason] || [];
         if (list.length > 0) {
@@ -316,16 +326,18 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       const sickData: number[] = [];
       const skillData: number[] = [];
       const exchangeData: number[] = [];
+      const walkData: number[] = [];
       const otherData: number[] = [];
       const dayTotals: number[] = [];
 
       weekDates.forEach((dStr) => {
-        const rMap = processedHistoricalData.dateReasonMap[dStr] || { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+        const rMap = processedHistoricalData.dateReasonMap[dStr] || { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
         homeData.push(rMap["กลับบ้าน"] || 0);
         campData.push(rMap["เข้าค่าย"] || 0);
         sickData.push(rMap["ป่วย"] || 0);
         skillData.push(rMap["แข่งทักษะ"] || 0);
         exchangeData.push(rMap["แลกเปลี่ยน"] || 0);
+        walkData.push(rMap["เดินเรียน"] || 0);
         otherData.push(rMap["อื่นๆ"] || 0);
         const tot = (Object.values(rMap) as number[]).reduce((a: number, b: number) => a + b, 0);
         dayTotals.push(tot);
@@ -337,6 +349,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         "ป่วย": sickData.reduce((a: number, b: number) => a + b, 0),
         "แข่งทักษะ": skillData.reduce((a: number, b: number) => a + b, 0),
         "แลกเปลี่ยน": exchangeData.reduce((a: number, b: number) => a + b, 0),
+        "เดินเรียน": walkData.reduce((a: number, b: number) => a + b, 0),
         "อื่นๆ": otherData.reduce((a: number, b: number) => a + b, 0)
       };
       const totalOutSum = (Object.values(reasonTotals) as number[]).reduce((a: number, b: number) => a + b, 0);
@@ -355,6 +368,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
           { label: "ป่วย", data: sickData, backgroundColor: "#F43F5E", borderRadius: 4 },
           { label: "แข่งทักษะ", data: skillData, backgroundColor: "#8B5CF6", borderRadius: 4 },
           { label: "แลกเปลี่ยน", data: exchangeData, backgroundColor: "#0EA5E9", borderRadius: 4 },
+          { label: "เดินเรียน", data: walkData, backgroundColor: "#0D9488", borderRadius: 4 },
           { label: "อื่นๆ", data: otherData, backgroundColor: "#64748B", borderRadius: 4 }
         ]
       };
@@ -376,10 +390,10 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
 
       const endDt = new Date(effDt);
       const weekData = [
-        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 },
-        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 },
-        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 },
-        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 }
+        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 },
+        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 },
+        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 },
+        { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 }
       ];
 
       for (let w = 3; w >= 0; w--) {
@@ -401,6 +415,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       const sickData = weekData.map((w) => w["ป่วย"]);
       const skillData = weekData.map((w) => w["แข่งทักษะ"]);
       const exchangeData = weekData.map((w) => w["แลกเปลี่ยน"]);
+      const walkData = weekData.map((w) => (w as any)["เดินเรียน"] || 0);
       const otherData = weekData.map((w) => w["อื่นๆ"]);
 
       const reasonTotals = {
@@ -409,6 +424,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         "ป่วย": sickData.reduce((a, b) => a + b, 0),
         "แข่งทักษะ": skillData.reduce((a, b) => a + b, 0),
         "แลกเปลี่ยน": exchangeData.reduce((a, b) => a + b, 0),
+        "เดินเรียน": walkData.reduce((a, b) => a + b, 0),
         "อื่นๆ": otherData.reduce((a, b) => a + b, 0)
       };
       const totalOutSum = Object.values(reasonTotals).reduce((a, b) => a + b, 0);
@@ -428,6 +444,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
           { label: "ป่วย", data: sickData, backgroundColor: "#F43F5E", borderRadius: 6 },
           { label: "แข่งทักษะ", data: skillData, backgroundColor: "#8B5CF6", borderRadius: 6 },
           { label: "แลกเปลี่ยน", data: exchangeData, backgroundColor: "#0EA5E9", borderRadius: 6 },
+          { label: "เดินเรียน", data: walkData, backgroundColor: "#0D9488", borderRadius: 6 },
           { label: "อื่นๆ", data: otherData, backgroundColor: "#64748B", borderRadius: 6 }
         ]
       };
@@ -451,21 +468,23 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       const sickData: number[] = [];
       const skillData: number[] = [];
       const exchangeData: number[] = [];
+      const walkData: number[] = [];
       const otherData: number[] = [];
       const dowTotals: number[] = [];
 
       for (let i = 0; i < 7; i++) {
-        const avgR = processedHistoricalData.dowAvgReasons[i] || { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+        const avgR = processedHistoricalData.dowAvgReasons[i] || { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
         homeData.push(avgR["กลับบ้าน"] || 0);
         campData.push(avgR["เข้าค่าย"] || 0);
         sickData.push(avgR["ป่วย"] || 0);
         skillData.push(avgR["แข่งทักษะ"] || 0);
         exchangeData.push(avgR["แลกเปลี่ยน"] || 0);
+        walkData.push(avgR["เดินเรียน"] || 0);
         otherData.push(avgR["อื่นๆ"] || 0);
         dowTotals.push((Object.values(avgR) as number[]).reduce((a: number, b: number) => a + b, 0));
       }
 
-      const reasonTotals = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "อื่นๆ": 0 };
+      const reasonTotals = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "อื่นๆ": 0 };
       Object.values(processedHistoricalData.dateReasonMap).forEach((rMap) => {
         Object.keys(reasonTotals).forEach((k) => {
           (reasonTotals as any)[k] += rMap[k] || 0;
@@ -487,6 +506,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
           { label: "ป่วย", data: sickData, backgroundColor: "#F43F5E", borderRadius: 4 },
           { label: "แข่งทักษะ", data: skillData, backgroundColor: "#8B5CF6", borderRadius: 4 },
           { label: "แลกเปลี่ยน", data: exchangeData, backgroundColor: "#0EA5E9", borderRadius: 4 },
+          { label: "เดินเรียน", data: walkData, backgroundColor: "#0D9488", borderRadius: 4 },
           { label: "อื่นๆ", data: otherData, backgroundColor: "#64748B", borderRadius: 4 }
         ]
       };

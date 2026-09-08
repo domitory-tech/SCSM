@@ -271,7 +271,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       let copiedCount = 0;
 
       prevRecords.forEach((r) => {
-        // If student was NOT present (i.e. HOME, ROUND_HOME, CAMP, SICK, SKILL_COMP, EXCHANGE, OTHER)
+        // If student was NOT present (i.e. HOME, ROUND_HOME, CAMP, SICK, SKILL_COMP, EXCHANGE, WALK_STUDY, OTHER)
         if (r.status !== "PRESENT") {
           outStatusesMap.set(r.studentId, {
             status: r.status,
@@ -283,6 +283,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 ? "รอบกลับบ้าน"
                 : r.status === "CAMP"
                 ? "เข้าค่าย"
+                : r.status === "WALK_STUDY"
+                ? "เดินเรียน"
                 : "")
           });
           copiedCount++;
@@ -893,6 +895,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                               ? "bg-purple-50 border-purple-300 text-purple-800 focus:ring-2 focus:ring-purple-500"
                               : rec.status === "EXCHANGE"
                               ? "bg-sky-50 border-sky-300 text-sky-800 focus:ring-2 focus:ring-sky-500"
+                              : rec.status === "WALK_STUDY"
+                              ? "bg-teal-50 border-teal-300 text-teal-800 focus:ring-2 focus:ring-teal-500"
                               : "bg-amber-950/10 border-amber-900/30 text-amber-950 focus:ring-2 focus:ring-amber-900"
                           }`}
                         >
@@ -903,6 +907,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                           <option value="SICK" className="bg-white text-gray-800 font-medium">ป่วย</option>
                           <option value="SKILL_COMP" className="bg-white text-gray-800 font-medium">แข่งทักษะ</option>
                           <option value="EXCHANGE" className="bg-white text-gray-800 font-medium">แลกเปลี่ยน</option>
+                          <option value="WALK_STUDY" className="bg-white text-gray-800 font-medium">เดินเรียน</option>
                           <option value="OTHER" className="bg-white text-gray-800 font-medium">อื่น</option>
                         </select>
                       </td>

@@ -86,6 +86,13 @@ const ATTENDANCE_CODE_MAP: Record<string, { code: string; label: string; colorCl
     bgClass: "bg-sky-100",
     hexColor: "#0284c7"
   },
+  WALK_STUDY: {
+    code: "ดร",
+    label: "เดินเรียน",
+    colorClass: "text-teal-700 font-extrabold",
+    bgClass: "bg-teal-100",
+    hexColor: "#0d9488"
+  },
   OTHER: {
     code: "อ",
     label: "อื่นๆ",
@@ -663,6 +670,9 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                     </span>
                     <span className="font-semibold">
                       <strong className="text-sky-700 font-black">ลป</strong> = แลกเปลี่ยน
+                    </span>
+                    <span className="font-semibold">
+                      <strong className="text-teal-700 font-black">ดร</strong> = เดินเรียน
                     </span>
                     <span className="font-semibold">
                       <strong className="text-amber-900 font-black">อ</strong> = อื่นๆ

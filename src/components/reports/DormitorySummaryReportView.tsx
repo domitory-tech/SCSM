@@ -58,6 +58,7 @@ const REASON_CONFIGS: Record<string, { label: string; color: string; bg: string;
   SICK: { label: "ป่วย", color: "#f43f5e", bg: "bg-rose-100", text: "text-rose-700" },
   SKILL_COMP: { label: "แข่งทักษะ", color: "#a855f7", bg: "bg-purple-100", text: "text-purple-700" },
   EXCHANGE: { label: "แลกเปลี่ยน", color: "#0ea5e9", bg: "bg-sky-100", text: "text-sky-700" },
+  WALK_STUDY: { label: "เดินเรียน", color: "#0d9488", bg: "bg-teal-100", text: "text-teal-700" },
   OTHER: { label: "อื่น", color: "#d97706", bg: "bg-amber-100", text: "text-amber-700" }
 };
 
@@ -83,6 +84,10 @@ const getAttendanceReasonText = (status?: string, reason?: string, note?: string
   if (status === "EXCHANGE") {
     if (reason && reason.trim() && !reason.includes("นักเรียนแลกเปลี่ยน")) return reason.trim();
     return "แลกเปลี่ยน";
+  }
+  if (status === "WALK_STUDY") {
+    if (reason && reason.trim() && !reason.includes("เดินเรียน")) return reason.trim();
+    return "เดินเรียน";
   }
   if (status === "OTHER") {
     if (reason && reason.trim() && !reason.includes("อื่นๆ/ลากิจ")) return reason.trim();

@@ -137,6 +137,13 @@ export const ATTENDANCE_STATUS_MAP: Record<
     border: "border-cyan-200",
     isOut: true
   },
+  WALK_STUDY: {
+    label: "เดินเรียน",
+    bg: "bg-teal-50 text-teal-700",
+    text: "text-teal-700",
+    border: "border-teal-200",
+    isOut: true
+  },
   OTHER: {
     label: "อื่นๆ",
     bg: "bg-slate-100 text-slate-700",
@@ -1070,6 +1077,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                     <option value="CAMP">เข้าค่าย</option>
                     <option value="SKILL_COMP">แข่งขันทักษะ</option>
                     <option value="EXCHANGE">แลกเปลี่ยน</option>
+                    <option value="WALK_STUDY">เดินเรียน</option>
                     <option value="OTHER">อื่นๆ</option>
                   </select>
                 </div>

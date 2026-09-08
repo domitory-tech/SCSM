@@ -648,6 +648,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       "ป่วย": 0,
       "แข่งทักษะ": 0,
       "แลกเปลี่ยน": 0,
+      "เดินเรียน": 0,
       "อื่นๆ": 0
     };
 
@@ -663,6 +664,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           else if (r.status === "SICK") counts["ป่วย"]++;
           else if (r.status === "SKILL_COMP") counts["แข่งทักษะ"]++;
           else if (r.status === "EXCHANGE") counts["แลกเปลี่ยน"]++;
+          else if (r.status === "WALK_STUDY") counts["เดินเรียน"]++;
           else if (r.status === "OTHER") counts["อื่นๆ"]++;
         });
       }
@@ -676,6 +678,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         else if (s.reason.includes("ป่วย")) counts["ป่วย"]++;
         else if (s.reason.includes("แข่งทักษะ")) counts["แข่งทักษะ"]++;
         else if (s.reason.includes("แลกเปลี่ยน")) counts["แลกเปลี่ยน"]++;
+        else if (s.reason.includes("เดินเรียน")) counts["เดินเรียน"]++;
         else counts["อื่นๆ"]++;
       });
     }

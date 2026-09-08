@@ -67,6 +67,8 @@ export function exportAllMonthlyReportsHtml(
               colorStyle = "color: #7e22ce; font-weight: 800; font-size: 10px;";
             } else if (code === "ลป") {
               colorStyle = "color: #0284c7; font-weight: 800; font-size: 10px;";
+            } else if (code === "ดร") {
+              colorStyle = "color: #0d9488; font-weight: 800; font-size: 10px;";
             } else if (code === "อ") {
               colorStyle = "color: #78350f; font-weight: 800; font-size: 10px;";
             }
@@ -173,6 +175,7 @@ export function exportAllMonthlyReportsHtml(
             <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
             <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
             <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+            <span><strong style="color:#0d9488;">ดร</strong> = เดินเรียน</span>
             <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
           </div>
         </div>
@@ -459,7 +462,7 @@ export function exportMonthlyReportToExcel(
     // Legend Row
     rows.push([]);
     rows.push(["คำอธิบายสัญลักษณ์และอักษรย่อ:"]);
-    rows.push(["✓", "อยู่หอพัก", "รบ", "รอบกลับบ้าน", "กบ", "กลับบ้าน", "ค", "เข้าค่าย", "ป", "ป่วย", "ท", "แข่งทักษะ", "ลป", "แลกเปลี่ยน", "อ", "อื่นๆ"]);
+    rows.push(["✓", "อยู่หอพัก", "รบ", "รอบกลับบ้าน", "กบ", "กลับบ้าน", "ค", "เข้าค่าย", "ป", "ป่วย", "ท", "แข่งทักษะ", "ลป", "แลกเปลี่ยน", "ดร", "เดินเรียน", "อ", "อื่นๆ"]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
 
