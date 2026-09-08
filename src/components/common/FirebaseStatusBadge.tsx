@@ -4,7 +4,7 @@ import { checkFirebaseConnection, FIREBASE_PROJECT_INFO, FirebaseConnectionStatu
 
 interface FirebaseStatusProps {
   compact?: boolean;
-  variant?: "compact" | "sidebar" | "full";
+  variant?: "compact" | "sidebar" | "full" | "footer";
   lastDbSaveTime?: string;
 }
 
@@ -23,6 +23,29 @@ export const FirebaseStatusBadge: React.FC<FirebaseStatusProps> = ({
   });
   const [loading, setLoading] = useState(false);
 
+  const [internalLastSave, setInternalLastSave] = useState<string>(() => {
+    return lastDbSaveTime || (typeof window !== "undefined" ? localStorage.getItem("dorm_last_cloud_sync") || "" : "");
+  });
+
+  useEffect(() => {
+    if (lastDbSaveTime) {
+      setInternalLastSave(lastDbSaveTime);
+    }
+  }, [lastDbSaveTime]);
+
+  useEffect(() => {
+    const handleStorage = () => {
+      const saved = localStorage.getItem("dorm_last_cloud_sync");
+      if (saved) setInternalLastSave(saved);
+    };
+    window.addEventListener("storage", handleStorage);
+    const interval = setInterval(handleStorage, 5000);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
+  }, []);
+
   const verifyConnection = async () => {
     setLoading(true);
     const res = await checkFirebaseConnection();
@@ -35,6 +58,84 @@ export const FirebaseStatusBadge: React.FC<FirebaseStatusProps> = ({
     const interval = setInterval(verifyConnection, 60000); // Check every 60s
     return () => clearInterval(interval);
   }, []);
+
+  if (activeVariant === "footer") {
+    const displaySaveTime = internalLastSave || status.lastChecked || "เปิดใช้งานแล้ว";
+    return (
+      <div
+        id="app-footer-db-status"
+        className="w-full bg-white/95 backdrop-blur-xs text-slate-600 px-4 py-2 border-t border-slate-200/90 text-xs flex flex-wrap items-center justify-between gap-x-4 gap-y-2 select-none"
+      >
+        {/* Left / Status items */}
+        <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1">
+          {/* Main Title & Indicator */}
+          <div className="flex items-center gap-1.5 font-black text-slate-800">
+            <Database className="w-3.5 h-3.5 text-[#A05AFF] shrink-0" />
+            <span className="text-[11px] sm:text-xs">สถานะเชื่อมต่อฐานข้อมูล:</span>
+            <div className="flex items-center gap-1 pl-0.5">
+              <span className="relative flex h-2 w-2">
+                {status.isConnected && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    status.isConnected ? "bg-emerald-500" : "bg-amber-500"
+                  }`}
+                />
+              </span>
+              <span className={`text-[11px] font-extrabold ${status.isConnected ? "text-emerald-700" : "text-amber-700"}`}>
+                {status.isConnected ? "Firebase เชื่อมต่อแล้ว (Online)" : "กำลังเชื่อมต่อ..."}
+              </span>
+            </div>
+          </div>
+
+          <span className="hidden sm:inline text-slate-300">|</span>
+
+          {/* Database Name */}
+          <div className="flex items-center gap-1 text-[11px] text-slate-600 font-medium">
+            <Server className="w-3 h-3 text-amber-500 shrink-0" />
+            <span>ฐานข้อมูลหลัก:</span>
+            <span className="font-extrabold text-slate-800">Firebase Firestore</span>
+          </div>
+
+          <span className="hidden md:inline text-slate-300">|</span>
+
+          {/* Latency */}
+          <div className="flex items-center gap-1 text-[11px] text-slate-600 font-medium">
+            <Wifi className="w-3 h-3 text-emerald-500 shrink-0" />
+            <span>ความเร็ว:</span>
+            <span className="font-mono text-[11px] font-bold text-emerald-600">
+              {status.latencyMs ? `${status.latencyMs} ms` : "ปกติ"}
+            </span>
+          </div>
+
+          <span className="hidden lg:inline text-slate-300">|</span>
+
+          {/* Last save time */}
+          <div className="flex items-center gap-1 text-[11px] text-slate-600">
+            <span className="text-slate-400">อัปเดตข้อมูลล่าสุด:</span>
+            <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-md">
+              {displaySaveTime}
+            </span>
+          </div>
+        </div>
+
+        {/* Right / Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={verifyConnection}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-purple-50 active:bg-purple-100 text-slate-600 hover:text-[#A05AFF] border border-slate-200 text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50"
+            title="ทดสอบการเชื่อมต่อฐานข้อมูล"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin text-[#A05AFF]" : ""}`} />
+            <span>รีเฟรชการเชื่อมต่อ</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (activeVariant === "compact") {
     return (

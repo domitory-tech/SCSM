@@ -18,6 +18,7 @@ import { DormsManagementView } from "./components/dorms/DormsManagementView";
 import { DormLayoutView } from "./components/dorms/DormLayoutView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
+import { FirebaseStatusBadge } from "./components/common/FirebaseStatusBadge";
 import {
   useAddDormMutation,
   useAddStudentMutation,
@@ -227,7 +228,7 @@ function MainAppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f2f4f9] flex flex-col font-sans text-slate-800">
+    <div className="min-h-screen lg:h-screen bg-[#f2f4f9] flex flex-col font-sans text-slate-800 lg:overflow-hidden">
       <Navbar
         currentUser={currentUser}
         systemSettings={systemSettings}
@@ -237,9 +238,12 @@ function MainAppContent() {
         }}
         activeTab={activeTab}
         onExportSheetsClick={() => handleSelectTab("reports")}
+        onToggleMobileMenu={() => setIsOpenMobile((prev) => !prev)}
+        isMobileMenuOpen={isOpenMobile}
+        uncheckedDormsCount={uncheckedDormsCount}
       />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden items-stretch">
         <Sidebar
           activeTab={activeTab}
           setActiveTab={handleSelectTab}
@@ -252,11 +256,16 @@ function MainAppContent() {
             setTargetTabPrompt("");
             setIsLoginModalOpen(true);
           }}
+          onOpenSwitchUser={() => {
+            setTargetTabPrompt("");
+            setIsLoginModalOpen(true);
+          }}
           onOpenMaintenanceModal={() => setIsMaintenanceModalOpen(true)}
         />
 
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-24 lg:pb-8">
+        {/* Right Side Column: Main Content Area + Bottom Footer */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#f2f4f9]">
+          <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-6">
           {activeTab === "dashboard" && (
             <DashboardView
               reportData={reportData}
@@ -411,7 +420,13 @@ function MainAppContent() {
             />
           )}
         </main>
+
+        {/* Right-Side Bottom Footer: สถานะเชื่อมต่อฐานข้อมูล */}
+        <footer className="shrink-0 bg-white border-t border-slate-200 shadow-2xs z-10">
+          <FirebaseStatusBadge variant="footer" />
+        </footer>
       </div>
+    </div>
 
 
       <LoginModal
