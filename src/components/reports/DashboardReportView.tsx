@@ -4,6 +4,7 @@ import {
   DEFAULT_SYSTEM_SETTINGS,
   detectStudentGender,
   formatGradeRoomFullTitle,
+  formatGradeRoomShort,
   formatThaiFullDate,
   formatThaiMediumDate,
   formatThaiMonthYear,
@@ -12,9 +13,10 @@ import {
   THAI_DAYS_SHORT,
   THAI_MONTHS
 } from "../../utils/dateUtils";
-import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
+import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormType, getDormTypeLabel, getDormTypeBadgeStyle, formatDormShort } from "../../utils/dormUtils";
 import {
   exportDashboardReportHtml,
+  exportAbsentListOnlyHtml,
   DashboardReportExportData
 } from "../../utils/dashboardReportExporter";
 import {
@@ -330,8 +332,8 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                 studentId: s.studentId,
                 studentNo: s.no,
                 fullName: `${s.title}${s.firstName} ${s.lastName}`,
-                gradeRoom: formatGradeRoomFullTitle(s.grade, s.room),
-                dormName: dorm?.name || s.dormId,
+                gradeRoom: formatGradeRoomShort(s.grade, s.room),
+                dormName: formatDormShort(dorm?.name || s.dormId),
                 dormId: s.dormId,
                 grade: s.grade,
                 room: s.room,
@@ -648,6 +650,44 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
       };
 
       exportDashboardReportHtml(exportData, fileName);
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการส่งออกรายงาน: " + err.message);
+    }
+  };
+
+  // Handler for Standalone Absent List Table HTML/CSS Export
+  const handleExportAbsentOnlyHtml = () => {
+    try {
+      const dormObj = dorms.find((d) => d.id === filterDormId);
+      const filterDormName = filterDormId === "ALL" ? "ทุกหอพัก (หอพัก 1 - 6)" : dormObj?.name || filterDormId;
+      const filterGradeName = filterGrade === "ALL" ? "ทุกระดับชั้น (ม.1 - ม.6)" : filterGrade;
+
+      const dateSuffix =
+        periodType === "daily"
+          ? selectedDate
+          : periodType === "weekly"
+          ? `${dateList[0]}_ถึง_${dateList[dateList.length - 1]}`
+          : `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+
+      const fileName = `บันทึกประวัติการออกหอพักของนักเรียน_${periodType}_${dateSuffix}.html`;
+
+      exportAbsentListOnlyHtml(
+        {
+          periodType,
+          periodTitle,
+          dateRangeText,
+          filterDormName,
+          filterGradeName,
+          systemSettings: systemSettings || DEFAULT_SYSTEM_SETTINGS,
+          absentList,
+          signatories: {
+            creator: currentUser?.name || "เจ้าหน้าที่สำนักงาน",
+            headTeacher: "ครูหัวหน้างานหอพัก",
+            deputyDirector: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"
+          }
+        },
+        fileName
+      );
     } catch (err: any) {
       alert("เกิดข้อผิดพลาดในการส่งออกรายงาน: " + err.message);
     }
@@ -1158,8 +1198,27 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
               <span>บันทึกประวัติการออกหอพักของนักเรียนในช่วงนี้</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              แสดงข้อมูล {absentList.length} รายการ (ตามเงื่อนไข: {selectedDormLabel})
+              แสดงข้อมูลทั้งหมด {absentList.length} รายการ (ตามเงื่อนไข: {selectedDormLabel})
             </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleExportAbsentOnlyHtml}
+              className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+              title="ส่งออกเฉพาะตารางบันทึกประวัติการออกหอพักนี้ (ส่งออกรายชื่อทั้งหมดในตารางออกไปด้วย)"
+            >
+              <FileCode className="w-3.5 h-3.5 text-pink-600" />
+              <span>พิมพ์/ส่งออกเฉพาะตารางนี้ ({absentList.length} คน)</span>
+            </button>
+            <button
+              onClick={handleExportHtml}
+              className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+              title="ส่งออกรายงานแดชบอร์ดสถิติทั้งหมด (รวมรายชื่อครบถ้วนทุกรายการ)"
+            >
+              <FileCode className="w-3.5 h-3.5 text-purple-600" />
+              <span>ส่งออกรายงานแดชบอร์ดฉบับเต็ม</span>
+            </button>
           </div>
         </div>
 
@@ -1168,13 +1227,13 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-pink-50 text-pink-900 font-bold border-b border-pink-100 sticky top-0 bg-pink-50 z-10">
                 <tr>
-                  <th className="py-2.5 px-3 text-center border-r border-pink-100 w-12">ที่</th>
-                  <th className="py-2.5 px-3 text-center border-r border-pink-100 w-28">วันที่</th>
-                  <th className="py-2.5 px-3 border-r border-pink-100 w-28">รหัสนักเรียน</th>
+                  <th className="py-2.5 px-2 text-center border-r border-pink-100 w-10">ที่</th>
+                  <th className="py-2.5 px-2 text-center border-r border-pink-100 w-24">วันที่</th>
+                  <th className="py-2.5 px-2 text-center border-r border-pink-100 w-24">รหัสนักเรียน</th>
                   <th className="py-2.5 px-3 border-r border-pink-100">ชื่อ - นามสกุล</th>
-                  <th className="py-2.5 px-3 text-center border-r border-pink-100 w-28">ระดับชั้น/ห้อง</th>
-                  <th className="py-2.5 px-3 text-center border-r border-pink-100 w-28">หอพัก</th>
-                  <th className="py-2.5 px-3 text-left w-48">เหตุผล/สถานะ</th>
+                  <th className="py-2.5 px-2 text-center border-r border-pink-100 w-20">ชั้น/ห้อง</th>
+                  <th className="py-2.5 px-2 text-center border-r border-pink-100 w-20">หอพัก</th>
+                  <th className="py-2.5 px-3 text-left w-40">เหตุผล/สถานะ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1187,12 +1246,12 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                 ) : (
                   absentList.map((a, i) => (
                     <tr key={`${a.studentId}_${a.date}_${i}`} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3 text-center text-slate-400 font-medium border-r border-slate-100">{i + 1}</td>
-                      <td className="py-2.5 px-3 text-center font-medium text-slate-700 border-r border-slate-100">{a.date}</td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-800 border-r border-slate-100">{a.studentId}</td>
+                      <td className="py-2.5 px-2 text-center text-slate-400 font-medium border-r border-slate-100">{i + 1}</td>
+                      <td className="py-2.5 px-2 text-center font-medium text-slate-700 border-r border-slate-100 whitespace-nowrap">{a.date}</td>
+                      <td className="py-2.5 px-2 font-mono font-bold text-slate-800 border-r border-slate-100 whitespace-nowrap text-center">{a.studentId}</td>
                       <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{a.fullName}</td>
-                      <td className="py-2.5 px-3 text-center font-semibold text-slate-700 border-r border-slate-100">{a.gradeRoom}</td>
-                      <td className="py-2.5 px-3 text-center text-purple-700 font-bold border-r border-slate-100">{a.dormName}</td>
+                      <td className="py-2.5 px-2 text-center font-semibold text-slate-700 border-r border-slate-100 whitespace-nowrap">{a.gradeRoom}</td>
+                      <td className="py-2.5 px-2 text-center text-purple-700 font-bold border-r border-slate-100 whitespace-nowrap">{a.dormName}</td>
                       <td className="py-2.5 px-3 font-bold text-rose-600">{a.reason || a.statusLabel}</td>
                     </tr>
                   ))

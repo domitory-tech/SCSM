@@ -227,29 +227,39 @@ export function formatGradeRoomFullTitle(grade: string, room: number | string): 
 
 export function formatGradeRoomShort(grade?: string, room?: number | string): string {
   if (!grade) return room !== undefined && room !== null ? `ห้อง ${room}` : "-";
-  const trimmed = grade.trim();
-  let gradeShort = trimmed;
-  if (trimmed.startsWith("มัธยมศึกษาปีที่")) {
-    const num = trimmed.replace("มัธยมศึกษาปีที่", "").trim();
-    gradeShort = `ม.${num}`;
-  } else if (trimmed.startsWith("ประถมศึกษาปีที่")) {
-    const num = trimmed.replace("ประถมศึกษาปีที่", "").trim();
-    gradeShort = `ป.${num}`;
-  } else if (!trimmed.startsWith("ม.") && !trimmed.startsWith("ป.")) {
+  let trimmed = grade.trim();
+
+  // Normalize "มัธยมศึกษาปีที่" or "ชั้นมัธยมศึกษาปีที่"
+  trimmed = trimmed.replace(/^(ชั้น)?มัธยมศึกษาปีที่\s*/, "ม.");
+  // Normalize "ประถมศึกษาปีที่" or "ชั้นประถมศึกษาปีที่"
+  trimmed = trimmed.replace(/^(ชั้น)?ประถมศึกษาปีที่\s*/, "ป.");
+  // Remove space after "ม." or "ป." e.g. "ม. 1" -> "ม.1"
+  trimmed = trimmed.replace(/^([มป])\.\s+/, "$1.");
+
+  // If already contains slash e.g. "ม.1/1" or "1/1"
+  if (trimmed.includes("/")) {
+    trimmed = trimmed.replace(/\s*\/\s*/, "/");
+    if (!trimmed.startsWith("ม.") && !trimmed.startsWith("ป.")) {
+      const matchNum = trimmed.match(/^(\d+)\/(\d+)$/);
+      if (matchNum) {
+        return `ม.${matchNum[1]}/${matchNum[2]}`;
+      }
+    }
+    return trimmed;
+  }
+
+  // If numeric only e.g. "1" -> "ม.1"
+  if (!trimmed.startsWith("ม.") && !trimmed.startsWith("ป.")) {
     const num = trimmed.replace(/[^0-9]/g, "");
     if (num) {
-      gradeShort = `ม.${num}`;
+      trimmed = `ม.${num}`;
     }
   }
 
-  if (gradeShort.includes("/")) {
-    return gradeShort;
-  }
-
   if (room !== undefined && room !== null && String(room).trim() !== "") {
-    return `${gradeShort}/${room}`;
+    return `${trimmed}/${String(room).trim()}`;
   }
-  return gradeShort;
+  return trimmed;
 }
 
 /**

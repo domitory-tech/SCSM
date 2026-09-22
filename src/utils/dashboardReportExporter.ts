@@ -1,5 +1,6 @@
 import { SystemSettings } from "../types";
-import { formatThaiFullDate, formatThaiMonthYear } from "./dateUtils";
+import { formatThaiFullDate, formatThaiMonthYear, formatGradeRoomShort } from "./dateUtils";
+import { formatDormShort } from "./dormUtils";
 
 export interface DashboardReportExportData {
   periodType: "daily" | "weekly" | "monthly";
@@ -185,24 +186,94 @@ export function exportDashboardReportHtml(
     </li>
   `).join("");
 
-  // Build absent list rows (up to 30 items)
-  const absentRowsHtml = absentList.length === 0 ? `
-    <tr>
-      <td colspan="7" class="py-4 text-center text-slate-400 text-xs font-medium">
-        ไม่มีข้อมูลนักเรียนออกหอพักในช่วงเวลานี้ (นักเรียนอยู่ครบทุกคน)
-      </td>
-    </tr>
-  ` : absentList.slice(0, 35).map((a, i) => `
-    <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
-      <td class="py-1.5 px-2.5 text-center font-medium text-slate-500 border-r border-slate-200">${i + 1}</td>
-      <td class="py-1.5 px-2.5 text-center font-medium text-slate-700 border-r border-slate-200">${a.date}</td>
-      <td class="py-1.5 px-2.5 font-mono font-bold text-slate-800 border-r border-slate-200">${a.studentId}</td>
-      <td class="py-1.5 px-2.5 font-bold text-slate-900 border-r border-slate-200">${a.fullName}</td>
-      <td class="py-1.5 px-2.5 text-center text-slate-700 border-r border-slate-200">${a.gradeRoom}</td>
-      <td class="py-1.5 px-2.5 text-center text-purple-700 font-semibold border-r border-slate-200">${a.dormName}</td>
-      <td class="py-1.5 px-2.5 font-bold text-rose-600">${a.reason || a.statusLabel}</td>
-    </tr>
-  `).join("");
+  // Build absent list pages for ALL records (no truncation/limit)
+  const ROWS_PER_PAGE = 25;
+  const totalAbsentPages = absentList.length > 0 ? Math.ceil(absentList.length / ROWS_PER_PAGE) : 0;
+  const totalReportPages = 1 + totalAbsentPages;
+
+  const absentPagesHtml = Array.from({ length: totalAbsentPages }).map((_, pageIdx) => {
+    const startIdx = pageIdx * ROWS_PER_PAGE;
+    const endIdx = Math.min((pageIdx + 1) * ROWS_PER_PAGE, absentList.length);
+    const pageChunk = absentList.slice(startIdx, endIdx);
+    const pageNumInReport = pageIdx + 2;
+    const isLastAbsentPage = pageIdx === totalAbsentPages - 1;
+
+    const rowsHtml = pageChunk.map((a, i) => `
+      <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
+        <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
+        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${a.studentId}</td>
+        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
+        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
+        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${a.reason || a.statusLabel}</td>
+      </tr>
+    `).join("");
+
+    return `
+    <!-- PAGE ${pageNumInReport}: Detailed Absence Records Log (${pageIdx + 1}/${totalAbsentPages}) -->
+    <div class="report-page flex flex-col justify-between">
+      <div>
+        <div class="border-b-2 border-pink-600 pb-2 mb-3 flex items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+              <h2 class="text-base font-black text-slate-900 whitespace-nowrap">
+                บัญชีรายชื่อนักเรียนที่มีการออกหอพัก
+              </h2>
+            </div>
+            <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
+              ${dateRangeText}
+            </p>
+            <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
+              ${filterDormName} • ${filterGradeName}
+            </p>
+            <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+              ${schoolName} • ${systemTitle}
+            </p>
+          </div>
+          <div class="text-right text-xs text-slate-600 shrink-0">
+            <div class="bg-pink-50 px-3 py-1.5 rounded-lg border border-pink-100 flex items-center gap-2 whitespace-nowrap">
+              <span>ลำดับที่ <strong class="text-pink-700">${startIdx + 1} - ${endIdx}</strong> จาก <strong class="text-slate-900">${absentList.length}</strong> คน</span>
+              <span class="text-pink-300">|</span>
+              <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-pink-100 text-pink-700 border border-pink-200">
+                หน้ารายชื่อ ${pageIdx + 1} / ${totalAbsentPages}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <table class="text-xs border border-slate-300 rounded-lg overflow-hidden mb-4 w-full">
+          <thead class="bg-pink-700 text-white font-bold">
+            <tr>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-10">ที่</th>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-20">วันที่</th>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-24">รหัสนักเรียน</th>
+              <th class="py-2 px-3 text-left border-r border-pink-600">ชื่อ - นามสกุล</th>
+              <th class="py-2 px-1.5 text-center border-r border-pink-600 w-16">ชั้น/ห้อง</th>
+              <th class="py-2 px-1.5 text-center border-r border-pink-600 w-16">หอพัก</th>
+              <th class="py-2 px-2.5 text-left w-36">เหตุผล/สถานะ</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200 mt-2">
+          <div>
+            เอกสารแนบท้ายรายงานแดชบอร์ดสถิติหอพัก • ${schoolName} (รายชื่อครบถ้วน ${absentList.length} รายการ)
+          </div>
+          <div class="font-medium">
+            หน้า ${pageNumInReport} จาก ${totalReportPages}
+          </div>
+        </div>
+      </div>
+    </div>
+    `;
+  }).join("");
 
   const htmlContent = `<!DOCTYPE html>
 <html lang="th">
@@ -463,43 +534,335 @@ export function exportDashboardReportHtml(
           ${insightsHtml}
         </ul>
       </div>
-    </div>
 
-    <!-- PAGE 2: Detailed Absence Records Log (If there are absent students) -->
-    ${absentList.length > 0 ? `
-    <div class="report-page">
-      <div class="border-b border-slate-300 pb-2 mb-4 flex items-center justify-between">
+      <!-- Page 1 Footer -->
+      <div class="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200 mt-2">
         <div>
-          <h2 class="text-base font-black text-slate-900">บัญชีรายชื่อนักเรียนที่มีการออกหอพัก (${periodTitle})</h2>
-          <p class="text-xs text-purple-700 font-bold">${dateRangeText}</p>
+          ${schoolName} • ${systemTitle}
         </div>
-        <div class="text-right text-xs text-slate-500">
-          แสดงรายการ <strong class="text-slate-900">${Math.min(absentList.length, 35)}</strong> จากทั้งหมด <strong>${absentList.length}</strong> รายการ
+        <div class="font-medium">
+          หน้า 1 จาก ${totalReportPages}
         </div>
-      </div>
-
-      <table class="text-xs border border-slate-300 rounded-lg overflow-hidden mb-6">
-        <thead class="bg-pink-700 text-white font-bold">
-          <tr>
-            <th class="py-2 px-2.5 text-center border-r border-pink-600 w-10">ที่</th>
-            <th class="py-2 px-2.5 text-center border-r border-pink-600 w-24">วันที่</th>
-            <th class="py-2 px-2.5 text-center border-r border-pink-600 w-24">รหัสนักเรียน</th>
-            <th class="py-2 px-2.5 text-left border-r border-pink-600">ชื่อ - นามสกุล</th>
-            <th class="py-2 px-2.5 text-center border-r border-pink-600 w-24">ชั้น/ห้อง</th>
-            <th class="py-2 px-2.5 text-center border-r border-pink-600 w-28">หอพัก</th>
-            <th class="py-2 px-2.5 text-left w-36">เหตุผล/สถานะ</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${absentRowsHtml}
-        </tbody>
-      </table>
-
-      <div class="text-[11px] text-slate-500 text-right">
-        เอกสารแนบท้ายรายงานแดชบอร์ดสถิติหอพัก • ${schoolName}
       </div>
     </div>
-    ` : ""}
+
+    <!-- Absence Records Log Pages (All records included) -->
+    ${absentPagesHtml}
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export interface AbsentListOnlyExportData {
+  periodType?: "daily" | "weekly" | "monthly";
+  periodTitle: string;
+  dateRangeText: string;
+  filterDormName: string;
+  filterGradeName: string;
+  systemSettings: SystemSettings;
+  absentList: Array<{
+    date: string;
+    studentId: string;
+    fullName: string;
+    gradeRoom: string;
+    dormName: string;
+    reason: string;
+    statusLabel: string;
+  }>;
+  signatories?: {
+    creator: string;
+    headTeacher: string;
+    deputyDirector: string;
+  };
+}
+
+/**
+ * Generates and downloads a standalone official HTML/CSS report specifically for
+ * the absence history list ("บันทึกประวัติการออกหอพักของนักเรียนในช่วงนี้")
+ * guaranteeing that 100% of names are cleanly exported and paginated for A4 printing.
+ */
+export function exportAbsentListOnlyHtml(
+  data: AbsentListOnlyExportData,
+  fileName: string = "บันทึกประวัติการออกหอพักของนักเรียน.html"
+): void {
+  const {
+    periodTitle,
+    dateRangeText,
+    filterDormName,
+    filterGradeName,
+    systemSettings,
+    absentList,
+    signatories
+  } = data;
+
+  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
+  const systemTitle = systemSettings?.systemTitleTh || "ระบบบริหารจัดการหอพักนักเรียน";
+
+  const ROWS_PER_PAGE = 26;
+  const totalPages = absentList.length > 0 ? Math.ceil(absentList.length / ROWS_PER_PAGE) : 1;
+
+  const pagesHtml = absentList.length === 0 ? `
+    <div class="report-page flex flex-col justify-between">
+      <div>
+        <div class="border-b-2 border-pink-600 pb-3 mb-4 flex items-start justify-between">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-rose-500 shrink-0"></span>
+              <h1 class="text-lg font-black text-slate-900 whitespace-nowrap">
+                บัญชีรายชื่อนักเรียนที่มีการออกหอพัก
+              </h1>
+            </div>
+            <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
+              ${dateRangeText}
+            </p>
+            <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
+              ${filterDormName} • ${filterGradeName}
+            </p>
+            <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+              ${schoolName} • ${systemTitle}
+            </p>
+          </div>
+          <div class="text-right text-xs text-slate-400">
+            <div>${schoolName}</div>
+            <div>${systemTitle}</div>
+          </div>
+        </div>
+
+        <div class="py-16 text-center text-slate-400 border border-dashed border-slate-300 rounded-xl">
+          <p class="text-base font-bold text-slate-600">ไม่มีข้อมูลนักเรียนออกหอพักในช่วงเวลานี้</p>
+          <p class="text-xs text-slate-400 mt-1">นักเรียนอยู่หอพักครบทุกคนตามเงื่อนไขที่เลือก</p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200 mt-4">
+        <div>${schoolName} • ${systemTitle}</div>
+        <div>หน้า 1 จาก 1</div>
+      </div>
+    </div>
+  ` : Array.from({ length: totalPages }).map((_, pageIdx) => {
+    const startIdx = pageIdx * ROWS_PER_PAGE;
+    const endIdx = Math.min((pageIdx + 1) * ROWS_PER_PAGE, absentList.length);
+    const chunk = absentList.slice(startIdx, endIdx);
+    const isLastPage = pageIdx === totalPages - 1;
+
+    const rowsHtml = chunk.map((a, i) => `
+      <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
+        <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
+        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${a.studentId}</td>
+        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
+        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
+        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${a.reason || a.statusLabel}</td>
+      </tr>
+    `).join("");
+
+    return `
+    <div class="report-page flex flex-col justify-between">
+      <div>
+        <!-- Page Header -->
+        <div class="border-b-2 border-pink-600 pb-2.5 mb-3 flex items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+              <h1 class="text-base font-black text-slate-900 whitespace-nowrap">
+                บัญชีรายชื่อนักเรียนที่มีการออกหอพัก
+              </h1>
+            </div>
+            <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
+              ${dateRangeText}
+            </p>
+            <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
+              ${filterDormName} • ${filterGradeName}
+            </p>
+            <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+              ${schoolName} • ${systemTitle}
+            </p>
+          </div>
+          <div class="text-right text-xs text-slate-600 shrink-0">
+            <div class="bg-pink-50 px-3 py-1.5 rounded-lg border border-pink-100 flex items-center gap-2 whitespace-nowrap">
+              <span>แสดงลำดับที่ <strong class="text-pink-700">${startIdx + 1} - ${endIdx}</strong> จาก <strong class="text-slate-900">${absentList.length}</strong> คน</span>
+              <span class="text-pink-300">|</span>
+              <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-pink-100 text-pink-700 border border-pink-200">
+                หน้ารายชื่อ ${pageIdx + 1} / ${totalPages}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <table class="text-xs border border-slate-300 rounded-lg overflow-hidden mb-3 w-full">
+          <thead class="bg-pink-700 text-white font-bold">
+            <tr>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-10">ที่</th>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-20">วันที่</th>
+              <th class="py-2 px-2 text-center border-r border-pink-600 w-24">รหัสนักเรียน</th>
+              <th class="py-2 px-3 text-left border-r border-pink-600">ชื่อ - นามสกุล</th>
+              <th class="py-2 px-1.5 text-center border-r border-pink-600 w-16">ชั้น/ห้อง</th>
+              <th class="py-2 px-1.5 text-center border-r border-pink-600 w-16">หอพัก</th>
+              <th class="py-2 px-2.5 text-left w-36">เหตุผล/สถานะ</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200 mt-2">
+          <div>
+            รายงานบันทึกประวัติการออกหอพัก • ${schoolName} (รายชื่อครบถ้วน ${absentList.length} รายการ)
+          </div>
+          <div class="font-medium">
+            หน้า ${pageIdx + 1} จาก ${totalPages}
+          </div>
+        </div>
+      </div>
+    </div>
+    `;
+  }).join("");
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${fileName.replace(".html", "")}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 8mm 10mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: 'Sarabun', sans-serif;
+      background-color: #0f172a;
+      margin: 0;
+      padding: 0;
+      color: #0f172a;
+    }
+    @media screen {
+      .screen-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: rgba(15, 23, 42, 0.94);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 12px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .page-wrapper {
+        padding: 24px 16px 60px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      }
+      .report-page {
+        width: 210mm;
+        max-width: 100%;
+        min-height: 297mm;
+        background: #ffffff;
+        padding: 28px 32px;
+        border-radius: 12px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.35);
+      }
+    }
+    @media print {
+      .screen-toolbar {
+        display: none !important;
+      }
+      body {
+        background: white !important;
+        padding: 0 !important;
+      }
+      .page-wrapper {
+        padding: 0 !important;
+        display: block !important;
+      }
+      .report-page {
+        width: 100% !important;
+        min-height: auto !important;
+        background: white !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        page-break-after: always;
+        break-after: page;
+      }
+      .report-page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    thead {
+      display: table-header-group;
+    }
+    tbody tr, .avoid-break {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <!-- Top Screen Toolbar -->
+  <div class="screen-toolbar">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-pink-600 to-rose-600 flex items-center justify-center text-white font-black text-sm shadow-md">
+        📋
+      </div>
+      <div>
+        <h1 class="text-white text-sm font-bold leading-tight">
+          บันทึกประวัติการออกหอพักของนักเรียนในช่วงนี้ (${periodTitle})
+        </h1>
+        <p class="text-slate-400 text-xs font-normal">
+          ${dateRangeText} • รวมรายชื่อทั้งหมด ${absentList.length} รายการ
+        </p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <button
+        onclick="window.print()"
+        class="inline-flex items-center gap-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-lg cursor-pointer transition-all active:scale-95"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+          <rect x="6" y="14" width="12" height="8"></rect>
+        </svg>
+        <span>พิมพ์รายงาน / บันทึก PDF (A4)</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="page-wrapper">
+    ${pagesHtml}
   </div>
 </body>
 </html>`;

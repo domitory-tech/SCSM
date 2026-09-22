@@ -345,4 +345,22 @@ export function getDormTypeBadgeStyle(dorm: Dormitory | null | undefined): strin
   return "bg-blue-100 text-blue-700 border border-blue-200";
 }
 
+/**
+ * Returns abbreviated dormitory name, e.g. "หอ 1", "หอ 2", "หอ 6".
+ */
+export function formatDormShort(dormNameOrObj?: string | Dormitory | null): string {
+  if (!dormNameOrObj) return "-";
+  const name = typeof dormNameOrObj === "string" ? dormNameOrObj : dormNameOrObj.name || dormNameOrObj.id || "";
+  const trimmed = name.trim();
+  const match = trimmed.match(/\d+/);
+  if (match) {
+    return `หอ ${match[0]}`;
+  }
+  if (trimmed.startsWith("หอพัก")) {
+    return trimmed.replace(/^หอพัก\s*/, "หอ ");
+  }
+  return trimmed || "-";
+}
+
+
 
