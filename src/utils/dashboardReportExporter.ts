@@ -259,6 +259,22 @@ export function exportDashboardReportHtml(
             ${rowsHtml}
           </tbody>
         </table>
+
+        <!-- Symbols Legend -->
+        <div class="mb-2 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] text-slate-700 flex items-center justify-between flex-wrap gap-2">
+          <span class="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
+          <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
+          <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
+          <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
+          <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
+          <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
+          <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
+          <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+          <span><strong style="color:#0d9488;">ดร</strong> = เดินเรียน</span>
+          <span><strong style="color:#ffffff; background-color:#27272a; padding:1px 4px; border-radius:3px;">ปภ</strong> = ปิดภาคเรียน</span>
+          <span><strong style="color:#e11d48;">ยห</strong> = ยังไม่เข้าหอพัก</span>
+          <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
+        </div>
       </div>
 
       <div>
@@ -526,13 +542,29 @@ export function exportDashboardReportHtml(
       </div>
 
       <!-- Automated Insights & Observations -->
-      <div class="p-3 bg-purple-50/70 border border-purple-200 rounded-xl mb-4">
+      <div class="p-3 bg-purple-50/70 border border-purple-200 rounded-xl mb-3">
         <h2 class="text-xs font-bold text-purple-900 mb-1.5 flex items-center gap-1.5">
           <span>💡 บทวิเคราะห์และข้อค้นพบจากข้อมูล (Automated Insights)</span>
         </h2>
         <ul class="space-y-1">
           ${insightsHtml}
         </ul>
+      </div>
+
+      <!-- Symbols Legend -->
+      <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-700 flex items-center justify-between flex-wrap gap-2 mb-2">
+        <span class="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
+        <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
+        <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
+        <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
+        <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
+        <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
+        <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
+        <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+        <span><strong style="color:#0d9488;">ดร</strong> = เดินเรียน</span>
+        <span><strong style="color:#ffffff; background-color:#27272a; padding:1px 4px; border-radius:3px;">ปภ</strong> = ปิดภาคเรียน</span>
+        <span><strong style="color:#e11d48;">ยห</strong> = ยังไม่เข้าหอพัก</span>
+        <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
       </div>
 
       <!-- Page 1 Footer -->
@@ -717,6 +749,22 @@ export function exportAbsentListOnlyHtml(
             ${rowsHtml}
           </tbody>
         </table>
+
+        <!-- Symbols Legend -->
+        <div class="mb-2 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] text-slate-700 flex items-center justify-between flex-wrap gap-2">
+          <span class="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
+          <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
+          <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
+          <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
+          <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
+          <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
+          <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
+          <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+          <span><strong style="color:#0d9488;">ดร</strong> = เดินเรียน</span>
+          <span><strong style="color:#ffffff; background-color:#27272a; padding:1px 4px; border-radius:3px;">ปภ</strong> = ปิดภาคเรียน</span>
+          <span><strong style="color:#e11d48;">ยห</strong> = ยังไม่เข้าหอพัก</span>
+          <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
+        </div>
       </div>
 
       <div>

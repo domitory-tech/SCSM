@@ -144,6 +144,20 @@ export const ATTENDANCE_STATUS_MAP: Record<
     border: "border-teal-200",
     isOut: true
   },
+  SEMESTER_BREAK: {
+    label: "ปิดภาคเรียน",
+    bg: "bg-neutral-800 text-white",
+    text: "text-neutral-800",
+    border: "border-neutral-700",
+    isOut: true
+  },
+  NOT_ARRIVED: {
+    label: "ยังไม่เข้าหอพัก",
+    bg: "bg-red-50 text-red-700",
+    text: "text-red-700",
+    border: "border-red-200",
+    isOut: true
+  },
   OTHER: {
     label: "อื่นๆ",
     bg: "bg-slate-100 text-slate-700",
@@ -1078,6 +1092,8 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                     <option value="SKILL_COMP">แข่งขันทักษะ</option>
                     <option value="EXCHANGE">แลกเปลี่ยน</option>
                     <option value="WALK_STUDY">เดินเรียน</option>
+                    <option value="SEMESTER_BREAK">ปิดภาคเรียน</option>
+                    <option value="NOT_ARRIVED">ยังไม่เข้าหอพัก</option>
                     <option value="OTHER">อื่นๆ</option>
                   </select>
                 </div>

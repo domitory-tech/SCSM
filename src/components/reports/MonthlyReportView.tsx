@@ -93,6 +93,20 @@ const ATTENDANCE_CODE_MAP: Record<string, { code: string; label: string; colorCl
     bgClass: "bg-teal-100",
     hexColor: "#0d9488"
   },
+  SEMESTER_BREAK: {
+    code: "ปภ",
+    label: "ปิดภาคเรียน",
+    colorClass: "text-white font-extrabold",
+    bgClass: "bg-neutral-800 text-white",
+    hexColor: "#27272a"
+  },
+  NOT_ARRIVED: {
+    code: "ยห",
+    label: "ยังไม่เข้าหอพัก",
+    colorClass: "text-rose-700 font-extrabold",
+    bgClass: "bg-rose-100",
+    hexColor: "#e11d48"
+  },
   OTHER: {
     code: "อ",
     label: "อื่นๆ",
@@ -648,7 +662,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                 {/* 3. Footer: Abbreviations Legend (No Signatures) */}
                 <div className="mt-3 pt-2 border-t border-slate-300 avoid-break print:border-t-0">
                   {/* Legend of Abbreviations */}
-                  <div className="flex items-center justify-between flex-wrap gap-2 text-[10px] text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-200 print:bg-transparent print:border-slate-300">
+                  <div className="flex items-center justify-between flex-wrap gap-2 text-[10px] text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200 print:bg-transparent print:border-slate-300">
                     <span className="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
                     <span className="font-semibold">
                       <strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก
@@ -673,6 +687,12 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                     </span>
                     <span className="font-semibold">
                       <strong className="text-teal-700 font-black">ดร</strong> = เดินเรียน
+                    </span>
+                    <span className="font-semibold">
+                      <strong className="text-white font-black bg-neutral-800 px-1 py-0.5 rounded">ปภ</strong> = ปิดภาคเรียน
+                    </span>
+                    <span className="font-semibold">
+                      <strong className="text-rose-700 font-black">ยห</strong> = ยังไม่เข้าหอพัก
                     </span>
                     <span className="font-semibold">
                       <strong className="text-amber-900 font-black">อ</strong> = อื่นๆ

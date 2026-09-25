@@ -451,6 +451,23 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
         ✓ นักเรียนในหอพักอยู่ครบทุกคน (ไม่มีรายการออกหอพักในวันที่เลือก)
       </div>
     `}
+    <!-- Section 6: คำอธิบายสัญลักษณ์และอักษรย่อ -->
+    <div class="mt-4 pt-3 border-t border-slate-200" style="page-break-inside: avoid; break-inside: avoid;">
+      <div class="flex items-center justify-between flex-wrap gap-2 text-[10px] text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+        <span class="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
+        <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
+        <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
+        <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
+        <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
+        <span><strong style="color:#e11d48;">ป</strong> = ป่วย</span>
+        <span><strong style="color:#7e22ce;">ท</strong> = แข่งทักษะ</span>
+        <span><strong style="color:#0284c7;">ลป</strong> = แลกเปลี่ยน</span>
+        <span><strong style="color:#0d9488;">ดร</strong> = เดินเรียน</span>
+        <span><strong style="color:#ffffff; background-color:#27272a; padding:1px 4px; border-radius:3px;">ปภ</strong> = ปิดภาคเรียน</span>
+        <span><strong style="color:#e11d48;">ยห</strong> = ยังไม่เข้าหอพัก</span>
+        <span><strong style="color:#78350f;">อ</strong> = อื่นๆ</span>
+      </div>
+    </div>
   </div>
 </body>
 </html>`;

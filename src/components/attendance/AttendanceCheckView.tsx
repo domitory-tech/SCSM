@@ -26,6 +26,7 @@ import {
   Bell,
   BookOpen,
   Calendar,
+  CalendarOff,
   Check,
   CheckCircle2,
   Clock,
@@ -42,6 +43,7 @@ import {
   UserCheck,
   UserMinus,
   Users,
+  UserX,
   X
 } from "lucide-react";
 
@@ -158,7 +160,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     }
   }, [accessibleDorms, selectedDormId, onDormChange]);
 
-  // Initialize records from existing attendanceData or default to all PRESENT (ไม่ต้องดึงรายชื่อเมื่อวานมาแสดงอัตโนมัติ)
+  // Initialize records from existing attendanceData or default to all PRESENT (with semester break auto-carry)
   useEffect(() => {
     if (attendanceData && attendanceData.records && attendanceData.records.length > 0) {
       setIsHomeBreak(attendanceData.isHomeBreak || false);
@@ -173,16 +175,22 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
         map[rec.studentId] = rec;
       });
 
-      // Default missing students to PRESENT
+      // Check if all existing records are SEMESTER_BREAK
+      const isAllBreak = attendanceData.records.every((r) => r.status === "SEMESTER_BREAK");
+
+      // Default missing students
       students.forEach((s) => {
         if (!map[s.studentId]) {
-          map[s.studentId] = { studentId: s.studentId, status: "PRESENT" };
+          map[s.studentId] = {
+            studentId: s.studentId,
+            status: isAllBreak ? "SEMESTER_BREAK" : "PRESENT",
+            reason: isAllBreak ? "ปิดภาคเรียน" : ""
+          };
         }
       });
       setRecordsMap(map);
     } else {
       setIsHomeBreak(false);
-      // เรื่องที่อบรมให้ครูหอพักกรอกใหม่สำหรับวันนี้
       setOrientationNotes([""]);
 
       // กำหนดให้นักเรียนทุกคนเริ่มต้นเป็น "อยู่หอพัก" (PRESENT) ตามปกติ
@@ -191,6 +199,43 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
         map[s.studentId] = { studentId: s.studentId, status: "PRESENT" };
       });
       setRecordsMap(map);
+
+      // ตรวจสอบว่าวันก่อนหน้ามีสถานะปิดภาคเรียนหรือไม่ หากมีให้ปรับเป็นปิดภาคเรียนอัตโนมัติ
+      let isCancelled = false;
+      const prevDateStr = getPreviousDateString(selectedDate);
+      fetchAttendance(prevDateStr, selectedDormId).then((prevAtt: any) => {
+        if (isCancelled) return;
+        if (prevAtt && prevAtt.records && prevAtt.records.length > 0) {
+          const hasBreak = prevAtt.records.some((r: any) => r.status === "SEMESTER_BREAK");
+          if (hasBreak) {
+            const allBreak = prevAtt.records.every((r: any) => r.status === "SEMESTER_BREAK");
+            const breakStudents = new Set<string>();
+            prevAtt.records.forEach((r: any) => {
+              if (r.status === "SEMESTER_BREAK") breakStudents.add(r.studentId);
+            });
+
+            setRecordsMap((curr) => {
+              const updated = { ...curr };
+              students.forEach((s) => {
+                if (allBreak || breakStudents.has(s.studentId)) {
+                  updated[s.studentId] = {
+                    studentId: s.studentId,
+                    status: "SEMESTER_BREAK",
+                    reason: "ปิดภาคเรียน",
+                    note: "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)"
+                  };
+                }
+              });
+              return updated;
+            });
+            setOrientationNotes(["ปิดภาคเรียน"]);
+          }
+        }
+      }).catch(() => {});
+
+      return () => {
+        isCancelled = true;
+      };
     }
   }, [attendanceData, students, selectedDormId, selectedDate]);
 
@@ -230,6 +275,24 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     const updated: Record<string, StudentAttendanceRecord> = {};
     students.forEach((s) => {
       updated[s.studentId] = { studentId: s.studentId, status: "HOME", reason: "กลับบ้าน" };
+    });
+    setRecordsMap(updated);
+  };
+
+  // Mark all students semester break ("ปิดภาคเรียน")
+  const handleMarkAllSemesterBreak = () => {
+    const updated: Record<string, StudentAttendanceRecord> = {};
+    students.forEach((s) => {
+      updated[s.studentId] = { studentId: s.studentId, status: "SEMESTER_BREAK", reason: "ปิดภาคเรียน" };
+    });
+    setRecordsMap(updated);
+  };
+
+  // Mark all students not arrived ("ยังไม่เข้าหอพัก")
+  const handleMarkAllNotArrived = () => {
+    const updated: Record<string, StudentAttendanceRecord> = {};
+    students.forEach((s) => {
+      updated[s.studentId] = { studentId: s.studentId, status: "NOT_ARRIVED", reason: "ยังไม่เข้าหอพัก" };
     });
     setRecordsMap(updated);
   };
@@ -285,6 +348,10 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 ? "เข้าค่าย"
                 : r.status === "WALK_STUDY"
                 ? "เดินเรียน"
+                : r.status === "SEMESTER_BREAK"
+                ? "ปิดภาคเรียน"
+                : r.status === "NOT_ARRIVED"
+                ? "ยังไม่เข้าหอพัก"
                 : "")
           });
           copiedCount++;
@@ -467,6 +534,12 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   // Calculate summary stats for current view
   const presentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => r.status === "PRESENT").length;
   const absentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => r.status !== "PRESENT").length;
+
+  const isAutoCheckedSemesterBreak = useMemo(() => {
+    const hasAutoCheckNote = attendanceData?.checkedBy?.includes("ระบบอัตโนมัติ") || false;
+    const hasBreakRecord = Object.values(recordsMap).some((r) => r.status === "SEMESTER_BREAK");
+    return hasAutoCheckNote && hasBreakRecord;
+  }, [attendanceData, recordsMap]);
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
@@ -689,6 +762,28 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
         </div>
       </div>
 
+      {/* Auto Semester Break Notice Banner */}
+      {isAutoCheckedSemesterBreak && (
+        <div className="bg-neutral-900 border border-neutral-800 text-white p-4 rounded-2xl flex items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-2.5 bg-neutral-800 rounded-xl text-neutral-200 border border-neutral-700 shrink-0 mt-0.5 sm:mt-0">
+              <CalendarOff className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-sm text-neutral-100">ระบบเช็คยอด "ปิดภาคเรียน" ให้อัตโนมัติ</span>
+                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-300 border border-neutral-700 font-medium">
+                  ต่อเนื่องจากวันก่อนหน้า
+                </span>
+              </div>
+              <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                ระบบได้ทำการเช็คยอดสถานะปิดภาคเรียนให้อัตโนมัติในวันถัดไปจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอด หากเปิดภาคเรียนหรือต้องการเปลี่ยนแปลงสถานะ สามารถปรับสถานะนักเรียนและกดปุ่ม "บันทึกข้อมูล" ได้ทันที
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Attendance List Section */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
         {/* Action Header Bar */}
@@ -734,6 +829,30 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               >
                 <UserMinus className="w-4 h-4" />
                 <span>กลับบ้านทุกคน</span>
+              </button>
+
+              {/* Quick Mark All Semester Break (Dark Gray Button) */}
+              <button
+                type="button"
+                onClick={handleMarkAllSemesterBreak}
+                disabled={isHomeBreak || !canEditAttendance || isCopyingYesterday}
+                className="bg-neutral-800 hover:bg-neutral-900 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                title="กำหนดสถานะนักเรียนทุกคนในหอพักเป็นปิดภาคเรียน"
+              >
+                <CalendarOff className="w-4 h-4 text-neutral-300" />
+                <span>ปิดภาคเรียนทุกคน</span>
+              </button>
+
+              {/* Quick Mark All Not Arrived (Rose/Red Button) */}
+              <button
+                type="button"
+                onClick={handleMarkAllNotArrived}
+                disabled={isHomeBreak || !canEditAttendance || isCopyingYesterday}
+                className="bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                title="กำหนดสถานะนักเรียนทุกคนในหอพักเป็นยังไม่เข้าหอพัก"
+              >
+                <UserX className="w-4 h-4 text-white" />
+                <span>ยังไม่เข้าหอทุกคน</span>
               </button>
 
               {/* Copy Yesterday Out Students Button */}
@@ -897,6 +1016,10 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                               ? "bg-sky-50 border-sky-300 text-sky-800 focus:ring-2 focus:ring-sky-500"
                               : rec.status === "WALK_STUDY"
                               ? "bg-teal-50 border-teal-300 text-teal-800 focus:ring-2 focus:ring-teal-500"
+                              : rec.status === "SEMESTER_BREAK"
+                              ? "bg-neutral-800 border-neutral-950 text-white focus:ring-2 focus:ring-neutral-600"
+                              : rec.status === "NOT_ARRIVED"
+                              ? "bg-rose-50 border-rose-300 text-rose-800 focus:ring-2 focus:ring-rose-500"
                               : "bg-amber-950/10 border-amber-900/30 text-amber-950 focus:ring-2 focus:ring-amber-900"
                           }`}
                         >
@@ -908,6 +1031,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                           <option value="SKILL_COMP" className="bg-white text-gray-800 font-medium">แข่งทักษะ</option>
                           <option value="EXCHANGE" className="bg-white text-gray-800 font-medium">แลกเปลี่ยน</option>
                           <option value="WALK_STUDY" className="bg-white text-gray-800 font-medium">เดินเรียน</option>
+                          <option value="SEMESTER_BREAK" className="bg-neutral-800 text-white font-medium">ปิดภาคเรียน</option>
+                          <option value="NOT_ARRIVED" className="bg-white text-gray-800 font-medium">ยังไม่เข้าหอพัก</option>
                           <option value="OTHER" className="bg-white text-gray-800 font-medium">อื่น</option>
                         </select>
                       </td>

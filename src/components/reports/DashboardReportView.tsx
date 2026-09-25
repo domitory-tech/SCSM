@@ -57,6 +57,8 @@ const REASON_CONFIGS: Record<string, { label: string; color: string; bg: string;
   SKILL_COMP: { label: "แข่งขันทักษะ", color: "#a855f7", bg: "bg-purple-100", text: "text-purple-700" },
   EXCHANGE: { label: "แลกเปลี่ยน", color: "#0ea5e9", bg: "bg-sky-100", text: "text-sky-700" },
   WALK_STUDY: { label: "เดินเรียน", color: "#0d9488", bg: "bg-teal-100", text: "text-teal-700" },
+  SEMESTER_BREAK: { label: "ปิดภาคเรียน", color: "#27272a", bg: "bg-neutral-800", text: "text-white" },
+  NOT_ARRIVED: { label: "ยังไม่เข้าหอพัก", color: "#e11d48", bg: "bg-rose-100", text: "text-rose-700" },
   OTHER: { label: "อื่นๆ/กิจธุระ", color: "#d97706", bg: "bg-amber-100", text: "text-amber-700" }
 };
 
@@ -188,6 +190,8 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
       SKILL_COMP: 0,
       EXCHANGE: 0,
       WALK_STUDY: 0,
+      SEMESTER_BREAK: 0,
+      NOT_ARRIVED: 0,
       OTHER: 0
     };
 
@@ -1258,6 +1262,24 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* Legend of Symbols & Abbreviations */}
+        <div className="pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between flex-wrap gap-2 text-[10.5px] text-slate-700 bg-slate-50/80 p-2.5 rounded-xl border border-slate-200">
+            <span className="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
+            <span className="font-semibold"><strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก</span>
+            <span className="font-semibold"><strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน</span>
+            <span className="font-semibold"><strong className="text-orange-700 font-black">กบ</strong> = กลับบ้าน</span>
+            <span className="font-semibold"><strong className="text-blue-700 font-black">ค</strong> = เข้าค่าย</span>
+            <span className="font-semibold"><strong className="text-rose-700 font-black">ป</strong> = ป่วย</span>
+            <span className="font-semibold"><strong className="text-purple-700 font-black">ท</strong> = แข่งทักษะ</span>
+            <span className="font-semibold"><strong className="text-sky-700 font-black">ลป</strong> = แลกเปลี่ยน</span>
+            <span className="font-semibold"><strong className="text-teal-700 font-black">ดร</strong> = เดินเรียน</span>
+            <span className="font-semibold"><strong className="text-white font-black bg-neutral-800 px-1 py-0.5 rounded">ปภ</strong> = ปิดภาคเรียน</span>
+            <span className="font-semibold"><strong className="text-rose-700 font-black">ยห</strong> = ยังไม่เข้าหอพัก</span>
+            <span className="font-semibold"><strong className="text-amber-900 font-black">อ</strong> = อื่นๆ</span>
           </div>
         </div>
       </div>

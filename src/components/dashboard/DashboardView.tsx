@@ -653,6 +653,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       "แข่งทักษะ": 0,
       "แลกเปลี่ยน": 0,
       "เดินเรียน": 0,
+      "ปิดภาคเรียน": 0,
+      "ยังไม่เข้าหอพัก": 0,
       "อื่นๆ": 0
     };
 
@@ -669,6 +671,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           else if (r.status === "SKILL_COMP") counts["แข่งทักษะ"]++;
           else if (r.status === "EXCHANGE") counts["แลกเปลี่ยน"]++;
           else if (r.status === "WALK_STUDY") counts["เดินเรียน"]++;
+          else if (r.status === "SEMESTER_BREAK") counts["ปิดภาคเรียน"]++;
+          else if (r.status === "NOT_ARRIVED") counts["ยังไม่เข้าหอพัก"]++;
           else if (r.status === "OTHER") counts["อื่นๆ"]++;
         });
       }
@@ -683,6 +687,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         else if (s.reason.includes("แข่งทักษะ")) counts["แข่งทักษะ"]++;
         else if (s.reason.includes("แลกเปลี่ยน")) counts["แลกเปลี่ยน"]++;
         else if (s.reason.includes("เดินเรียน")) counts["เดินเรียน"]++;
+        else if (s.reason.includes("ปิดภาคเรียน")) counts["ปิดภาคเรียน"]++;
+        else if (s.reason.includes("ยังไม่เข้า")) counts["ยังไม่เข้าหอพัก"]++;
         else counts["อื่นๆ"]++;
       });
     }

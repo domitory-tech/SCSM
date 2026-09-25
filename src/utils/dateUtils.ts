@@ -51,6 +51,19 @@ export function getPreviousDateString(dateStr: string): string {
   return `${prevY}-${prevM}-${prevD}`;
 }
 
+export function getNextDateString(dateStr: string): string {
+  if (!dateStr) return getTodayDateString();
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return getTodayDateString();
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 1);
+  const nextY = dt.getFullYear();
+  const nextM = String(dt.getMonth() + 1).padStart(2, "0");
+  const nextD = String(dt.getDate()).padStart(2, "0");
+  return `${nextY}-${nextM}-${nextD}`;
+}
+
 export function getDashboardDefaultDate(todayAttendanceMap?: Record<string, any> | null): string {
   const now = new Date();
   const currentHour = now.getHours(); // 0 - 23
