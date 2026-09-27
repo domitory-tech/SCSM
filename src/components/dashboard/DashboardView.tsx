@@ -144,7 +144,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [todayAttendance]);
 
-  // Fetch attendance and notices data when effective dashboard date changes
+  // Categorize checked dates, semester break dates, and home break dates for ThaiCalendarPicker
+  const { checkedDatesList, semesterBreakDatesList, homeBreakDatesList } = React.useMemo(() => {
+    const checked = new Set<string>(checkedAttendanceDates);
+    const semBreak = new Set<string>();
+    const homeBreak = new Set<string>();
+
+    const allRecs: DailyAttendance[] = [...allHistoricalRecords];
+    if (todayAttendance) {
+      Object.values(todayAttendance).forEach((a) => {
+        if (a) allRecs.push(a);
+      });
+    }
+
+    const dateMap = new Map<string, DailyAttendance[]>();
+    allRecs.forEach((r) => {
+      if (!r || !r.date) return;
+      const list = dateMap.get(r.date) || [];
+      list.push(r);
+      dateMap.set(r.date, list);
+    });
+
+    dateMap.forEach((recs, dateStr) => {
+      const hasAnyCheck = recs.some(
+        (r) =>
+          r.status === "CHECKED" ||
+          r.status === "HOME_BREAK" ||
+          r.status === "SEMESTER_BREAK" ||
+          (r.records && r.records.length > 0)
+      );
+      if (hasAnyCheck) checked.add(dateStr);
+
+      const isSemBreak = recs.some((r) => {
+        if (r.status === "SEMESTER_BREAK") return true;
+        if (r.records && r.records.some((rec) => rec.status === "SEMESTER_BREAK")) return true;
+        return false;
+      });
+      if (isSemBreak) {
+        semBreak.add(dateStr);
+      }
+
+      const isHmBreak = recs.some((r) => r.isHomeBreak || r.status === "HOME_BREAK");
+      if (isHmBreak && !isSemBreak) {
+        homeBreak.add(dateStr);
+      }
+    });
+
+    return {
+      checkedDatesList: Array.from(checked),
+      semesterBreakDatesList: Array.from(semBreak),
+      homeBreakDatesList: Array.from(homeBreak)
+    };
+  }, [checkedAttendanceDates, allHistoricalRecords, todayAttendance]);
+
   React.useEffect(() => {
     if (!effectiveDashboardDate) {
       setHistoricalAttendanceMap(null);
@@ -201,6 +253,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
     return {};
   }, [historicalAttendanceMap, todayAttendance, effectiveDashboardDate]);
+
+  // Check if effective dashboard date is in semester break
+  const isSemesterBreakForEffectiveDate = React.useMemo(() => {
+    if (semesterBreakDatesList.includes(effectiveDashboardDate)) return true;
+    if (activeAttendanceMap) {
+      return Object.values(activeAttendanceMap).some((att) => {
+        if (!att) return false;
+        if (att.status === "SEMESTER_BREAK") return true;
+        if (att.records && att.records.some((r) => r.status === "SEMESTER_BREAK")) return true;
+        return false;
+      });
+    }
+    return false;
+  }, [effectiveDashboardDate, semesterBreakDatesList, activeAttendanceMap]);
 
   // Active notice: notice for effective date if loaded/picked, otherwise latest notice
   const activeNotice = React.useMemo(() => {
@@ -481,9 +547,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const totalCount = dormStudents.length;
       const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
 
-      if (att && (att.status === "CHECKED" || (att.records && att.records.length > 0))) {
+      if (att && (att.status === "CHECKED" || att.status === "SEMESTER_BREAK" || (att.records && att.records.length > 0))) {
         let outCount = 0;
         if (att.isHomeBreak || att.status === "HOME_BREAK") {
+          outCount = totalCount;
+        } else if (att.status === "SEMESTER_BREAK" && (!att.records || att.records.length === 0)) {
           outCount = totalCount;
         } else if (Array.isArray(att.records)) {
           const absentSet = new Set(
@@ -502,7 +570,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           out: outCount,
           remaining: Math.max(0, totalCount - outCount)
         };
-      } else if (att && (att.status === "HOME_BREAK" || att.isHomeBreak)) {
+      } else if (att && (att.status === "HOME_BREAK" || att.isHomeBreak || att.status === "SEMESTER_BREAK")) {
         result[d.id] = {
           total: totalCount,
           out: totalCount,
@@ -662,7 +730,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     dorms.forEach((d) => {
       const att = activeAttendanceMap[d.id];
-      if (att && att.status === "CHECKED" && att.records) {
+      if (att && (att.status === "CHECKED" || att.status === "SEMESTER_BREAK") && att.records) {
         hasLiveRecords = true;
         att.records.forEach((r) => {
           if (r.status === "HOME") counts["กลับบ้าน"]++;
@@ -675,6 +743,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           else if (r.status === "NOT_ARRIVED") counts["ยังไม่เข้าหอพัก"]++;
           else if (r.status === "OTHER") counts["อื่นๆ"]++;
         });
+      } else if (att && att.status === "SEMESTER_BREAK") {
+        hasLiveRecords = true;
+        const dCount = countStudentsInDorm(students, d);
+        counts["ปิดภาคเรียน"] += dCount;
       }
     });
 
@@ -727,7 +799,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Calculate actual attendance checking progress
   const totalDorms = dorms.length || 6;
   const checkedDormsCount = dorms.filter(
-    (d) => activeAttendanceMap[d.id]?.status === "CHECKED" || activeAttendanceMap[d.id]?.status === "HOME_BREAK"
+    (d) =>
+      activeAttendanceMap[d.id]?.status === "CHECKED" ||
+      activeAttendanceMap[d.id]?.status === "HOME_BREAK" ||
+      activeAttendanceMap[d.id]?.status === "SEMESTER_BREAK" ||
+      (activeAttendanceMap[d.id]?.records && activeAttendanceMap[d.id]?.records.length > 0)
   ).length;
 
   // Aggregated Historical Attendance Statistics from Firestore
@@ -1269,13 +1345,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <ThaiCalendarPicker
             selectedDate={selectedDashboardDate || effectiveDashboardDate}
             onSelectDate={setSelectedDashboardDate}
-            checkedDates={checkedAttendanceDates}
+            checkedDates={checkedDatesList}
+            semesterBreakDates={semesterBreakDatesList}
+            homeBreakDates={homeBreakDatesList}
             todayDate={getTodayDateString()}
           />
         </div>
 
         {/* Right Side (lg:col-span-7 xl:col-span-8): 4 Summary Stat Cards */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col justify-between space-y-4">
+          {/* Semester Break Notice Banner */}
+          {isSemesterBreakForEffectiveDate && (
+            <div className="bg-neutral-900 border border-neutral-800 text-white px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md animate-fade-in">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-neutral-800 text-amber-400 border border-neutral-700 flex items-center justify-center shrink-0 shadow-inner">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-sm text-neutral-100">สถานะการเช็คยอด: ปิดภาคเรียน</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 font-bold">
+                      ปิดภาคเรียน
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 mt-0.5 leading-relaxed truncate sm:whitespace-normal">
+                    ระบบบันทึกสถานะปิดภาคเรียนสำหรับนักเรียนในหอพัก และส่งต่อสถานะอัตโนมัติจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอดเมื่อเปิดภาคเรียน
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateToCheck(undefined, effectiveDashboardDate)}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-neutral-950 font-extrabold text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>ปรับเปลี่ยนสถานะ</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {selectedDashboardDate && selectedDashboardDate !== effectiveDashboardDate ? (
             <div className="bg-purple-100/90 border border-purple-300 text-purple-950 px-4 py-2.5 rounded-2xl flex items-center justify-between text-xs font-bold shadow-xs">
               <div className="flex items-center gap-2">
@@ -1365,7 +1473,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
               <div className="mt-3 text-xs sm:text-sm font-semibold text-white/90 relative z-10">
-                <span>กลับบ้าน {liveReasonCounts["กลับบ้าน"]} • ป่วย {liveReasonCounts["ป่วย"]} คน</span>
+                {liveReasonCounts["ปิดภาคเรียน"] > 0 ? (
+                  <span>ปิดภาคเรียน {liveReasonCounts["ปิดภาคเรียน"]} • กลับบ้าน {liveReasonCounts["กลับบ้าน"]} คน</span>
+                ) : (
+                  <span>กลับบ้าน {liveReasonCounts["กลับบ้าน"]} • ป่วย {liveReasonCounts["ป่วย"]} คน</span>
+                )}
               </div>
             </div>
 
@@ -1385,7 +1497,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <div className="mt-3 text-xs sm:text-sm font-semibold text-white/90 relative z-10">
                 <span>
-                  {checkedDormsCount === totalDorms
+                  {isSemesterBreakForEffectiveDate
+                    ? `สถานะ: ปิดภาคเรียน (${checkedDormsCount} / ${totalDorms} หอพัก)`
+                    : checkedDormsCount === totalDorms
                     ? "ส่งข้อมูลเช็คยอดเรียบร้อยครบทุกหอ"
                     : `เช็คยอดแล้ว ${checkedDormsCount} หอ (เหลืออีก ${totalDorms - checkedDormsCount} หอ)`}
                 </span>

@@ -145,6 +145,28 @@ export async function checkFirebaseConnection(): Promise<FirebaseConnectionStatu
   }
 }
 
+// Recursively remove undefined values from objects and arrays so Firestore never throws "Unsupported field value: undefined"
+export function cleanFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => cleanFirestoreData(item)) as any;
+  }
+  if (typeof obj === "object" && !(obj instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanFirestoreData(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
 // Chunked batch helper to bypass Firestore 500 operations limit
 export async function commitChunkedSetDocs(
   collectionName: string,
@@ -160,7 +182,8 @@ export async function commitChunkedSetDocs(
     chunk.forEach((item) => {
       const docId = item[idKey] || item.id || `doc-${Date.now()}-${Math.random()}`;
       const docRef = doc(db, collectionName, docId);
-      batch.set(docRef, item, { merge: true });
+      const cleaned = cleanFirestoreData(item);
+      batch.set(docRef, cleaned, { merge: true });
       count++;
     });
     await batch.commit();

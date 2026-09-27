@@ -14,6 +14,7 @@ import {
 import { MonthlyReportView } from "./MonthlyReportView";
 import { DashboardReportView } from "./DashboardReportView";
 import { DormitorySummaryReportView } from "./DormitorySummaryReportView";
+import { ThaiCalendarPicker } from "../dashboard/ThaiCalendarPicker";
 import { toPng, toBlob } from "html-to-image";
 import {
   BarChart3,
@@ -79,6 +80,39 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const [capturedImageUrl, setCapturedImageUrl] = useState<string | null>(null);
   const [capturedSheetInfo, setCapturedSheetInfo] = useState<{ key: string; title: string; subtitle: string } | null>(null);
   const [copyImageSuccess, setCopyImageSuccess] = useState<boolean>(false);
+  const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
+
+  // Categorize checked dates, semester break dates, and home break dates for ThaiCalendarPicker
+  const { reportCheckedDates, reportSemesterBreakDates, reportHomeBreakDates } = React.useMemo(() => {
+    const checked = new Set<string>();
+    const semBreak = new Set<string>();
+    const homeBreak = new Set<string>();
+
+    (attendanceRecords || []).forEach((r) => {
+      if (!r || !r.date) return;
+      const isCheck =
+        r.status === "CHECKED" ||
+        r.status === "HOME_BREAK" ||
+        r.status === "SEMESTER_BREAK" ||
+        (r.records && r.records.length > 0);
+      if (isCheck) checked.add(r.date);
+
+      const isSem =
+        r.status === "SEMESTER_BREAK" ||
+        (r.records && r.records.some((rec) => rec.status === "SEMESTER_BREAK"));
+      if (isSem) semBreak.add(r.date);
+
+      if ((r.isHomeBreak || r.status === "HOME_BREAK") && !isSem) {
+        homeBreak.add(r.date);
+      }
+    });
+
+    return {
+      reportCheckedDates: Array.from(checked),
+      reportSemesterBreakDates: Array.from(semBreak),
+      reportHomeBreakDates: Array.from(homeBreak)
+    };
+  }, [attendanceRecords]);
 
   // References for each printable sheet
   const sheet1Ref = useRef<HTMLDivElement>(null);
@@ -447,10 +481,18 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                   }}
                   className="bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:ring-2 focus:ring-[#A05AFF]"
                 />
-                <div className="bg-purple-50 border border-purple-200 text-[#A05AFF] text-xs font-extrabold rounded-xl px-3 py-1.5 flex items-center gap-1.5 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowCalendarModal(true)}
+                  className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-[#A05AFF] text-xs font-extrabold rounded-xl px-3 py-1.5 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="คลิกเพื่อเปิดปฏิทินรายงานเช็คยอดนักเรียน"
+                >
                   <Calendar className="w-3.5 h-3.5 text-[#A05AFF] shrink-0" />
                   <span>{formatThaiFullDate(selectedReportDate)}</span>
-                </div>
+                  <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.5 rounded-md font-bold">
+                    เปิดปฏิทิน
+                  </span>
+                </button>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1154,6 +1196,44 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Thai Calendar Picker Modal */}
+      {showCalendarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl p-5 max-w-md w-full border border-purple-200 shadow-2xl relative space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-purple-100">
+              <span className="text-sm font-black text-purple-950 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#A05AFF]" />
+                <span>เลือกวันที่รายงาน (ปฏิทินไทย)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowCalendarModal(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+                title="ปิดหน้าต่าง"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <ThaiCalendarPicker
+              selectedDate={selectedReportDate}
+              onSelectDate={(dateStr) => {
+                if (dateStr) {
+                  setSelectedReportDate(dateStr);
+                  setShowCalendarModal(false);
+                }
+              }}
+              checkedDates={reportCheckedDates}
+              semesterBreakDates={reportSemesterBreakDates}
+              homeBreakDates={reportHomeBreakDates}
+              todayDate={getTodayDateString()}
+              title="ปฏิทินรายงานเช็คยอดนักเรียน"
+              subtitle="คลิกวันที่เพื่อเปิดดูรายงานประจำวัน"
+            />
           </div>
         </div>
       )}

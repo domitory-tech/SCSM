@@ -12,6 +12,7 @@ import {
   db,
   commitChunkedSetDocs,
   commitChunkedDeleteDocs,
+  cleanFirestoreData,
   FIREBASE_PROJECT_INFO,
   withTimeout
 } from "../lib/firebase";
@@ -22,6 +23,7 @@ import {
   DormTeacher,
   Notice,
   Student,
+  StudentAttendanceRecord,
   SystemSettings,
   UserProfile
 } from "../types";
@@ -127,7 +129,7 @@ export async function addDorm(data: {
   const newId = `dorm-${Date.now()}`;
   const newDorm: Dormitory = { id: newId, ...data };
   try {
-    await setDoc(doc(db, "dorms", newId), newDorm);
+    await setDoc(doc(db, "dorms", newId), cleanFirestoreData(newDorm));
   } catch (e) {
     console.warn("Saved dorm offline locally:", e);
   }
@@ -146,7 +148,7 @@ export async function updateDorm(
     if (snap.exists()) {
       updatedData = { ...snap.data(), ...data };
     }
-    await setDoc(docRef, updatedData, { merge: true });
+    await setDoc(docRef, cleanFirestoreData(updatedData), { merge: true });
   } catch (e) {
     console.warn("Updated dorm offline locally:", e);
   }
@@ -262,7 +264,7 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
   };
 
   try {
-    await setDoc(doc(db, "students", id), newStudent);
+    await setDoc(doc(db, "students", id), cleanFirestoreData(newStudent));
   } catch (e) {
     console.warn("Saved student offline locally:", e);
   }
@@ -279,7 +281,7 @@ export async function updateStudent(id: string, studentData: Partial<Student>): 
     if (snap.exists()) {
       updated = { ...snap.data(), ...studentData };
     }
-    await setDoc(docRef, updated, { merge: true });
+    await setDoc(docRef, cleanFirestoreData(updated), { merge: true });
   } catch (e) {
     console.warn("Updated student offline locally:", e);
   }
@@ -352,7 +354,7 @@ export async function addUser(userData: Partial<UserProfile>): Promise<UserProfi
   };
 
   try {
-    await setDoc(doc(db, "users", id), newUser);
+    await setDoc(doc(db, "users", id), cleanFirestoreData(newUser));
   } catch (e) {
     console.warn("Saved user offline locally:", e);
   }
@@ -369,7 +371,7 @@ export async function updateUser(id: string, userData: Partial<UserProfile>): Pr
     if (snap.exists()) {
       updated = { ...snap.data(), ...userData };
     }
-    await setDoc(docRef, updated, { merge: true });
+    await setDoc(docRef, cleanFirestoreData(updated), { merge: true });
   } catch (e) {
     console.warn("Updated user offline locally:", e);
   }
@@ -906,7 +908,7 @@ export async function restoreDatabase(data: any) {
   if (data.systemSettings && typeof data.systemSettings === "object") {
     setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, data.systemSettings);
     try {
-      await setDoc(doc(db, "system_settings", "config"), data.systemSettings, { merge: true });
+      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(data.systemSettings), { merge: true });
     } catch (e) { console.warn("Restored settings offline:", e); }
   }
 
@@ -1016,7 +1018,7 @@ export async function postNotice(noticeData: {
   };
 
   try {
-    await setDoc(doc(db, "notices", id), newNotice);
+    await setDoc(doc(db, "notices", id), cleanFirestoreData(newNotice));
   } catch (e) {
     console.warn("Posted notice offline locally:", e);
   }
@@ -1027,7 +1029,7 @@ export async function postNotice(noticeData: {
 
 export async function updateNotice(noticeData: Notice) {
   try {
-    await setDoc(doc(db, "notices", noticeData.id), noticeData, { merge: true });
+    await setDoc(doc(db, "notices", noticeData.id), cleanFirestoreData(noticeData), { merge: true });
   } catch (e) {
     console.warn("Updated notice offline locally:", e);
   }
@@ -1089,8 +1091,15 @@ export async function syncSemesterBreakAutoAttendance(
     let lastSemesterBreakIndex = -1;
     for (let i = 0; i < dormRecs.length; i++) {
       const rec = dormRecs[i];
-      if (rec.status !== "CHECKED" || !rec.records || rec.records.length === 0) continue;
-      const hasSemesterBreak = rec.records.some((r) => r.status === "SEMESTER_BREAK");
+      if (
+        (rec.status !== "CHECKED" && rec.status !== "SEMESTER_BREAK") ||
+        !rec.records ||
+        rec.records.length === 0
+      )
+        continue;
+      const hasSemesterBreak =
+        rec.status === "SEMESTER_BREAK" ||
+        rec.records.some((r) => r.status === "SEMESTER_BREAK");
       if (hasSemesterBreak) {
         lastSemesterBreakIndex = i;
       }
@@ -1120,22 +1129,29 @@ export async function syncSemesterBreakAutoAttendance(
         currDate = getNextDateString(currDate);
       } else {
         // Auto-check this day as SEMESTER_BREAK
+        const autoRecords: StudentAttendanceRecord[] = (prevRec.records || []).map((r) => {
+          const item: StudentAttendanceRecord = {
+            studentId: r.studentId,
+            status: r.status === "SEMESTER_BREAK" ? "SEMESTER_BREAK" : r.status,
+            reason: r.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (r.reason || ""),
+            note: r.note || "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)"
+          };
+          if (r.studentName) {
+            item.studentName = r.studentName;
+          }
+          return item;
+        });
+
         const autoRecord: DailyAttendance = {
           id: expectedDocId,
           date: currDate,
           dormId: dormId,
           isHomeBreak: false,
-          status: "CHECKED",
+          status: "SEMESTER_BREAK",
           checkedAt: "08:00",
           checkedBy: "ระบบอัตโนมัติ (ปิดภาคเรียน)",
           teacherOrientationNotes: ["ปิดภาคเรียน"],
-          records: prevRec.records.map((r) => ({
-            studentId: r.studentId,
-            studentName: r.studentName,
-            status: r.status === "SEMESTER_BREAK" ? "SEMESTER_BREAK" : r.status,
-            reason: r.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (r.reason || ""),
-            note: "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)"
-          }))
+          records: autoRecords
         };
 
         recordsMapById.set(expectedDocId, autoRecord);
@@ -1150,13 +1166,16 @@ export async function syncSemesterBreakAutoAttendance(
   // If new auto records were created, persist them to Firestore and local cache
   if (newlyCreatedRecords.length > 0) {
     setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
-    Promise.allSettled(
-      newlyCreatedRecords.map((r) =>
-        setDoc(doc(db, "attendance", r.id), r, { merge: true }).catch((err) =>
+    newlyCreatedRecords.forEach((r) => {
+      try {
+        const cleaned = cleanFirestoreData(r);
+        setDoc(doc(db, "attendance", r.id), cleaned, { merge: true }).catch((err) =>
           console.warn("Could not save auto semester break record to Firestore:", err)
-        )
-      )
-    );
+        );
+      } catch (err) {
+        console.warn("Could not prepare auto semester break record for Firestore:", err);
+      }
+    });
   }
 
   return allRecords;
@@ -1179,7 +1198,14 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
 
   const datesSet = new Set<string>();
   records.forEach((data) => {
-    if (data && data.date && (data.status === "CHECKED" || data.status === "HOME_BREAK" || (data.records && data.records.length > 0))) {
+    if (
+      data &&
+      data.date &&
+      (data.status === "CHECKED" ||
+        data.status === "HOME_BREAK" ||
+        data.status === "SEMESTER_BREAK" ||
+        (data.records && data.records.length > 0))
+    ) {
       datesSet.add(data.date);
     }
   });
@@ -1293,7 +1319,8 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
   };
 
   try {
-    await setDoc(docRef, updatedRecord, { merge: true });
+    const cleaned = cleanFirestoreData(updatedRecord);
+    await setDoc(docRef, cleaned, { merge: true });
   } catch (e) {
     console.warn("Saved attendance offline locally:", e);
   }
@@ -1344,7 +1371,7 @@ export async function updateSystemSettings(settings: SystemSettings): Promise<Sy
   setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settings);
 
   try {
-    await setDoc(doc(db, "system_settings", "config"), settings, { merge: true });
+    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settings), { merge: true });
   } catch (err) {
     console.warn("Firestore updateSystemSettings saved locally (offline):", err);
   }
@@ -1421,7 +1448,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
       let outInGrade = 0;
 
       if (attendance) {
-        if (attendance.isHomeBreak) {
+        if (attendance.isHomeBreak || attendance.status === "HOME_BREAK") {
           outInGrade = totalInGrade;
         } else if (Array.isArray(attendance.records)) {
           studentsInGrade.forEach((std) => {

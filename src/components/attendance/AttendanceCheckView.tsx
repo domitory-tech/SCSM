@@ -286,6 +286,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       updated[s.studentId] = { studentId: s.studentId, status: "SEMESTER_BREAK", reason: "ปิดภาคเรียน" };
     });
     setRecordsMap(updated);
+    setIsHomeBreak(false);
+    setOrientationNotes(["ปิดภาคเรียน"]);
   };
 
   // Mark all students not arrived ("ยังไม่เข้าหอพัก")
@@ -462,10 +464,15 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     setIsSaving(true);
     setSaveSuccessMsg(null);
     try {
+      const allSemesterBreak =
+        Object.values(recordsMap).length > 0 &&
+        Object.values(recordsMap).every((r) => r.status === "SEMESTER_BREAK");
+
       const payload: Partial<DailyAttendance> = {
         date: selectedDate,
         dormId: selectedDormId,
         isHomeBreak,
+        status: allSemesterBreak ? "SEMESTER_BREAK" : isHomeBreak ? "HOME_BREAK" : "CHECKED",
         checkedBy: currentUserName,
         teacherOrientationNotes: orientationNotes.filter((n) => n.trim().length > 0),
         records: Object.values(recordsMap)

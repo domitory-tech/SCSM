@@ -72,7 +72,7 @@ export interface DailyAttendance {
   date: string;
   dormId: string;
   isHomeBreak: boolean;
-  status: "CHECKED" | "HOME_BREAK" | "PENDING";
+  status: "CHECKED" | "HOME_BREAK" | "SEMESTER_BREAK" | "PENDING";
   checkedAt?: string;
   checkedBy?: string;
   teacherOrientationNotes: string[];
