@@ -268,6 +268,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return false;
   }, [effectiveDashboardDate, semesterBreakDatesList, activeAttendanceMap]);
 
+  // Check if effective dashboard date is in home break
+  const isHomeBreakForEffectiveDate = React.useMemo(() => {
+    if (isSemesterBreakForEffectiveDate) return false;
+    if (homeBreakDatesList.includes(effectiveDashboardDate)) return true;
+    if (activeAttendanceMap) {
+      return Object.values(activeAttendanceMap).some((att) => {
+        if (!att) return false;
+        if (att.isHomeBreak || att.status === "HOME_BREAK") return true;
+        if (att.records && att.records.length > 0 && att.records.every((r) => r.status === "ROUND_HOME")) return true;
+        return false;
+      });
+    }
+    return false;
+  }, [effectiveDashboardDate, homeBreakDatesList, activeAttendanceMap, isSemesterBreakForEffectiveDate]);
+
   // Active notice: notice for effective date if loaded/picked, otherwise latest notice
   const activeNotice = React.useMemo(() => {
     if (dateNotices !== null) {
@@ -1370,6 +1385,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <p className="text-[11px] text-neutral-400 mt-0.5 leading-relaxed truncate sm:whitespace-normal">
                     ระบบบันทึกสถานะปิดภาคเรียนสำหรับนักเรียนในหอพัก และส่งต่อสถานะอัตโนมัติจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอดเมื่อเปิดภาคเรียน
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateToCheck(undefined, effectiveDashboardDate)}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-neutral-950 font-extrabold text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>ปรับเปลี่ยนสถานะ</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Home Break Notice Banner */}
+          {isHomeBreakForEffectiveDate && !isSemesterBreakForEffectiveDate && (
+            <div className="bg-amber-950 border border-amber-800 text-white px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md animate-fade-in">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-900 text-amber-300 border border-amber-700 flex items-center justify-center shrink-0 shadow-inner">
+                  <Home className="w-5 h-5 text-amber-300" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-sm text-amber-100">สถานะการเช็คยอด: รอบกลับบ้าน</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 font-bold">
+                      รอบกลับบ้าน
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/80 mt-0.5 leading-relaxed truncate sm:whitespace-normal">
+                    ระบบบันทึกสถานะรอบกลับบ้านสำหรับนักเรียนในหอพัก และส่งต่อสถานะอัตโนมัติจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอดเมื่อนักเรียนกลับเข้าหอพัก
                   </p>
                 </div>
               </div>

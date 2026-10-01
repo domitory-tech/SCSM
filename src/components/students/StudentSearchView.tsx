@@ -381,7 +381,10 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                 text: meta.text,
                 border: meta.border
               },
-              reason: rec.reason,
+              reason:
+                (rec.reason || "").includes("เช็คยอดอัตโนมัติ") || rec.status === "SEMESTER_BREAK"
+                  ? "ปิดภาคเรียน"
+                  : rec.reason || rec.note || "ไม่ระบุสาเหตุ",
               checkedBy: att.checkedBy,
               checkedAt: att.checkedAt,
               isHomeBreak: att.isHomeBreak

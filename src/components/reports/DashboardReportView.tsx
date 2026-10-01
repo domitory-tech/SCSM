@@ -327,6 +327,14 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
             const st = rec.status in reasonCountMap ? rec.status : "OTHER";
             reasonCountMap[st] = (reasonCountMap[st] || 0) + 1;
 
+            const rawReason = rec.reason || rec.note || REASON_CONFIGS[rec.status]?.label || "ไม่ระบุสาเหตุ";
+            const cleanedReason =
+              rec.status === "SEMESTER_BREAK" ||
+              rawReason === "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)" ||
+              rawReason.includes("เช็คยอดอัตโนมัติ")
+                ? "ปิดภาคเรียน"
+                : rawReason;
+
             if (
               (filterDormId === "ALL" || s.dormId === filterDormId) &&
               (filterGrade === "ALL" || s.grade === filterGrade)
@@ -341,7 +349,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                 dormId: s.dormId,
                 grade: s.grade,
                 room: s.room,
-                reason: rec.reason || rec.note || REASON_CONFIGS[rec.status]?.label || "ไม่ระบุสาเหตุ",
+                reason: cleanedReason,
                 status: rec.status,
                 statusLabel: REASON_CONFIGS[rec.status]?.label || "ออกหอพัก"
               });
@@ -1256,7 +1264,19 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                       <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{a.fullName}</td>
                       <td className="py-2.5 px-2 text-center font-semibold text-slate-700 border-r border-slate-100 whitespace-nowrap">{a.gradeRoom}</td>
                       <td className="py-2.5 px-2 text-center text-purple-700 font-bold border-r border-slate-100 whitespace-nowrap">{a.dormName}</td>
-                      <td className="py-2.5 px-3 font-bold text-rose-600">{a.reason || a.statusLabel}</td>
+                      <td className="py-2.5 px-3 font-bold text-rose-600">
+                        {(() => {
+                          const val = a.reason || a.statusLabel || "ไม่ระบุสาเหตุ";
+                          if (
+                            val === "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)" ||
+                            val.includes("เช็คยอดอัตโนมัติ") ||
+                            a.status === "SEMESTER_BREAK"
+                          ) {
+                            return "ปิดภาคเรียน";
+                          }
+                          return val;
+                        })()}
+                      </td>
                     </tr>
                   ))
                 )}

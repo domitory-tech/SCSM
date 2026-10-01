@@ -99,17 +99,9 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): P
 export async function checkFirebaseConnection(): Promise<FirebaseConnectionStatus> {
   const startTime = Date.now();
   try {
-    const testDocRef = doc(db, "_system_status", "ping");
-    const pingTask = setDoc(
-      testDocRef,
-      {
-        lastPing: new Date().toISOString(),
-        system: "Student Counting System",
-        user: "domitory@pcccr.ac.th",
-        projectId: firebaseConfig.projectId
-      },
-      { merge: true }
-    );
+    // Perform a lightweight read ping rather than a write to avoid polluting Firestore write streams
+    const testDocRef = doc(db, "system_settings", "config");
+    const pingTask = getDoc(testDocRef);
 
     // Timeout at 4 seconds so UI never hangs or waits 10s for SDK timeout
     await withTimeout(pingTask, 4000);
@@ -122,26 +114,13 @@ export async function checkFirebaseConnection(): Promise<FirebaseConnectionStatu
       latencyMs: latency
     };
   } catch (err: any) {
-    console.warn("Firebase setDoc ping attempt failed, trying read ping:", err?.message || err);
-    try {
-      const readTask = getDoc(doc(db, "system_settings", "config"));
-      await withTimeout(readTask, 3000);
-      const latency = Date.now() - startTime;
-      return {
-        isConnected: true,
-        lastChecked: new Date().toLocaleTimeString("th-TH"),
-        error: null,
-        latencyMs: latency
-      };
-    } catch (readErr: any) {
-      console.warn("Firebase read ping failed:", readErr?.message || readErr);
-      return {
-        isConnected: false,
-        lastChecked: new Date().toLocaleTimeString("th-TH"),
-        error: readErr?.message || "Failed to reach Firestore in time",
-        latencyMs: null
-      };
-    }
+    console.warn("Firebase ping attempt failed:", err?.message || err);
+    return {
+      isConnected: false,
+      lastChecked: new Date().toLocaleTimeString("th-TH"),
+      error: err?.message || "Failed to reach Firestore in time",
+      latencyMs: null
+    };
   }
 }
 

@@ -54,7 +54,7 @@ export const CACHE_KEYS = {
   STUDENTS: "dorm_cache_students",
   USERS: "dorm_cache_users",
   NOTICES: "dorm_cache_notices",
-  ATTENDANCE: "dorm_cache_attendance",
+  ATTENDANCE: "dorm_cache_attendance_v2",
   SYSTEM_SETTINGS: "dorm_system_settings"
 };
 
@@ -1061,125 +1061,205 @@ export async function deleteNotice(id: string) {
  * the next day(s) up to targetDate (default today) are automatically checked as SEMESTER_BREAK,
  * UNTIL an attendance status on a subsequent date is modified by the user (or changed away from SEMESTER_BREAK).
  */
-export async function syncSemesterBreakAutoAttendance(
+/**
+ * Detect whether an attendance record has an active break status:
+ * - "SEMESTER_BREAK" (ปิดภาคเรียน)
+ * - null (Normal attendance / other)
+ * Note: HOME_BREAK (รอบกลับบ้าน) does not auto-propagate across dates.
+ */
+export function getAttendanceBreakType(
+  rec: DailyAttendance | null | undefined
+): "SEMESTER_BREAK" | null {
+  if (!rec) return null;
+
+  // 1. SEMESTER_BREAK:
+  if (rec.status === "SEMESTER_BREAK") return "SEMESTER_BREAK";
+  if (
+    rec.records &&
+    rec.records.length > 0 &&
+    rec.records.some((r) => r.status === "SEMESTER_BREAK")
+  ) {
+    return "SEMESTER_BREAK";
+  }
+
+  return null;
+}
+
+/**
+ * Auto-propagate SEMESTER_BREAK (ปิดภาคเรียน) attendance:
+ * "เมื่อมีสถานะการเช็คยอด ปิดภาคเรียน ในวันถัดไปให้ระบบทำการเช็คยอดเองอัตโนมัติว่า ปิดภาคเรียน จนกว่าจะมีการเปลี่ยนสถานะใหม่"
+ * 
+ * If a dormitory has a checked attendance with SEMESTER_BREAK,
+ * the next day(s) up to targetDate (default today) are automatically checked matching SEMESTER_BREAK,
+ * UNTIL an attendance status on a subsequent date is modified by the user (or changed away from the break status).
+ */
+// Cache of auto-attendance document IDs persisted or attempted in this session to prevent duplicate writes
+const persistedAutoDocIds = new Set<string>();
+let syncAutoAttendanceInFlight: Promise<DailyAttendance[]> | null = null;
+
+export async function syncAutoAttendanceCarryOver(
   allRecords: DailyAttendance[],
   targetDate?: string
 ): Promise<DailyAttendance[]> {
-  const todayStr = getTodayDateString();
-  const maxTargetDate = targetDate && targetDate > todayStr ? targetDate : todayStr;
-  const recordsMapById = new Map<string, DailyAttendance>();
-  allRecords.forEach((r) => {
-    if (r && r.id) recordsMapById.set(r.id, r);
-  });
-
-  // Group records by dormId
-  const dormRecordsMap = new Map<string, DailyAttendance[]>();
-  allRecords.forEach((r) => {
-    if (!r || !r.dormId || !r.date) return;
-    const list = dormRecordsMap.get(r.dormId) || [];
-    list.push(r);
-    dormRecordsMap.set(r.dormId, list);
-  });
-
-  const newlyCreatedRecords: DailyAttendance[] = [];
-
-  dormRecordsMap.forEach((dormRecs, dormId) => {
-    // Sort chronologically ascending
-    dormRecs.sort((a, b) => a.date.localeCompare(b.date));
-
-    // Find the latest checked attendance date for this dorm
-    let lastSemesterBreakIndex = -1;
-    for (let i = 0; i < dormRecs.length; i++) {
-      const rec = dormRecs[i];
-      if (
-        (rec.status !== "CHECKED" && rec.status !== "SEMESTER_BREAK") ||
-        !rec.records ||
-        rec.records.length === 0
-      )
-        continue;
-      const hasSemesterBreak =
-        rec.status === "SEMESTER_BREAK" ||
-        rec.records.some((r) => r.status === "SEMESTER_BREAK");
-      if (hasSemesterBreak) {
-        lastSemesterBreakIndex = i;
-      }
+  // If a sync is already running with the same record count, reuse it to prevent concurrent stream writes
+  if (syncAutoAttendanceInFlight) {
+    try {
+      return await syncAutoAttendanceInFlight;
+    } catch {
+      // If previous failed, continue fresh
     }
-
-    if (lastSemesterBreakIndex === -1) return;
-
-    // Check from this semester break forward
-    const startRec = dormRecs[lastSemesterBreakIndex];
-    let currDate = getNextDateString(startRec.date);
-    let prevRec = startRec;
-    let safetyCount = 0;
-
-    while (currDate <= maxTargetDate && safetyCount < 90) {
-      safetyCount++;
-      const expectedDocId = `${currDate}_${dormId}`;
-      const existing = recordsMapById.get(expectedDocId);
-
-      if (existing) {
-        // If a record already exists: check if it still contains SEMESTER_BREAK
-        const stillHasBreak = existing.records && existing.records.some((r) => r.status === "SEMESTER_BREAK");
-        if (!stillHasBreak) {
-          // "จนกว่าจะมีการเปลี่ยนสถานะการเช็คยอด" -> Status was changed by user, stop propagating!
-          break;
-        }
-        prevRec = existing;
-        currDate = getNextDateString(currDate);
-      } else {
-        // Auto-check this day as SEMESTER_BREAK
-        const autoRecords: StudentAttendanceRecord[] = (prevRec.records || []).map((r) => {
-          const item: StudentAttendanceRecord = {
-            studentId: r.studentId,
-            status: r.status === "SEMESTER_BREAK" ? "SEMESTER_BREAK" : r.status,
-            reason: r.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (r.reason || ""),
-            note: r.note || "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)"
-          };
-          if (r.studentName) {
-            item.studentName = r.studentName;
-          }
-          return item;
-        });
-
-        const autoRecord: DailyAttendance = {
-          id: expectedDocId,
-          date: currDate,
-          dormId: dormId,
-          isHomeBreak: false,
-          status: "SEMESTER_BREAK",
-          checkedAt: "08:00",
-          checkedBy: "ระบบอัตโนมัติ (ปิดภาคเรียน)",
-          teacherOrientationNotes: ["ปิดภาคเรียน"],
-          records: autoRecords
-        };
-
-        recordsMapById.set(expectedDocId, autoRecord);
-        allRecords.push(autoRecord);
-        newlyCreatedRecords.push(autoRecord);
-        prevRec = autoRecord;
-        currDate = getNextDateString(currDate);
-      }
-    }
-  });
-
-  // If new auto records were created, persist them to Firestore and local cache
-  if (newlyCreatedRecords.length > 0) {
-    setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
-    newlyCreatedRecords.forEach((r) => {
-      try {
-        const cleaned = cleanFirestoreData(r);
-        setDoc(doc(db, "attendance", r.id), cleaned, { merge: true }).catch((err) =>
-          console.warn("Could not save auto semester break record to Firestore:", err)
-        );
-      } catch (err) {
-        console.warn("Could not prepare auto semester break record for Firestore:", err);
-      }
-    });
   }
 
-  return allRecords;
+  const syncPromise = (async () => {
+    const todayStr = getTodayDateString();
+    // Safety: Auto-attendance carry over must never write future dates ahead of today to Firestore
+    const maxTargetDate = todayStr;
+    const recordsMapById = new Map<string, DailyAttendance>();
+    allRecords.forEach((r) => {
+      if (r && r.id) {
+        recordsMapById.set(r.id, r);
+        persistedAutoDocIds.add(r.id);
+      }
+    });
+
+    // Group records by dormId
+    const dormRecordsMap = new Map<string, DailyAttendance[]>();
+    allRecords.forEach((r) => {
+      if (!r || !r.dormId || !r.date) return;
+      const list = dormRecordsMap.get(r.dormId) || [];
+      list.push(r);
+      dormRecordsMap.set(r.dormId, list);
+    });
+
+    const newlyCreatedRecords: DailyAttendance[] = [];
+
+    dormRecordsMap.forEach((dormRecs, dormId) => {
+      // Sort chronologically ascending
+      dormRecs.sort((a, b) => a.date.localeCompare(b.date));
+
+      // Iterate through all records for this dorm to propagate breaks across gaps or up to maxTargetDate
+      for (let i = 0; i < dormRecs.length; i++) {
+        const rec = dormRecs[i];
+        if (
+          (rec.status !== "CHECKED" && rec.status !== "SEMESTER_BREAK" && rec.status !== "HOME_BREAK") ||
+          !rec.records ||
+          rec.records.length === 0
+        ) {
+          continue;
+        }
+
+        const breakType = getAttendanceBreakType(rec);
+        if (!breakType) continue;
+
+        let currDate = getNextDateString(rec.date);
+        let prevRec = rec;
+        let safetyCount = 0;
+
+        while (currDate <= maxTargetDate && safetyCount < 90) {
+          safetyCount++;
+          const expectedDocId = `${currDate}_${dormId}`;
+          const existing = recordsMapById.get(expectedDocId);
+
+          if (existing) {
+            const existingBreakType = getAttendanceBreakType(existing);
+            if (existingBreakType !== breakType) {
+              // Status was changed by user away from this break, stop propagating!
+              break;
+            }
+            prevRec = existing;
+            currDate = getNextDateString(currDate);
+          } else {
+            // Auto-check this day matching SEMESTER_BREAK
+            const targetStatus = "SEMESTER_BREAK";
+            const targetReason = "ปิดภาคเรียน";
+            const noteText = "ปิดภาคเรียน";
+
+            const autoRecords: StudentAttendanceRecord[] = (prevRec.records || []).map((r) => {
+              const cleanedNote =
+                r.note && !r.note.includes("เช็คยอดอัตโนมัติ") ? r.note : noteText;
+              const item: StudentAttendanceRecord = {
+                studentId: r.studentId,
+                status: targetStatus,
+                reason: targetReason,
+                note: cleanedNote
+              };
+              if (r.studentName) {
+                item.studentName = r.studentName;
+              }
+              return item;
+            });
+
+            const autoRecord: DailyAttendance = {
+              id: expectedDocId,
+              date: currDate,
+              dormId: dormId,
+              isHomeBreak: false,
+              status: "SEMESTER_BREAK",
+              checkedAt: "08:00",
+              checkedBy: "ระบบอัตโนมัติ (ปิดภาคเรียน)",
+              teacherOrientationNotes: [targetReason],
+              records: autoRecords
+            };
+
+            recordsMapById.set(expectedDocId, autoRecord);
+            allRecords.push(autoRecord);
+            newlyCreatedRecords.push(autoRecord);
+            prevRec = autoRecord;
+            currDate = getNextDateString(currDate);
+          }
+        }
+      }
+    });
+
+    // If new auto records were created, persist them to Firestore using safe chunked batches
+    if (newlyCreatedRecords.length > 0) {
+      setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
+
+      const recordsToPersist = newlyCreatedRecords.filter(
+        (r) => !persistedAutoDocIds.has(r.id)
+      );
+      recordsToPersist.forEach((r) => persistedAutoDocIds.add(r.id));
+
+      if (recordsToPersist.length > 0) {
+        // Run batch persistence sequentially in small chunks of 5 without overloading Firestore write streams
+        (async () => {
+          const CHUNK_SIZE = 5;
+          for (let i = 0; i < recordsToPersist.length; i += CHUNK_SIZE) {
+            const chunk = recordsToPersist.slice(i, i + CHUNK_SIZE);
+            try {
+              const batch = writeBatch(db);
+              chunk.forEach((r) => {
+                const cleaned = cleanFirestoreData(r);
+                batch.set(doc(db, "attendance", r.id), cleaned, { merge: true });
+              });
+              await batch.commit();
+            } catch (err: any) {
+              console.warn(
+                "Firestore writeBatch commit error during auto carry-over:",
+                err?.message || err
+              );
+            }
+          }
+        })().catch((err) =>
+          console.warn("Background auto-carry-over write failed:", err?.message || err)
+        );
+      }
+    }
+
+    return allRecords;
+  })();
+
+  syncAutoAttendanceInFlight = syncPromise;
+  try {
+    const result = await syncPromise;
+    return result;
+  } finally {
+    syncAutoAttendanceInFlight = null;
+  }
 }
+
+// Backward-compatibility alias
+export const syncSemesterBreakAutoAttendance = syncAutoAttendanceCarryOver;
 
 export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
   let records: DailyAttendance[] = [];
@@ -1215,7 +1295,7 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
 export async function fetchAllAttendanceRecords(): Promise<DailyAttendance[]> {
   let records: DailyAttendance[] = [];
   try {
-    const snap = await withTimeout(getDocs(collection(db, "attendance")), 3500);
+    const snap = await withTimeout(getDocs(collection(db, "attendance")), 15000);
     records = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
   } catch (err: any) {
@@ -1235,7 +1315,7 @@ export async function fetchAttendance(
 ): Promise<Record<string, DailyAttendance> | DailyAttendance> {
   let allRecords: DailyAttendance[] = [];
   try {
-    const snap = await withTimeout(getDocs(collection(db, "attendance")), 3500);
+    const snap = await withTimeout(getDocs(collection(db, "attendance")), 15000);
     allRecords = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
   } catch (err: any) {
@@ -1327,9 +1407,10 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
 
   updateLocalCacheList(CACHE_KEYS.ATTENDANCE, updatedRecord, "UPSERT");
 
-  // If status on this date no longer contains SEMESTER_BREAK,
+  // If status on this date is no longer a break (SEMESTER_BREAK or HOME_BREAK),
   // clean up any subsequent future auto-generated records for this dorm
-  if (!updatedRecord.records.some((r) => r.status === "SEMESTER_BREAK")) {
+  const activeBreakType = getAttendanceBreakType(updatedRecord);
+  if (!activeBreakType) {
     const cached = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
     const toDelete = cached.filter(
       (c) =>
@@ -1340,9 +1421,18 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
     if (toDelete.length > 0) {
       const remaining = cached.filter((c) => !toDelete.some((d) => d.id === c.id));
       setLocalCache(CACHE_KEYS.ATTENDANCE, remaining);
-      toDelete.forEach((d) => {
-        deleteDoc(doc(db, "attendance", d.id)).catch(() => {});
-      });
+      (async () => {
+        try {
+          const batch = writeBatch(db);
+          toDelete.forEach((d) => {
+            batch.delete(doc(db, "attendance", d.id));
+            persistedAutoDocIds.delete(d.id);
+          });
+          await batch.commit();
+        } catch (err: any) {
+          console.warn("Could not delete cancelled auto-attendance records:", err?.message || err);
+        }
+      })().catch(() => {});
     }
   }
 

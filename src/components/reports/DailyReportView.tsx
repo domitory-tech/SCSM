@@ -443,6 +443,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
           systemSettings={systemSettings}
           currentUser={currentUser}
           isLoading={isLoading}
+          selectedReportDate={selectedReportDate}
         />
       ) : (
         <>

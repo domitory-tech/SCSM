@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import {
   DEFAULT_SYSTEM_SETTINGS,
@@ -33,6 +33,7 @@ interface MonthlyReportViewProps {
   systemSettings?: SystemSettings;
   currentUser?: UserProfile | null;
   isLoading?: boolean;
+  selectedReportDate?: string;
 }
 
 // Attendance code mapping
@@ -122,13 +123,46 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   attendanceRecords = [],
   systemSettings = DEFAULT_SYSTEM_SETTINGS,
   currentUser,
-  isLoading = false
+  isLoading = false,
+  selectedReportDate
 }) => {
-  const currentDate = new Date();
-  const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1); // 1-12
+  const initialYear = useMemo(() => {
+    if (selectedReportDate) {
+      const parts = selectedReportDate.split("-");
+      const y = parseInt(parts[0], 10);
+      if (!isNaN(y)) return y;
+    }
+    return new Date().getFullYear();
+  }, [selectedReportDate]);
+
+  const initialMonth = useMemo(() => {
+    if (selectedReportDate) {
+      const parts = selectedReportDate.split("-");
+      const m = parseInt(parts[1], 10);
+      if (!isNaN(m)) return m;
+    }
+    return new Date().getMonth() + 1;
+  }, [selectedReportDate]);
+
+  const [selectedYear, setSelectedYear] = useState<number>(initialYear);
+  const [selectedMonth, setSelectedMonth] = useState<number>(initialMonth);
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>("ม.1/1");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Sync selectedYear and selectedMonth when selectedReportDate changes
+  useEffect(() => {
+    if (selectedReportDate) {
+      const parts = selectedReportDate.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(y) && !isNaN(m)) {
+          setSelectedYear(y);
+          setSelectedMonth(m);
+        }
+      }
+    }
+  }, [selectedReportDate]);
 
   const daysInMonth = useMemo(() => {
     return getDaysInMonth(selectedYear, selectedMonth);
@@ -149,6 +183,26 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
       }
     });
     return map;
+  }, [attendanceRecords]);
+
+  // Dates marked as SEMESTER_BREAK (ปิดภาคเรียน) school-wide
+  // Only true if status is explicitly SEMESTER_BREAK (or every record is SEMESTER_BREAK and NOT a checked normal attendance)
+  const semesterBreakDates = useMemo(() => {
+    const set = new Set<string>();
+    attendanceRecords.forEach((att) => {
+      if (!att || !att.date) return;
+      if (att.status === "SEMESTER_BREAK" || (att as any).isSemesterBreak === true) {
+        set.add(att.date);
+      } else if (
+        att.status !== "CHECKED" &&
+        Array.isArray(att.records) &&
+        att.records.length > 0 &&
+        att.records.every((r) => r.status === "SEMESTER_BREAK" || r.reason === "ปิดภาคเรียน")
+      ) {
+        set.add(att.date);
+      }
+    });
+    return set;
   }, [attendanceRecords]);
 
   // Process data by classroom
@@ -195,17 +249,44 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
           const dayStr = String(d).padStart(2, "0");
           const dateStr = `${selectedYear}-${monthStr}-${dayStr}`;
           const dormAtt = attendanceLookup[dateStr]?.[std.dormId];
+          const isDateGloballySemBreak = semesterBreakDates.has(dateStr);
 
-          if (!dormAtt) {
-            // Unchecked date
+          // Check if dorm attendance explicitly indicates semester break (NOT teacherOrientationNotes which are orientation messages)
+          const isDormSemBreak =
+            dormAtt &&
+            (dormAtt.status === "SEMESTER_BREAK" || (dormAtt as any).isSemesterBreak === true);
+
+          if (isDormSemBreak) {
             attendanceMap[std.studentId][d] = {
-              status: "NONE",
-              label: "-",
-              code: "-",
-              color: "text-gray-300"
+              status: "SEMESTER_BREAK",
+              label: "ปิดภาคเรียน",
+              code: "ปภ",
+              color: ATTENDANCE_CODE_MAP.SEMESTER_BREAK.colorClass
             };
+            outDaysCount++;
+            dayStats[d].out++;
+          } else if (!dormAtt) {
+            if (isDateGloballySemBreak) {
+              attendanceMap[std.studentId][d] = {
+                status: "SEMESTER_BREAK",
+                label: "ปิดภาคเรียน",
+                code: "ปภ",
+                color: ATTENDANCE_CODE_MAP.SEMESTER_BREAK.colorClass
+              };
+              outDaysCount++;
+              dayStats[d].out++;
+            } else {
+              // Unchecked date
+              attendanceMap[std.studentId][d] = {
+                status: "NONE",
+                label: "-",
+                code: "-",
+                color: "text-gray-300"
+              };
+            }
           } else {
-            if (dormAtt.isHomeBreak) {
+            // Dorm attendance exists for this student's dormitory
+            if (dormAtt.isHomeBreak || dormAtt.status === "HOME_BREAK") {
               attendanceMap[std.studentId][d] = {
                 status: "ROUND_HOME",
                 label: "รอบกลับบ้าน",
@@ -215,8 +296,20 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
               outDaysCount++;
               dayStats[d].out++;
             } else if (Array.isArray(dormAtt.records)) {
-              const record = dormAtt.records.find((r) => r.studentId === std.studentId);
-              if (record && record.status !== "PRESENT") {
+              const record = dormAtt.records.find(
+                (r) => String(r.studentId).trim() === String(std.studentId).trim()
+              );
+
+              if (record && (record.status === "SEMESTER_BREAK" || record.reason === "ปิดภาคเรียน")) {
+                attendanceMap[std.studentId][d] = {
+                  status: "SEMESTER_BREAK",
+                  label: "ปิดภาคเรียน",
+                  code: "ปภ",
+                  color: ATTENDANCE_CODE_MAP.SEMESTER_BREAK.colorClass
+                };
+                outDaysCount++;
+                dayStats[d].out++;
+              } else if (record && record.status && record.status !== "PRESENT") {
                 const conf = ATTENDANCE_CODE_MAP[record.status] || ATTENDANCE_CODE_MAP.OTHER;
                 attendanceMap[std.studentId][d] = {
                   status: record.status,
@@ -234,6 +327,15 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                   color: ATTENDANCE_CODE_MAP.PRESENT.colorClass
                 };
                 dayStats[d].present++;
+              } else if (isDateGloballySemBreak) {
+                attendanceMap[std.studentId][d] = {
+                  status: "SEMESTER_BREAK",
+                  label: "ปิดภาคเรียน",
+                  code: "ปภ",
+                  color: ATTENDANCE_CODE_MAP.SEMESTER_BREAK.colorClass
+                };
+                outDaysCount++;
+                dayStats[d].out++;
               } else {
                 attendanceMap[std.studentId][d] = {
                   status: "NONE",
@@ -250,6 +352,15 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                 color: ATTENDANCE_CODE_MAP.PRESENT.colorClass
               };
               dayStats[d].present++;
+            } else if (isDateGloballySemBreak) {
+              attendanceMap[std.studentId][d] = {
+                status: "SEMESTER_BREAK",
+                label: "ปิดภาคเรียน",
+                code: "ปภ",
+                color: ATTENDANCE_CODE_MAP.SEMESTER_BREAK.colorClass
+              };
+              outDaysCount++;
+              dayStats[d].out++;
             } else {
               attendanceMap[std.studentId][d] = {
                 status: "NONE",
@@ -276,7 +387,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
         totalStudents: sortedStudents.length
       };
     });
-  }, [students, daysArray, selectedYear, selectedMonth, attendanceLookup]);
+  }, [students, daysArray, selectedYear, selectedMonth, attendanceLookup, semesterBreakDates]);
 
   // Filtered rooms for screen display (defaults to ม.1/1)
   const displayedRooms = useMemo(() => {
@@ -448,12 +559,16 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
             <span>อยู่หอพัก</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
-            <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 font-extrabold text-[10px]">รบ</span>
+            <span className="px-1.5 py-0.5 rounded-md bg-yellow-200 text-amber-950 font-black text-[10px] border border-yellow-300">รบ</span>
             <span>รอบกลับบ้าน</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <span className="px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700 font-extrabold text-[10px]">กบ</span>
             <span>กลับบ้าน</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 font-extrabold text-[10px]">ค</span>
+            <span>เข้าค่าย</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <span className="px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 font-extrabold text-[10px]">ป</span>
@@ -466,6 +581,18 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <span className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-700 font-extrabold text-[10px]">ลป</span>
             <span>แลกเปลี่ยน</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700 font-extrabold text-[10px]">ดร</span>
+            <span>เดินเรียน</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="px-1.5 py-0.5 rounded-md bg-neutral-800 text-white font-extrabold text-[10px]">ปภ</span>
+            <span>ปิดภาคเรียน</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 font-extrabold text-[10px]">ยห</span>
+            <span>ยังไม่เข้าหอพัก</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 font-extrabold text-[10px]">อ</span>
@@ -579,13 +706,17 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                                 const code = att?.code || "-";
                                 const isCheckmark = code === "✓";
                                 const isRoundHome = code === "รบ";
+                                const isSemesterBreak = code === "ปภ";
 
                                 return (
                                   <td
                                     key={d}
+                                    title={`${student.title || ""}${student.firstName} ${student.lastName} วันที่ ${d}: ${att?.label || "-"}`}
                                     className={`border border-slate-300 px-0.5 py-0.5 text-center leading-none ${
                                       isRoundHome
                                         ? "bg-yellow-200 text-amber-950 font-black text-[10px]"
+                                        : isSemesterBreak
+                                        ? "bg-neutral-800 text-white font-extrabold text-[10px]"
                                         : isCheckmark
                                         ? "text-emerald-600 font-black text-xs"
                                         : code !== "-"

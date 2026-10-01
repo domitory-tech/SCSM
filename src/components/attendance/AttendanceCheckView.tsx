@@ -175,16 +175,24 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
         map[rec.studentId] = rec;
       });
 
-      // Check if all existing records are SEMESTER_BREAK
+      // Check if all existing records are SEMESTER_BREAK or HOME_BREAK
       const isAllBreak = attendanceData.records.every((r) => r.status === "SEMESTER_BREAK");
+      const isAllHomeBreak =
+        attendanceData.isHomeBreak ||
+        attendanceData.status === "HOME_BREAK" ||
+        attendanceData.records.every((r) => r.status === "ROUND_HOME");
+
+      if (isAllHomeBreak) {
+        setIsHomeBreak(true);
+      }
 
       // Default missing students
       students.forEach((s) => {
         if (!map[s.studentId]) {
           map[s.studentId] = {
             studentId: s.studentId,
-            status: isAllBreak ? "SEMESTER_BREAK" : "PRESENT",
-            reason: isAllBreak ? "ปิดภาคเรียน" : ""
+            status: isAllBreak ? "SEMESTER_BREAK" : isAllHomeBreak ? "ROUND_HOME" : "PRESENT",
+            reason: isAllBreak ? "ปิดภาคเรียน" : isAllHomeBreak ? "รอบกลับบ้าน" : ""
           };
         }
       });
@@ -200,14 +208,19 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       });
       setRecordsMap(map);
 
-      // ตรวจสอบว่าวันก่อนหน้ามีสถานะปิดภาคเรียนหรือไม่ หากมีให้ปรับเป็นปิดภาคเรียนอัตโนมัติ
+      // ตรวจสอบว่าวันก่อนหน้ามีสถานะปิดภาคเรียน หรือรอบกลับบ้าน หรือไม่ หากมีให้ปรับสถานะอัตโนมัติ
       let isCancelled = false;
       const prevDateStr = getPreviousDateString(selectedDate);
       fetchAttendance(prevDateStr, selectedDormId).then((prevAtt: any) => {
         if (isCancelled) return;
         if (prevAtt && prevAtt.records && prevAtt.records.length > 0) {
-          const hasBreak = prevAtt.records.some((r: any) => r.status === "SEMESTER_BREAK");
-          if (hasBreak) {
+          const hasSemesterBreak = prevAtt.status === "SEMESTER_BREAK" || prevAtt.records.some((r: any) => r.status === "SEMESTER_BREAK");
+          const hasHomeBreak =
+            prevAtt.isHomeBreak ||
+            prevAtt.status === "HOME_BREAK" ||
+            prevAtt.records.every((r: any) => r.status === "ROUND_HOME");
+
+          if (hasSemesterBreak) {
             const allBreak = prevAtt.records.every((r: any) => r.status === "SEMESTER_BREAK");
             const breakStudents = new Set<string>();
             prevAtt.records.forEach((r: any) => {
@@ -222,7 +235,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                     studentId: s.studentId,
                     status: "SEMESTER_BREAK",
                     reason: "ปิดภาคเรียน",
-                    note: "เช็คยอดอัตโนมัติ (ปิดภาคเรียน)"
+                    note: "ปิดภาคเรียน"
                   };
                 }
               });
@@ -548,6 +561,15 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     return hasAutoCheckNote && hasBreakRecord;
   }, [attendanceData, recordsMap]);
 
+  const isAutoCheckedHomeBreak = useMemo(() => {
+    const hasAutoCheckNote = attendanceData?.checkedBy?.includes("ระบบอัตโนมัติ") || false;
+    const hasHomeBreakRecord =
+      isHomeBreak ||
+      attendanceData?.status === "HOME_BREAK" ||
+      Object.values(recordsMap).some((r) => r.status === "ROUND_HOME");
+    return hasAutoCheckNote && hasHomeBreakRecord && !isAutoCheckedSemesterBreak;
+  }, [attendanceData, recordsMap, isHomeBreak, isAutoCheckedSemesterBreak]);
+
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Top Header Card */}
@@ -785,6 +807,28 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               </div>
               <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
                 ระบบได้ทำการเช็คยอดสถานะปิดภาคเรียนให้อัตโนมัติในวันถัดไปจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอด หากเปิดภาคเรียนหรือต้องการเปลี่ยนแปลงสถานะ สามารถปรับสถานะนักเรียนและกดปุ่ม "บันทึกข้อมูล" ได้ทันที
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto Home Break Notice Banner */}
+      {isAutoCheckedHomeBreak && (
+        <div className="bg-amber-950 border border-amber-800 text-white p-4 rounded-2xl flex items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-2.5 bg-amber-900/80 rounded-xl text-amber-200 border border-amber-700 shrink-0 mt-0.5 sm:mt-0">
+              <Home className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-sm text-amber-100">ระบบเช็คยอด "รอบกลับบ้าน" ให้อัตโนมัติ</span>
+                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-900 text-amber-300 border border-amber-700 font-medium">
+                  ต่อเนื่องจากวันก่อนหน้า
+                </span>
+              </div>
+              <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                ระบบได้ทำการเช็คยอดสถานะรอบกลับบ้านให้อัตโนมัติในวันถัดไปจนกว่าจะมีการเปลี่ยนสถานะการเช็คยอด หากนักเรียนกลับเข้าหอพักหรือต้องการเปลี่ยนแปลงสถานะ สามารถปรับสถานะนักเรียนและกดปุ่ม "บันทึกข้อมูล" ได้ทันที
               </p>
             </div>
           </div>

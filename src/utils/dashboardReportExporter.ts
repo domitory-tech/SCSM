@@ -65,6 +65,7 @@ export interface DashboardReportExportData {
     dormName: string;
     reason: string;
     statusLabel: string;
+    status?: string;
   }>;
   insights: string[];
   signatories?: {
@@ -206,7 +207,7 @@ export function exportDashboardReportHtml(
         <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
         <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
         <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
-        <td class="py-2 px-2.5 font-bold text-rose-600">${a.reason || a.statusLabel}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${(a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-")}</td>
       </tr>
     `).join("");
 
@@ -610,6 +611,7 @@ export interface AbsentListOnlyExportData {
     dormName: string;
     reason: string;
     statusLabel: string;
+    status?: string;
   }>;
   signatories?: {
     creator: string;
@@ -695,7 +697,7 @@ export function exportAbsentListOnlyHtml(
         <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
         <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
         <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
-        <td class="py-2 px-2.5 font-bold text-rose-600">${a.reason || a.statusLabel}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${(a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-")}</td>
       </tr>
     `).join("");
 
