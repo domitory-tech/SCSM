@@ -136,8 +136,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "เช็คยอด",
       fullLabel: "เช็คยอดหอพัก",
       icon: CheckCircle2,
-      badge: uncheckedDormsCount > 0 ? `${uncheckedDormsCount} รอเช็ค` : undefined,
-      badgeColor: "bg-[#FE9496] text-white font-extrabold"
+      badge: systemSettings?.isAttendancePaused
+        ? "⛔ หยุดเช็ค"
+        : uncheckedDormsCount > 0
+        ? `${uncheckedDormsCount} รอเช็ค`
+        : undefined,
+      badgeColor: systemSettings?.isAttendancePaused
+        ? "bg-rose-600 text-white font-black animate-pulse"
+        : "bg-[#FE9496] text-white font-extrabold"
     },
     {
       id: "notices",

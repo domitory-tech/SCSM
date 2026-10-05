@@ -1,7 +1,7 @@
 import React from "react";
 import { Bar, Doughnut, Line, Radar } from "react-chartjs-2";
 import "../charts/ChartSetup";
-import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile } from "../../types";
+import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile, SystemSettings } from "../../types";
 import { useUsersQuery } from "../../services/useDormQueries";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
 import { getDashboardDefaultDate, getTodayDateString, detectStudentGender } from "../../utils/dateUtils";
@@ -38,7 +38,8 @@ import {
   Table,
   X,
   Sparkles,
-  Layers
+  Layers,
+  PauseCircle
 } from "lucide-react";
 
 interface DashboardViewProps {
@@ -52,7 +53,9 @@ interface DashboardViewProps {
   onNavigateToCheck: (dormId?: string, date?: string) => void;
   onNavigateToReports: () => void;
   onNavigateToDormLayout?: () => void;
+  onNavigateToStudents?: () => void;
   currentUser?: UserProfile | null;
+  systemSettings?: SystemSettings;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -66,7 +69,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToCheck,
   onNavigateToReports,
   onNavigateToDormLayout,
-  currentUser
+  onNavigateToStudents,
+  currentUser,
+  systemSettings
 }) => {
   const { data: queriedUsers = [] } = useUsersQuery();
   const effectiveUsers = users && users.length > 0 ? users : queriedUsers;
@@ -1353,6 +1358,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
+      {/* Attendance Check Paused Notice Banner */}
+      {systemSettings?.isAttendancePaused && (
+        <div className="bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white p-4 rounded-2xl shadow-lg border border-rose-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <PauseCircle className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="bg-white text-rose-700 text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                  ⛔ ระบบหยุดการเช็คยอดชั่วคราว
+                </span>
+                {systemSettings.attendancePausedAt && (
+                  <span className="text-[11px] text-white/90">
+                    (หยุดเมื่อ: {systemSettings.attendancePausedAt}{systemSettings.attendancePausedBy ? ` โดย ${systemSettings.attendancePausedBy}` : ""})
+                  </span>
+                )}
+              </div>
+              <p className="text-sm font-bold mt-1 text-white">
+                {systemSettings.attendancePauseReason || "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"}
+              </p>
+              <p className="text-xs text-rose-100 mt-0.5">
+                กำลังอยู่ในช่วงปรับปรุงข้อมูลนักเรียนและการย้ายหอพัก ครูประจำหอพักไม่ต้องทำการเช็คยอดจนกว่าจะเปิดระบบอีกครั้ง
+              </p>
+            </div>
+          </div>
+          {onNavigateToStudents && (currentUser?.roleLevel === 1 || currentUser?.roleLevel === 2) && (
+            <button
+              type="button"
+              onClick={onNavigateToStudents}
+              className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 font-black text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>จัดการรายชื่อนักเรียน</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Section Grid: Left = Thai Calendar Picker, Right = 4 Summary Stat Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* Left Side (lg:col-span-5 xl:col-span-4): Thai Calendar Picker */}

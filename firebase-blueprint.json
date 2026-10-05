@@ -78,7 +78,9 @@
       "properties": {
         "schoolNameTh": { "type": "string" },
         "systemNameTh": { "type": "string" },
-        "schoolLogoUrl": { "type": "string" }
+        "schoolLogoUrl": { "type": "string" },
+        "isAttendancePaused": { "type": "boolean" },
+        "attendancePauseReason": { "type": "string" }
       }
     }
   },

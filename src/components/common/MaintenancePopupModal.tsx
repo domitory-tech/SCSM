@@ -33,9 +33,15 @@ export const MaintenancePopupModal: React.FC<MaintenancePopupModalProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
-                  ⚡ แจ้งการปรับปรุงระบบ
-                </span>
+                {systemSettings.isAttendancePaused ? (
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-rose-600 text-white px-2 py-0.5 rounded-md animate-pulse">
+                    ⛔ หยุดการเช็คยอดชั่วคราว
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
+                    ⚡ แจ้งการปรับปรุงระบบ
+                  </span>
+                )}
                 <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md">
                   {formatThaiFullDate(todayStr)}
                 </span>

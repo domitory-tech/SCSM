@@ -25,6 +25,8 @@ import {
   useAllAttendanceRecordsQuery,
   useAttendanceQuery,
   useBatchDeleteStudentsMutation,
+  useBatchTransferStudentsMutation,
+  useClearStudentsMutation,
   useDailyReportQuery,
   useDeleteNoticeMutation,
   useDeleteStudentMutation,
@@ -156,6 +158,8 @@ function MainAppContent() {
   const updateStudentMutation = useUpdateStudentMutation();
   const deleteStudentMutation = useDeleteStudentMutation();
   const batchDeleteStudentsMutation = useBatchDeleteStudentsMutation();
+  const clearStudentsMutation = useClearStudentsMutation();
+  const batchTransferStudentsMutation = useBatchTransferStudentsMutation();
   const postNoticeMutation = usePostNoticeMutation();
   const updateNoticeMutation = useUpdateNoticeMutation();
   const deleteNoticeMutation = useDeleteNoticeMutation();
@@ -282,7 +286,9 @@ function MainAppContent() {
               onNavigateToCheck={handleNavigateToCheck}
               onNavigateToReports={handleNavigateToReports}
               onNavigateToDormLayout={() => handleSelectTab("dorm-layout")}
+              onNavigateToStudents={() => setActiveTab("students")}
               currentUser={currentUser}
+              systemSettings={systemSettings}
             />
           )}
 
@@ -329,6 +335,9 @@ function MainAppContent() {
               selectedDate={selectedAttendanceDate}
               onDateChange={setSelectedAttendanceDate}
               onReturnToDashboard={() => setActiveTab("dashboard")}
+              systemSettings={systemSettings}
+              onUpdateSystemSettings={handleUpdateSystemSettings}
+              onNavigateToStudents={() => setActiveTab("students")}
             />
           )}
 
@@ -371,6 +380,8 @@ function MainAppContent() {
               dorms={dorms}
               students={students}
               currentUser={currentUser}
+              systemSettings={systemSettings}
+              onUpdateSystemSettings={handleUpdateSystemSettings}
               onImportStudents={async (dormId, stds) => {
                 await importStudentsMutation.mutateAsync({ dormId, students: stds });
               }}
@@ -385,6 +396,12 @@ function MainAppContent() {
               }}
               onBatchDeleteStudents={async (ids) => {
                 await batchDeleteStudentsMutation.mutateAsync(ids);
+              }}
+              onClearStudents={async (mode, dormId) => {
+                await clearStudentsMutation.mutateAsync({ mode, dormId });
+              }}
+              onBatchTransferDorm={async (studentIds, targetDormId, targetDormRoom) => {
+                await batchTransferStudentsMutation.mutateAsync({ studentIds, targetDormId, targetDormRoom });
               }}
             />
           )}

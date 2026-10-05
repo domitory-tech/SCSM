@@ -43,6 +43,10 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   systemNameEn: "Student Dormitory Management System",
   systemIcon: "building",
   lastUpdatedDate: "8 สิงหาคม พ.ศ. 2569",
+  isAttendancePaused: false,
+  attendancePauseReason: "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
+  attendancePausedAt: "",
+  attendancePausedBy: "",
   navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS
 };
 
@@ -211,7 +215,8 @@ export async function importStudents(dormId: string, students: Partial<Student>[
   const createdStudents: Student[] = [];
 
   students.forEach((s, idx) => {
-    const id = s.id || `std-${dormId}-${Date.now()}-${idx}`;
+    const targetDormId = s.dormId || dormId;
+    const id = s.id || `std-${targetDormId}-${Date.now()}-${idx}`;
     const newStudent: Student = {
       id,
       studentId: s.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
@@ -222,8 +227,10 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       nickname: s.nickname || "",
       grade: s.grade || "ม.1",
       room: Number(s.room) || 1,
-      dormId,
+      dormId: targetDormId,
       dormRoom: s.dormRoom || "101",
+      dormBed: s.dormBed ? String(s.dormBed).trim() : "",
+      bed: s.dormBed ? String(s.dormBed).trim() : (s.bed ? String(s.bed).trim() : ""),
       gender: (s.gender as any) || "male"
     };
     createdStudents.push(newStudent);
@@ -314,6 +321,38 @@ export async function batchDeleteStudents(ids: string[]) {
   setLocalCache(CACHE_KEYS.STUDENTS, remaining);
 
   return { success: true, count: ids.length };
+}
+
+export async function batchTransferStudentsDorm(
+  studentIds: string[],
+  targetDormId: string,
+  targetDormRoom?: string
+) {
+  const cached = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
+  const idSet = new Set(studentIds);
+  const updatedStudents: Student[] = [];
+
+  const updatedCache = cached.map((s) => {
+    if (idSet.has(s.id)) {
+      const updated: Student = {
+        ...s,
+        dormId: targetDormId,
+        ...(targetDormRoom ? { dormRoom: targetDormRoom } : {})
+      };
+      updatedStudents.push(updated);
+      return updated;
+    }
+    return s;
+  });
+
+  try {
+    await commitChunkedSetDocs("students", updatedStudents);
+  } catch (e) {
+    console.warn("Batch transferred students offline locally:", e);
+  }
+
+  setLocalCache(CACHE_KEYS.STUDENTS, updatedCache);
+  return { success: true, count: updatedStudents.length };
 }
 
 // ----------------------------------------------------------------------

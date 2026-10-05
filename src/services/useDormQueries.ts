@@ -4,6 +4,8 @@ import {
   addStudent,
   addUser,
   batchDeleteStudents,
+  batchTransferStudentsDorm,
+  clearStudentsDatabase,
   deleteNotice,
   deleteSampleData,
   DeleteSampleDataOptions,
@@ -186,6 +188,35 @@ export function useBatchDeleteStudentsMutation() {
     onSuccess: () => {
       recordLastDbSave();
       queryClient.invalidateQueries({ queryKey: ["students"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+    }
+  });
+}
+
+export function useClearStudentsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { mode: "BY_DORM" | "ALL"; dormId?: string }) =>
+      clearStudentsDatabase(payload),
+    onSuccess: () => {
+      recordLastDbSave();
+      queryClient.invalidateQueries({ queryKey: ["students"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+    }
+  });
+}
+
+export function useBatchTransferStudentsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ studentIds, targetDormId, targetDormRoom }: { studentIds: string[]; targetDormId: string; targetDormRoom?: string }) =>
+      batchTransferStudentsDorm(studentIds, targetDormId, targetDormRoom),
+    onSuccess: () => {
+      recordLastDbSave();
+      queryClient.invalidateQueries({ queryKey: ["students"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
     }
   });
 }

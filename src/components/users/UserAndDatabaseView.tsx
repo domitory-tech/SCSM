@@ -80,7 +80,9 @@ import {
   Megaphone,
   Bell,
   Eye,
-  Wrench
+  Wrench,
+  PauseCircle,
+  PlayCircle
 } from "lucide-react";
 import { uploadImageToGoogleDrive } from "../../services/googleDrive";
 
@@ -1587,6 +1589,85 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                 </span>
               </div>
 
+              {/* Attendance Pause Switch Card */}
+              <div className={`p-4 rounded-xl border-2 transition-all ${
+                settingsForm.isAttendancePaused
+                  ? "bg-rose-50 border-rose-400 shadow-xs"
+                  : "bg-white border-amber-200"
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                      settingsForm.isAttendancePaused
+                        ? "bg-rose-500 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {settingsForm.isAttendancePaused ? (
+                        <PauseCircle className="w-5 h-5 animate-pulse" />
+                      ) : (
+                        <PlayCircle className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-black ${settingsForm.isAttendancePaused ? "text-rose-900" : "text-slate-800"}`}>
+                          หยุดการเช็คยอดนักเรียนชั่วคราว (Pause Attendance Checks)
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          settingsForm.isAttendancePaused
+                            ? "bg-rose-200 text-rose-800"
+                            : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {settingsForm.isAttendancePaused ? "สถานะ: ปิดเช็คยอดอยู่" : "สถานะ: เปิดปกติ"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed font-medium">
+                        เมื่อเปิดตัวเลือกนี้ ครูประจำหอพักจะไม่สามารถบันทึกการเช็คยอดได้ ใช้เมื่อต้องการ <strong>ลบรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none shrink-0 self-start sm:self-center">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.isAttendancePaused ?? false}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        const now = new Date();
+                        const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+                        const timeStr = `${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} น.`;
+
+                        setSettingsForm({
+                          ...settingsForm,
+                          isAttendancePaused: checked,
+                          attendancePausedAt: checked ? timeStr : undefined,
+                          attendancePausedBy: checked ? currentUser?.name || "ผู้ดูแลระบบ" : undefined
+                        });
+                      }}
+                      className="w-5 h-5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-black text-slate-800">
+                      {settingsForm.isAttendancePaused ? "หยุดการเช็คยอด" : "เปิดเช็คปกติ"}
+                    </span>
+                  </label>
+                </div>
+
+                {settingsForm.isAttendancePaused && (
+                  <div className="mt-3 pt-3 border-t border-rose-200">
+                    <label className="block text-xs font-bold text-rose-950 mb-1">
+                      ระบุเหตุผลในการหยุดเช็คยอด (แสดงในแถบแจ้งเตือน):
+                    </label>
+                    <input
+                      type="text"
+                      value={settingsForm.attendancePauseReason || ""}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, attendancePauseReason: e.target.value })}
+                      placeholder="เช่น ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"
+                      className="w-full bg-white border border-rose-300 rounded-xl px-3.5 py-2 text-xs font-semibold text-rose-950 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Toggles Row */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 {/* Toggle 1: Auto Popup */}
@@ -1718,6 +1799,29 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     className="text-[10px] bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded-lg font-bold transition-colors cursor-pointer"
                   >
                     + ข้อความแจ้งปิดปรับปรุงชั่วคราว
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+                      const timeStr = `${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} น.`;
+
+                      setSettingsForm({
+                        ...settingsForm,
+                        isAttendancePaused: true,
+                        attendancePausedAt: timeStr,
+                        attendancePausedBy: currentUser?.name || "ผู้ดูแลระบบ",
+                        attendancePauseReason: "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
+                        maintenanceTitle: "แจ้งหยุดการเช็คยอดเพื่อปรับปรุงรายชื่อและย้ายหอพัก",
+                        maintenanceMessage: `เรียน ครูประจำหอพักและผู้เกี่ยวข้องทุกท่าน\nระบบขอหยุดการเช็คยอดนักเรียนชั่วคราว เพื่อดำเนินการ:\n1. ลบรายชื่อนักเรียนเดิมที่จบการศึกษาหรือย้ายออก\n2. บันทึกการย้ายหอพักของนักเรียนเดิม\n3. นำเข้าข้อมูลรายชื่อนักเรียนชุดใหม่เข้าสู่ระบบ\nขอความกรุณาครูประจำหอพักงดการเช็คยอดจนกว่าระบบจะเปิดให้บริการตามปกติ`,
+                        showMaintenanceBox: true,
+                        showMaintenancePopup: true
+                      });
+                    }}
+                    className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 px-2 py-1 rounded-lg font-bold transition-colors cursor-pointer"
+                  >
+                    + แจ้งหยุดเช็คยอด (ย้ายหอ/นักเรียนใหม่)
                   </button>
                 </div>
               </div>

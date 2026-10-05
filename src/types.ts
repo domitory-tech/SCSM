@@ -159,6 +159,11 @@ export interface SystemSettings {
   maintenanceMessage?: string;
   showMaintenancePopup?: boolean;
   showMaintenanceBox?: boolean;
+  // Attendance Pause / Freeze feature
+  isAttendancePaused?: boolean;
+  attendancePauseReason?: string;
+  attendancePausedAt?: string;
+  attendancePausedBy?: string;
   // Dynamic Navigation Access Permissions
   navigationPermissions?: RoleNavigationPermissions;
 }

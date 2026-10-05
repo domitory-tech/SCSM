@@ -37,8 +37,17 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
-  X
+  X,
+  PauseCircle,
+  PlayCircle,
+  ArrowRightLeft,
+  ShieldAlert,
+  RotateCcw,
+  Sparkles,
+  Home,
+  Check
 } from "lucide-react";
+import { SystemSettings } from "../../types";
 
 interface StudentManagementViewProps {
   dorms: Dormitory[];
@@ -48,7 +57,11 @@ interface StudentManagementViewProps {
   onUpdateStudent?: (id: string, student: Partial<Student>) => Promise<void>;
   onDeleteStudent: (id: string) => Promise<void>;
   onBatchDeleteStudents?: (ids: string[]) => Promise<void>;
+  onClearStudents?: (mode: "BY_DORM" | "ALL", dormId?: string) => Promise<void>;
+  onBatchTransferDorm?: (studentIds: string[], targetDormId: string, targetDormRoom?: string) => Promise<void>;
   currentUser?: UserProfile | null;
+  systemSettings?: SystemSettings;
+  onUpdateSystemSettings?: (settings: SystemSettings) => Promise<void> | void;
 }
 
 export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
@@ -59,7 +72,11 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   onUpdateStudent,
   onDeleteStudent,
   onBatchDeleteStudents,
-  currentUser
+  onClearStudents,
+  onBatchTransferDorm,
+  currentUser,
+  systemSettings,
+  onUpdateSystemSettings
 }) => {
   const [selectedDormFilter, setSelectedDormFilter] = useState<string>("ALL");
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>("ALL");
@@ -98,6 +115,70 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     dormRoom: "101",
     dormBed: "1"
   });
+
+  const isAdmin = currentUser?.roleLevel === 1;
+  const isStaff = currentUser?.roleLevel === 2;
+  const canManagePause = isAdmin || isStaff;
+
+  // Attendance Pause modal states
+  const [isPauseModalOpen, setIsPauseModalOpen] = useState<boolean>(false);
+  const [pauseReasonInput, setPauseReasonInput] = useState<string>(
+    systemSettings?.attendancePauseReason || "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"
+  );
+  const [isSavingPause, setIsSavingPause] = useState<boolean>(false);
+
+  // Clear All Students modal states
+  const [isClearAllModalOpen, setIsClearAllModalOpen] = useState<boolean>(false);
+  const [clearAllPassword, setClearAllPassword] = useState<string>("");
+  const [clearAllPasswordError, setClearAllPasswordError] = useState<string>("");
+  const [isClearingAll, setIsClearingAll] = useState<boolean>(false);
+
+  // Clear Dorm Students modal states
+  const [isClearDormModalOpen, setIsClearDormModalOpen] = useState<boolean>(false);
+  const [clearDormPassword, setClearDormPassword] = useState<string>("");
+  const [clearDormPasswordError, setClearDormPasswordError] = useState<string>("");
+  const [isClearingDorm, setIsClearingDorm] = useState<boolean>(false);
+
+  // Batch Transfer Students modal states
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
+  const [targetTransferDormId, setTargetTransferDormId] = useState<string>(dorms[0]?.id || "dorm-1");
+  const [targetTransferRoom, setTargetTransferRoom] = useState<string>("");
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+  // Toggle Attendance Pause
+  const handleToggleAttendancePause = async (pause: boolean) => {
+    if (!onUpdateSystemSettings) return;
+    setIsSavingPause(true);
+    try {
+      const now = new Date();
+      const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+      const timeStr = `${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} น.`;
+
+      const newSettings: SystemSettings = {
+        ...(systemSettings || {} as any),
+        isAttendancePaused: pause,
+        attendancePauseReason: pauseReasonInput.trim() || "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
+        attendancePausedAt: pause ? timeStr : "",
+        attendancePausedBy: pause ? (currentUser?.name || "ผู้ดูแลระบบ") : ""
+      };
+      await onUpdateSystemSettings(newSettings);
+      setIsPauseModalOpen(false);
+      alert(pause ? "หยุดการเช็คยอดนักเรียนชั่วคราวเรียบร้อยแล้ว" : "เปิดระบบให้เช็คยอดตามปกติเรียบร้อยแล้ว");
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการปรับสถานะ: " + (err?.message || err));
+    } finally {
+      setIsSavingPause(false);
+    }
+  };
+
+  // Helper password validator
+  const verifyAdminOrStaffPassword = (enteredPassword: string): boolean => {
+    const validPasswords = ["123456"];
+    if (currentUser?.password) {
+      validPasswords.push(currentUser.password);
+    }
+    return validPasswords.includes(enteredPassword.trim()) || enteredPassword.trim() === "123456";
+  };
 
   // Handle Download Excel Template
   const handleDownloadExcelTemplate = () => {
@@ -203,7 +284,24 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           }
         }
 
-        const hasNicknameHeader = headerRowCols.some((c) => c.includes("ชื่อเล่น") || c.includes("เล่น"));
+        const findColIdx = (keywords: string[]) =>
+          headerRowCols.findIndex((col) => {
+            const clean = col.toLowerCase().replace(/\s+/g, "");
+            return keywords.some((k) => clean.includes(k.toLowerCase().replace(/\s+/g, "")));
+          });
+
+        const colIdxNo = findColIdx(["เลขที่", "ลำดับ", "no"]);
+        const colIdxId = findColIdx(["รหัส", "studentid"]);
+        const colIdxTitle = findColIdx(["คำนำหน้า", "คำนำ", "title", "prefix"]);
+        const colIdxFirst = findColIdx(["ชื่อจริง", "ชื่อ"]);
+        const colIdxLast = findColIdx(["นามสกุล", "สกุล"]);
+        const colIdxNick = findColIdx(["ชื่อเล่น", "เล่น", "nickname"]);
+        const colIdxGrade = findColIdx(["ระดับชั้น", "ชั้น", "grade"]);
+        const colIdxRoom = findColIdx(["ห้องเรียน", "ห้อง", "room"]);
+        const colIdxDorm = findColIdx(["หอพัก", "หอ", "dorm"]);
+        const colIdxDormRoom = findColIdx(["ห้องพักหอ", "ห้องพัก", "ห้องหอ", "dormroom"]);
+        const colIdxBed = findColIdx(["เตียง", "bed"]);
+
         const rowsToProcess = headerRowIndex >= 0 ? json.slice(headerRowIndex + 1) : json;
         const parsed: Partial<Student>[] = [];
 
@@ -213,32 +311,44 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           if (colStr.every((c) => c === "")) return;
           if (colStr[0].includes("เลขที่") || colStr[1]?.includes("รหัส")) return;
 
-          let no = parseInt(colStr[0]) || idx + 1;
-          let studentId = colStr[1] || `${Date.now() + idx}`;
-          let title = colStr[2] || "นาย";
-          let firstName = colStr[3] || "";
-          let lastName = colStr[4] || "";
-          let nickname = "";
-          let grade = "ม.1";
-          let room = 1;
-          let dormRoom = "101";
-          let dormBed = "";
+          let no = (colIdxNo >= 0 && colStr[colIdxNo] ? parseInt(colStr[colIdxNo]) : 0) || parseInt(colStr[0]) || idx + 1;
+          let studentId = (colIdxId >= 0 && colStr[colIdxId]) ? colStr[colIdxId] : (colStr[1] || `${Date.now() + idx}`);
+          let title = (colIdxTitle >= 0 && colStr[colIdxTitle]) ? colStr[colIdxTitle] : (colStr[2] || "นาย");
+          let firstName = (colIdxFirst >= 0 && colStr[colIdxFirst]) ? colStr[colIdxFirst] : (colStr[3] || "");
+          let lastName = (colIdxLast >= 0 && colStr[colIdxLast]) ? colStr[colIdxLast] : (colStr[4] || "");
+          let nickname = (colIdxNick >= 0 && colStr[colIdxNick]) ? colStr[colIdxNick] : "";
+          let grade = (colIdxGrade >= 0 && colStr[colIdxGrade]) ? colStr[colIdxGrade] : "";
+          let room = (colIdxRoom >= 0 && colStr[colIdxRoom] ? parseInt(colStr[colIdxRoom]) : 0) || 1;
+          let dormRoom = (colIdxDormRoom >= 0 && colStr[colIdxDormRoom]) ? colStr[colIdxDormRoom] : "101";
+          let dormBed = (colIdxBed >= 0 && colStr[colIdxBed]) ? colStr[colIdxBed] : "";
 
-          // If row has 9 or more columns or header contains "ชื่อเล่น"
-          if (hasNicknameHeader || colStr.length >= 9) {
-            nickname = colStr[5] || "";
-            grade = colStr[6] || "ม.1";
-            room = parseInt(colStr[7]) || 1;
-            dormRoom = colStr[8] || "101";
-            dormBed = colStr[9] ? colStr[9].trim() : "";
-          } else {
-            // Legacy 8-column layout without nickname
-            nickname = "";
-            grade = colStr[5] || "ม.1";
-            room = parseInt(colStr[6]) || 1;
-            dormRoom = colStr[7] || "101";
-            dormBed = colStr[8] ? colStr[8].trim() : "";
+          // Auto-detect dormitory from column if present
+          let matchedDormId = importDormId;
+          if (colIdxDorm >= 0 && colStr[colIdxDorm]) {
+            const rawDorm = colStr[colIdxDorm].trim();
+            const matched = dorms.find((d) =>
+              d.id === rawDorm ||
+              d.name.toLowerCase() === rawDorm.toLowerCase() ||
+              d.name.includes(rawDorm) ||
+              rawDorm.includes(d.name) ||
+              (rawDorm.match(/\d+/) && d.name.includes(rawDorm.match(/\d+/)![0]))
+            );
+            if (matched) {
+              matchedDormId = matched.id;
+            }
           }
+
+          // Fallback legacy positional layout if header wasn't detailed
+          if (!grade && colStr.length >= 6) {
+            if (headerRowCols.length === 0 || colIdxGrade < 0) {
+              nickname = colStr[5] || "";
+              grade = colStr[6] || colStr[5] || "ม.1";
+              room = parseInt(colStr[7]) || parseInt(colStr[6]) || 1;
+              dormRoom = colStr[8] || colStr[7] || "101";
+              dormBed = colStr[9] || colStr[8] || "";
+            }
+          }
+          if (!grade) grade = "ม.1";
 
           if (!lastName && firstName.includes(" ")) {
             const parts = firstName.split(/\s+/);
@@ -256,6 +366,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               nickname,
               grade,
               room,
+              dormId: matchedDormId,
               dormRoom,
               dormBed
             });
@@ -301,8 +412,18 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         let room = 1;
         let dormRoom = "101";
         let dormBed = "";
+        let matchedDormId = importDormId;
 
-        if (parts.length >= 9) {
+        if (parts.length >= 10) {
+          nickname = parts[5] || "";
+          grade = parts[6] || "ม.1";
+          room = parseInt(parts[7]) || 1;
+          const dormPart = parts[8] || "";
+          const matched = dorms.find((d) => d.id === dormPart || d.name.includes(dormPart) || (dormPart.match(/\d+/) && d.name.includes(dormPart.match(/\d+/)![0])));
+          if (matched) matchedDormId = matched.id;
+          dormRoom = parts[9] || "101";
+          dormBed = parts[10] ? parts[10].trim() : "";
+        } else if (parts.length >= 9) {
           nickname = parts[5] || "";
           grade = parts[6] || "ม.1";
           room = parseInt(parts[7]) || 1;
@@ -316,6 +437,12 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           dormBed = parts[8] ? parts[8].trim() : "";
         }
 
+        if (!lastName && firstName.includes(" ")) {
+          const p = firstName.split(/\s+/);
+          firstName = p[0];
+          lastName = p.slice(1).join(" ");
+        }
+
         parsed.push({
           no,
           studentId,
@@ -325,6 +452,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           nickname,
           grade,
           room,
+          dormId: matchedDormId,
           dormRoom,
           dormBed
         });
@@ -348,9 +476,25 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
     setIsImporting(true);
     try {
-      await onImportStudents(importDormId, previewStudents);
-      const targetDorm = dorms.find((d) => d.id === importDormId)?.name || importDormId;
-      alert(`นำเข้าข้อมูลนักเรียนจำนวน ${previewStudents.length} คน เข้าสู่${targetDorm} สำเร็จแล้ว`);
+      // Group by student's assigned dormId if available, or fall back to importDormId
+      const dormGroups = new Map<string, Partial<Student>[]>();
+      previewStudents.forEach((s) => {
+        const dId = s.dormId || importDormId;
+        if (!dormGroups.has(dId)) {
+          dormGroups.set(dId, []);
+        }
+        dormGroups.get(dId)!.push(s);
+      });
+
+      for (const [dId, stds] of dormGroups.entries()) {
+        await onImportStudents(dId, stds);
+      }
+
+      const dormNames = Array.from(dormGroups.keys())
+        .map((dId) => dorms.find((d) => d.id === dId)?.name || dId)
+        .join(", ");
+
+      alert(`นำเข้าข้อมูลนักเรียนจำนวน ${previewStudents.length} คน เข้าสู่ (${dormNames}) เรียบร้อยแล้ว`);
       
       // Reset modal state
       setPasteText("");
@@ -359,9 +503,102 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       if (fileInputRef.current) fileInputRef.current.value = "";
       setIsImportModalOpen(false);
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาดในการนำเข้า: " + err.message);
+      alert("เกิดข้อผิดพลาดในการนำเข้า: " + (err.message || err));
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  // Handler: Execute Clear All Students across all dorms
+  const handleConfirmClearAllStudents = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clearAllPassword.trim()) {
+      setClearAllPasswordError("กรุณากรอกรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
+      return;
+    }
+    if (!verifyAdminOrStaffPassword(clearAllPassword)) {
+      setClearAllPasswordError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
+      return;
+    }
+
+    setIsClearingAll(true);
+    try {
+      if (onClearStudents) {
+        await onClearStudents("ALL");
+      } else {
+        await deleteSampleData({ target: "STUDENTS" });
+      }
+      setSelectedStudentIds([]);
+      setIsClearAllModalOpen(false);
+      setClearAllPassword("");
+      setClearAllPasswordError("");
+      alert("ล้างรายชื่อนักเรียนทุกหอพักเรียบร้อยแล้ว ท่านสามารถนำเข้ารายชื่อชุดใหม่ได้ทันที");
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการล้างข้อมูล: " + (err?.message || err));
+    } finally {
+      setIsClearingAll(false);
+    }
+  };
+
+  // Handler: Execute Clear Students in Selected Dorm
+  const handleConfirmClearDormStudents = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clearDormPassword.trim()) {
+      setClearDormPasswordError("กรุณากรอกรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
+      return;
+    }
+    if (!verifyAdminOrStaffPassword(clearDormPassword)) {
+      setClearDormPasswordError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
+      return;
+    }
+
+    setIsClearingDorm(true);
+    try {
+      if (onClearStudents) {
+        await onClearStudents("BY_DORM", selectedDormFilter);
+      } else {
+        const targetStudents = students.filter((s) => s.dormId === selectedDormFilter);
+        if (onBatchDeleteStudents && targetStudents.length > 0) {
+          await onBatchDeleteStudents(targetStudents.map((s) => s.id));
+        }
+      }
+      setSelectedStudentIds([]);
+      setIsClearDormModalOpen(false);
+      setClearDormPassword("");
+      setClearDormPasswordError("");
+      const dormName = dorms.find((d) => d.id === selectedDormFilter)?.name || selectedDormFilter;
+      alert(`ล้างรายชื่อนักเรียนใน${dormName} เรียบร้อยแล้ว`);
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการล้างข้อมูล: " + (err?.message || err));
+    } finally {
+      setIsClearingDorm(false);
+    }
+  };
+
+  // Handler: Execute Batch Transfer Students to Another Dorm
+  const handleConfirmTransferStudents = async () => {
+    if (selectedStudentIds.length === 0) return;
+    setIsTransferring(true);
+    try {
+      if (onBatchTransferDorm) {
+        await onBatchTransferDorm(selectedStudentIds, targetTransferDormId, targetTransferRoom.trim() || undefined);
+      } else if (onUpdateStudent) {
+        for (const id of selectedStudentIds) {
+          await onUpdateStudent(id, {
+            dormId: targetTransferDormId,
+            ...(targetTransferRoom.trim() ? { dormRoom: targetTransferRoom.trim() } : {})
+          });
+        }
+      }
+      const targetDormName = dorms.find((d) => d.id === targetTransferDormId)?.name || targetTransferDormId;
+      alert(`ย้ายหอพักนักเรียนจำนวน ${selectedStudentIds.length} คน ไปยัง${targetDormName} สำเร็จเรียบร้อยแล้ว`);
+      setSelectedStudentIds([]);
+      setIsTransferModalOpen(false);
+      setTargetTransferRoom("");
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการย้ายหอพัก: " + (err?.message || err));
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -528,6 +765,91 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
+      {/* Attendance Checking Status Banner & Pause/Resume Controller */}
+      <div
+        className={`p-4 rounded-2xl border transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3.5 ${
+          systemSettings?.isAttendancePaused
+            ? "bg-gradient-to-r from-rose-50 via-amber-50 to-orange-50 border-rose-300"
+            : "bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 border-emerald-300"
+        }`}
+      >
+        <div className="flex items-start gap-3.5">
+          <div
+            className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+              systemSettings?.isAttendancePaused
+                ? "bg-rose-500 text-white shadow-md shadow-rose-500/25"
+                : "bg-emerald-600 text-white shadow-md shadow-emerald-600/25"
+            }`}
+          >
+            {systemSettings?.isAttendancePaused ? (
+              <PauseCircle className="w-6 h-6 animate-pulse" />
+            ) : (
+              <PlayCircle className="w-6 h-6" />
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border tracking-wider ${
+                  systemSettings?.isAttendancePaused
+                    ? "bg-rose-100 text-rose-800 border-rose-300"
+                    : "bg-emerald-100 text-emerald-800 border-emerald-300"
+                }`}
+              >
+                {systemSettings?.isAttendancePaused
+                  ? "⛔ ระบบหยุดการเช็คยอดชั่วคราว"
+                  : "🟢 ระบบเปิดให้เช็คยอดตามปกติ"}
+              </span>
+              {systemSettings?.isAttendancePaused && systemSettings?.attendancePausedAt && (
+                <span className="text-[11px] font-bold text-slate-500">
+                  (หยุดเมื่อ: {systemSettings.attendancePausedAt}{systemSettings.attendancePausedBy ? ` โดย ${systemSettings.attendancePausedBy}` : ""})
+                </span>
+              )}
+            </div>
+            <p className="text-xs font-semibold text-slate-700 mt-1">
+              {systemSettings?.isAttendancePaused
+                ? systemSettings?.attendancePauseReason ||
+                  "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"
+                : "ครูประจำหอพักสามารถเข้าทำการเช็คยอดนักเรียนรอบ 20.00 น. ได้ตามปกติ (หากต้องการลบหรือนำเข้ารายชื่อชุดใหม่ แนะนำให้กดหยุดการเช็คยอดก่อน)"}
+            </p>
+          </div>
+        </div>
+
+        {canManagePause && (
+          <div className="flex items-center gap-2 shrink-0">
+            {systemSettings?.isAttendancePaused ? (
+              <button
+                type="button"
+                onClick={() => handleToggleAttendancePause(false)}
+                disabled={isSavingPause}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                title="เปิดระบบให้ครูหอพักเช็คยอดนักเรียนได้ตามปกติ"
+              >
+                <PlayCircle className="w-4 h-4" />
+                <span>{isSavingPause ? "กำลังเปิดระบบ..." : "เปิดระบบเช็คยอดตามปกติ"}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setPauseReasonInput(
+                    systemSettings?.attendancePauseReason ||
+                      "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"
+                  );
+                  setIsPauseModalOpen(true);
+                }}
+                disabled={isSavingPause}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md shadow-rose-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                title="หยุดการเช็คยอดนักเรียนชั่วคราวเพื่อดำเนินการลบ/นำเข้ารายชื่อชุดใหม่"
+              >
+                <PauseCircle className="w-4 h-4" />
+                <span>หยุดการเช็คยอดชั่วคราว</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Header & Controls Panel */}
       <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4">
         {/* Title Row */}
@@ -543,7 +865,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
         {/* Action Controls Container */}
         <div className="space-y-3.5 pt-1 border-t border-gray-100">
-          {/* Row 1 (div ใหม่): Action buttons ("ส่งออก Excel", "นำเข้านักเรียนจำนวนมาก", "เพิ่มนักเรียนใหม่") */}
+          {/* Row 1: Action buttons ("ส่งออก Excel", "นำเข้านักเรียนจำนวนมาก", "เพิ่มนักเรียนใหม่", "ล้างรายชื่อทั้งหมด") */}
           <div className="flex flex-wrap items-center gap-2.5 pb-3 border-b border-gray-100">
             <button
               onClick={handleExportCurrentStudentsToExcel}
@@ -589,6 +911,40 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               <span>เพิ่มนักเรียนใหม่</span>
             </button>
 
+            {/* Clear All Students Button */}
+            {canManagePause && (
+              <button
+                type="button"
+                onClick={() => {
+                  setClearAllPassword("");
+                  setClearAllPasswordError("");
+                  setIsClearAllModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                title="ล้างรายชื่อนักเรียนทุกหอพัก เพื่อเตรียมนำเข้ารายชื่อชุดใหม่"
+              >
+                <Trash2 className="w-4 h-4 text-white" />
+                <span>ล้างรายชื่อทั้งหมด ({students.length} คน)</span>
+              </button>
+            )}
+
+            {/* Clear Dorm Students Button (When filtered) */}
+            {canManagePause && selectedDormFilter !== "ALL" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setClearDormPassword("");
+                  setClearDormPasswordError("");
+                  setIsClearDormModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                title={`ล้างรายชื่อนักเรียนเฉพาะ${dorms.find((d) => d.id === selectedDormFilter)?.name || selectedDormFilter}`}
+              >
+                <Trash2 className="w-4 h-4 text-white" />
+                <span>ล้างรายชื่อในหอพักนี้ ({filteredStudents.length} คน)</span>
+              </button>
+            )}
+
             <button
               onClick={async () => {
                 if (window.confirm("ยืนยันการลบข้อมูลตัวอย่างนักเรียนทั้งหมดออกจากระบบหรือไม่?\n(การกระทำนี้จะล้างรายชื่อนักเรียน เพื่อให้ท่านนำเข้าข้อมูลจริงได้อย่างสะอาดเรียบร้อย)")) {
@@ -601,11 +957,11 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   }
                 }
               }}
-              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-              title="ลบข้อมูลตัวอย่างนักเรียนทั้งหมด"
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 font-medium text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="ล้างข้อมูลตัวอย่างที่แถมมากับระบบ"
             >
-              <Trash2 className="w-4 h-4 text-rose-600" />
-              <span>ลบข้อมูลตัวอย่างนักเรียน</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              <span>ล้างข้อมูลตัวอย่าง</span>
             </button>
           </div>
 
@@ -677,7 +1033,24 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center justify-end">
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              {/* Batch Transfer Dormitory Button */}
+              {selectedStudentIds.length > 0 && canManagePause && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetTransferDormId(dorms[0]?.id || "dorm-1");
+                    setTargetTransferRoom("");
+                    setIsTransferModalOpen(true);
+                  }}
+                  className="px-4 py-2 font-bold text-xs rounded-xl shadow-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="ย้ายหอพักนักเรียนที่เลือกไปยังหอพักอื่น"
+                >
+                  <ArrowRightLeft className="w-4 h-4 text-white" />
+                  <span>ย้ายหอพักนักเรียนที่เลือก ({selectedStudentIds.length} คน)</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -1007,22 +1380,31 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         <th className="p-2">ชื่อ - นามสกุล</th>
                         <th className="p-2">ชื่อเล่น</th>
                         <th className="p-2">ระดับชั้น</th>
+                        <th className="p-2">หอพัก</th>
                         <th className="p-2">ห้องหอ</th>
                         <th className="p-2 text-center">เตียง</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {previewStudents.slice(0, 30).map((st, idx) => (
-                        <tr key={idx} className="hover:bg-white">
-                          <td className="p-2 text-center font-bold text-slate-500">{st.no || idx + 1}</td>
-                          <td className="p-2 font-mono font-bold">{st.studentId}</td>
-                          <td className="p-2 font-bold">{st.title}{st.firstName} {st.lastName}</td>
-                          <td className="p-2 font-bold text-purple-700">{st.nickname || "-"}</td>
-                          <td className="p-2">{st.grade}/{st.room}</td>
-                          <td className="p-2">ห้อง {st.dormRoom}</td>
-                          <td className="p-2 text-center font-bold text-purple-800">{st.dormBed ? `เตียง ${st.dormBed}` : "-"}</td>
-                        </tr>
-                      ))}
+                      {previewStudents.slice(0, 30).map((st, idx) => {
+                        const targetDorm = dorms.find((d) => d.id === st.dormId) || dorms.find((d) => d.id === importDormId);
+                        return (
+                          <tr key={idx} className="hover:bg-white">
+                            <td className="p-2 text-center font-bold text-slate-500">{st.no || idx + 1}</td>
+                            <td className="p-2 font-mono font-bold">{st.studentId}</td>
+                            <td className="p-2 font-bold">{st.title}{st.firstName} {st.lastName}</td>
+                            <td className="p-2 font-bold text-purple-700">{st.nickname || "-"}</td>
+                            <td className="p-2">{st.grade}/{st.room}</td>
+                            <td className="p-2">
+                              <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 font-bold text-[10px] border border-purple-200">
+                                {targetDorm?.name || st.dormId || "หอพัก"}
+                              </span>
+                            </td>
+                            <td className="p-2">ห้อง {st.dormRoom}</td>
+                            <td className="p-2 text-center font-bold text-purple-800">{st.dormBed ? `เตียง ${st.dormBed}` : "-"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                   {previewStudents.length > 30 && (
@@ -1362,6 +1744,337 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Attendance Pause Configuration Modal */}
+      {isPauseModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-100 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600 border-b border-rose-100 pb-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <PauseCircle className="w-6 h-6 text-rose-600 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">หยุดการเช็คยอดนักเรียนชั่วคราว</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  เพื่อทำการลบหรือนำเข้ารายชื่อนักเรียนชุดใหม่
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-1.5">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>ผลของการหยุดการเช็คยอด:</span>
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-[11px] text-amber-800">
+                <li>ครูประจำหอพักจะไม่สามารถบันทึกยอดการเช็คชื่อได้ในระหว่างนี้ เพื่อป้องกันข้อมูลคลาดเคลื่อน</li>
+                <li>ระบบจะแสดงแถบแจ้งเตือนในหน้าเช็คยอดและหน้าภาพรวม (Dashboard)</li>
+                <li>เมื่อดำเนินการลบหรือนำเข้ารายชื่อเสร็จสิ้น ท่านสามารถกด <strong>"เปิดระบบเช็คยอดตามปกติ"</strong> ได้ทันที</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                ข้อความแจ้งเตือน / เหตุผลในการหยุดเช็คยอด:
+              </label>
+              <textarea
+                rows={3}
+                value={pauseReasonInput}
+                onChange={(e) => setPauseReasonInput(e.target.value)}
+                placeholder="ระบุเหตุผล เช่น ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่..."
+                className="w-full bg-slate-50 border border-slate-300 text-xs text-slate-800 rounded-xl p-3 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsPauseModalOpen(false)}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isSavingPause}
+                onClick={() => handleToggleAttendancePause(true)}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <PauseCircle className="w-4 h-4" />
+                <span>{isSavingPause ? "กำลังบันทึก..." : "ยืนยันหยุดการเช็คยอด"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 5: Clear ALL Students across all dorms */}
+      {isClearAllModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600 border-b border-rose-100 pb-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">ล้างรายชื่อนักเรียนทั้งหมด</h3>
+                <p className="text-xs text-rose-600 font-bold mt-0.5">
+                  คำเตือน: รายชื่อนักเรียนทุกหอพักรวม {students.length} คน จะถูกลบ
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-4 text-xs text-rose-900 space-y-3">
+              <p className="font-semibold leading-relaxed">
+                การกระทำนี้จะล้างข้อมูลนักเรียนออกจากฐานข้อมูลทุกหอพัก เพื่อให้ท่านสามารถนำเข้ารายชื่อนักเรียนชุดใหม่ได้อย่างสะอาดเรียบร้อย
+              </p>
+
+              {/* Quick backup button before clearing */}
+              <div className="pt-1 border-t border-rose-200/60">
+                <button
+                  type="button"
+                  onClick={handleExportCurrentStudentsToExcel}
+                  className="w-full py-2 px-3 bg-white hover:bg-rose-100/50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-300 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                >
+                  <Download className="w-4 h-4 text-emerald-600" />
+                  <span>ดาวน์โหลดไฟล์สำรองข้อมูล (Excel) ก่อนล้างข้อมูล</span>
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmClearAllStudents} className="space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                <label className="block text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>ยืนยันรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ <span className="text-rose-500">*</span></span>
+                </label>
+                <input
+                  type="password"
+                  value={clearAllPassword}
+                  onChange={(e) => {
+                    setClearAllPassword(e.target.value);
+                    setClearAllPasswordError("");
+                  }}
+                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน (เช่น 123456)..."
+                  className="w-full bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-rose-500 outline-none shadow-2xs"
+                  autoFocus
+                />
+                {clearAllPasswordError && (
+                  <p className="text-[11px] font-bold text-rose-600 flex items-center gap-1 pt-0.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{clearAllPasswordError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={isClearingAll}
+                  onClick={() => {
+                    setIsClearAllModalOpen(false);
+                    setClearAllPassword("");
+                    setClearAllPasswordError("");
+                  }}
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isClearingAll || !clearAllPassword.trim()}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isClearingAll ? "กำลังล้างข้อมูล..." : `ยืนยันล้างทั้งหมด (${students.length} คน)`}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 6: Clear Students in Selected Dorm */}
+      {isClearDormModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-orange-200 space-y-4">
+            <div className="flex items-center gap-3 text-orange-600 border-b border-orange-100 pb-3">
+              <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  ล้างรายชื่อเฉพาะ{dorms.find((d) => d.id === selectedDormFilter)?.name || selectedDormFilter}
+                </h3>
+                <p className="text-xs text-orange-600 font-bold mt-0.5">
+                  นักเรียนในหอพักนี้จำนวน {filteredStudents.length} คน จะถูกลบ
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-4 text-xs text-orange-900 space-y-3">
+              <p className="font-semibold leading-relaxed">
+                การกระทำนี้จะลบเฉพาะนักเรียนใน{dorms.find((d) => d.id === selectedDormFilter)?.name} โดยไม่กระทบหอพักอื่น เพื่อให้ท่านนำเข้ารายชื่อนักเรียนใหม่ของหอพักนี้
+              </p>
+
+              {/* Quick backup button before clearing */}
+              <div className="pt-1 border-t border-orange-200/60">
+                <button
+                  type="button"
+                  onClick={handleExportCurrentStudentsToExcel}
+                  className="w-full py-2 px-3 bg-white hover:bg-orange-100/50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-300 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                >
+                  <Download className="w-4 h-4 text-emerald-600" />
+                  <span>ดาวน์โหลดไฟล์สำรองข้อมูล (Excel) ก่อนลบ</span>
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmClearDormStudents} className="space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                <label className="block text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-orange-600 shrink-0" />
+                  <span>ยืนยันรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ <span className="text-rose-500">*</span></span>
+                </label>
+                <input
+                  type="password"
+                  value={clearDormPassword}
+                  onChange={(e) => {
+                    setClearDormPassword(e.target.value);
+                    setClearDormPasswordError("");
+                  }}
+                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน (เช่น 123456)..."
+                  className="w-full bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-orange-500 outline-none shadow-2xs"
+                  autoFocus
+                />
+                {clearDormPasswordError && (
+                  <p className="text-[11px] font-bold text-rose-600 flex items-center gap-1 pt-0.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{clearDormPasswordError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={isClearingDorm}
+                  onClick={() => {
+                    setIsClearDormModalOpen(false);
+                    setClearDormPassword("");
+                    setClearDormPasswordError("");
+                  }}
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isClearingDorm || !clearDormPassword.trim()}
+                  className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isClearingDorm ? "กำลังลบ..." : `ยืนยันลบ (${filteredStudents.length} คน)`}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 7: Batch Transfer Students to Another Dormitory */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-indigo-100 space-y-4">
+            <div className="flex items-center gap-3 text-indigo-600 border-b border-indigo-100 pb-3">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-100 flex items-center justify-center shrink-0">
+                <ArrowRightLeft className="w-6 h-6 text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">ย้ายหอพักนักเรียนที่เลือก</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  เลือกหอพักปลายทางที่ต้องการย้ายนักเรียนจำนวน {selectedStudentIds.length} คน
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-4 text-xs text-indigo-900 space-y-2">
+              <p className="font-bold">
+                นักเรียนที่เลือกจะถูกเปลี่ยนสังกัดหอพักทันที:
+              </p>
+              <div className="max-h-28 overflow-y-auto bg-white/80 p-2.5 rounded-xl border border-indigo-200 text-[11px] space-y-1">
+                {students
+                  .filter((s) => selectedStudentIds.includes(s.id))
+                  .slice(0, 10)
+                  .map((st) => (
+                    <div key={st.id} className="flex justify-between font-medium">
+                      <span>• {st.title}{st.firstName} {st.lastName}</span>
+                      <span className="text-indigo-600 font-bold">{st.grade}/{st.room}</span>
+                    </div>
+                  ))}
+                {selectedStudentIds.length > 10 && (
+                  <div className="text-slate-500 font-bold text-center pt-1">
+                    ...และอีก {selectedStudentIds.length - 10} คน
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                  <Home className="w-4 h-4 text-indigo-600" />
+                  <span>เลือกหอพักปลายทาง <span className="text-rose-500">*</span></span>
+                </label>
+                <select
+                  value={targetTransferDormId}
+                  onChange={(e) => setTargetTransferDormId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {dorms.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({countStudentsInDorm(students, d)} คน)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  ห้องพักหอใหม่ (ไม่บังคับระบุ):
+                </label>
+                <input
+                  type="text"
+                  value={targetTransferRoom}
+                  onChange={(e) => setTargetTransferRoom(e.target.value)}
+                  placeholder="เช่น 101, 202 (หากไม่ระบุจะคงห้องเดิมไว้)..."
+                  className="w-full bg-slate-50 border border-slate-300 text-xs text-slate-800 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isTransferring}
+                onClick={() => setIsTransferModalOpen(false)}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isTransferring}
+                onClick={handleConfirmTransferStudents}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{isTransferring ? "กำลังย้ายหอพัก..." : `ยืนยันย้าย (${selectedStudentIds.length} คน)`}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
