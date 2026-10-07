@@ -165,8 +165,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: "dorms",
-      label: "หอพัก",
-      fullLabel: "ข้อมูลหอพัก",
+      label: "จัดการหอพัก",
+      fullLabel: "จัดการหอพัก",
       icon: Home
     },
     {

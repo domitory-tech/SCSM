@@ -411,6 +411,9 @@ function MainAppContent() {
               dorms={dorms}
               students={students}
               users={users}
+              attendanceRecords={allAttendanceRecords}
+              systemSettings={systemSettings}
+              currentUser={currentUser}
               onAddDorm={async (dData) => {
                 await addDormMutation.mutateAsync(dData);
               }}
