@@ -139,20 +139,17 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
             }
             <div style="text-align: left;">
               <div style="font-size: 14px; font-weight: 800; color: #1e1b4b; line-height: 1.2;">
-                ${schoolName} ${schoolAcronym}
+                ${schoolName}
               </div>
               <div style="font-size: 12px; color: #6b21a8; font-weight: 700;">
-                ระบบบริหารจัดการหอพักนักเรียน • ฝ่ายกิจการหอพัก
+                งานหอพัก • กลุ่มบริหารกิจการนักเรียน
               </div>
             </div>
           </div>
           
           <h1 style="font-size: 20px; font-weight: 900; color: #1e1b4b; margin: 4px 0 2px 0; letter-spacing: -0.3px;">
-            ผังการจัดห้องนอนและข้อมูลประจำหอพัก
+            ผังการจัดห้องนอน ${dorm.name}
           </h1>
-          <div style="font-size: 13px; font-weight: 700; color: #7e22ce;">
-            ${dorm.name} (${dormTypeTh})
-          </div>
           <div style="font-size: 10.5px; color: #64748b; margin-top: 3px;">
             ข้อมูล ณ ${todayText}
           </div>
@@ -165,28 +162,24 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
             <span style="font-size: 11px; font-weight: 700; color: #7e22ce;">รหัสหอพัก: ${dorm.id}</span>
           </div>
           <div style="border: 1px solid #e9d5ff; border-top: none; padding: 12px; border-radius: 0 0 8px 8px; background: #ffffff;">
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center;">
-              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 4px;">
-                <div style="font-size: 10px; color: #64748b; font-weight: 600;">ความจุที่รองรับ</div>
-                <div style="font-size: 18px; font-weight: 900; color: #0f172a; margin-top: 2px;">${capacity} <span style="font-size: 11px; font-weight: 600;">เตียง</span></div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
+              <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 10px 4px;">
+                <div style="font-size: 10.5px; color: #7e22ce; font-weight: 700;">นักเรียนปัจจุบัน</div>
+                <div style="font-size: 19px; font-weight: 900; color: #6b21a8; margin-top: 2px;">${totalStudents} <span style="font-size: 11px; font-weight: 600;">คน</span></div>
               </div>
-              <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 8px 4px;">
-                <div style="font-size: 10px; color: #7e22ce; font-weight: 600;">นักเรียนปัจจุบัน</div>
-                <div style="font-size: 18px; font-weight: 900; color: #6b21a8; margin-top: 2px;">${totalStudents} <span style="font-size: 11px; font-weight: 600;">คน</span></div>
+              <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 4px;">
+                <div style="font-size: 10.5px; color: #166534; font-weight: 700;">จำนวนห้องนอน</div>
+                <div style="font-size: 19px; font-weight: 900; color: #15803d; margin-top: 2px;">${roomCount} <span style="font-size: 11px; font-weight: 600;">ห้อง</span></div>
               </div>
-              <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px 4px;">
-                <div style="font-size: 10px; color: #166534; font-weight: 600;">จำนวนห้องนอน</div>
-                <div style="font-size: 18px; font-weight: 900; color: #15803d; margin-top: 2px;">${roomCount} <span style="font-size: 11px; font-weight: 600;">ห้อง</span></div>
-              </div>
-              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 4px;">
-                <div style="font-size: 10px; color: #1e40af; font-weight: 600;">อัตราการครองเตียง</div>
-                <div style="font-size: 18px; font-weight: 900; color: #1d4ed8; margin-top: 2px;">${occupancyRate}%</div>
+              <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 10px 4px;">
+                <div style="font-size: 10.5px; color: #4338ca; font-weight: 700;">เตียงที่ใช้</div>
+                <div style="font-size: 19px; font-weight: 900; color: #3730a3; margin-top: 2px;">${totalStudents} <span style="font-size: 11px; font-weight: 600;">เตียง</span></div>
               </div>
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e2e8f0; font-size: 11px; color: #475569;">
               <div><strong>ประเภทหอพัก:</strong> ${dormTypeTh}</div>
-              <div><strong>เตียงว่างที่ยังไม่ครอง:</strong> <span style="color: ${availableBeds > 0 ? "#15803d" : "#b91c1c"}; font-weight: 700;">${availableBeds} เตียง</span></div>
+              <div><strong>เตียงที่ใช้:</strong> <span style="color: #4338ca; font-weight: 700;">${totalStudents} เตียง</span></div>
               <div><strong>เฉลี่ยต่อห้อง:</strong> ${(roomCount > 0 ? (totalStudents / roomCount).toFixed(1) : "0")} คน/ห้อง</div>
             </div>
           </div>

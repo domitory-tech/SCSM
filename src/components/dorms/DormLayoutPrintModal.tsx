@@ -347,12 +347,12 @@ export const DormLayoutPrintModal: React.FC<DormLayoutPrintModalProps> = ({
                   {/* Header */}
                   <div className="text-center pb-3 border-b-2 border-purple-900">
                     <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">{schoolName}</div>
-                    <h1 className="text-xl font-black text-slate-900 tracking-tight mt-1">
-                      ผังการจัดห้องนอนและข้อมูลประจำหอพัก
-                    </h1>
-                    <div className="text-sm font-extrabold text-purple-800 mt-0.5">
-                      {previewDormData.dorm.name} ({getDormTypeLabel(previewDormData.dorm, true)})
+                    <div className="text-xs text-purple-700 font-bold mt-0.5">
+                      งานหอพัก • กลุ่มบริหารกิจการนักเรียน
                     </div>
+                    <h1 className="text-xl font-black text-slate-900 tracking-tight mt-1.5">
+                      ผังการจัดห้องนอน {previewDormData.dorm.name}
+                    </h1>
                     <div className="text-[11px] text-slate-400 mt-1">
                       ข้อมูล ณ {formatThaiFullDate(new Date().toISOString().split("T")[0])}
                     </div>
@@ -370,35 +370,41 @@ export const DormLayoutPrintModal: React.FC<DormLayoutPrintModalProps> = ({
                       </span>
                     </div>
                     <div className="p-3 bg-white">
-                      <div className="grid grid-cols-4 gap-2.5 text-center">
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
-                          <div className="text-[10px] text-slate-500 font-bold">ความจุที่รองรับ</div>
-                          <div className="text-base font-black text-slate-800">
-                            {previewDormData.dorm.capacity || 80} คน
-                          </div>
-                        </div>
-                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-2.5">
                           <div className="text-[10px] text-purple-700 font-bold">นักเรียนปัจจุบัน</div>
                           <div className="text-base font-black text-purple-800">
                             {previewDormData.totalStudents} คน
                           </div>
                         </div>
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
                           <div className="text-[10px] text-emerald-700 font-bold">จำนวนห้องนอน</div>
                           <div className="text-base font-black text-emerald-800">
                             {previewDormData.roomCount} ห้อง
                           </div>
                         </div>
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-                          <div className="text-[10px] text-blue-700 font-bold">อัตราการครองเตียง</div>
-                          <div className="text-base font-black text-blue-800">
-                            {(
-                              (previewDormData.totalStudents /
-                                (previewDormData.dorm.capacity || 80)) *
-                              100
-                            ).toFixed(1)}
-                            %
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2.5">
+                          <div className="text-[10px] text-indigo-700 font-bold">เตียงที่ใช้</div>
+                          <div className="text-base font-black text-indigo-800">
+                            {previewDormData.totalStudents} เตียง
                           </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center mt-3 pt-2 border-t border-dashed border-slate-200 text-xs text-slate-600">
+                        <div>
+                          <strong className="text-slate-700">ประเภทหอพัก:</strong> {getDormTypeLabel(previewDormData.dorm, true)}
+                        </div>
+                        <div>
+                          <strong className="text-slate-700">เตียงที่ใช้:</strong>{" "}
+                          <span className="text-purple-700 font-bold">{previewDormData.totalStudents} เตียง</span>
+                        </div>
+                        <div>
+                          <strong className="text-slate-700">เฉลี่ยต่อห้อง:</strong>{" "}
+                          {previewDormData.roomCount > 0
+                            ? (previewDormData.totalStudents / previewDormData.roomCount).toFixed(1)
+                            : "0"}{" "}
+                          คน/ห้อง
                         </div>
                       </div>
                     </div>
