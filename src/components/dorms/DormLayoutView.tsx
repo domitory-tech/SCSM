@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Dormitory, Student, UserProfile } from "../../types";
+import { Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import { useUsersQuery } from "../../services/useDormQueries";
 import {
   getStudentsInDorm,
@@ -11,6 +11,7 @@ import {
 } from "../../utils/dormUtils";
 import { printOrSaveElementAsPdf } from "../../utils/htmlReportExporter";
 import { DormLayoutOverviewModal } from "./DormLayoutOverviewModal";
+import { DormLayoutPrintModal } from "./DormLayoutPrintModal";
 import {
   LayoutGrid,
   Search,
@@ -33,6 +34,7 @@ interface DormLayoutViewProps {
   students: Student[];
   users?: UserProfile[];
   currentUser?: UserProfile | null;
+  systemSettings?: SystemSettings;
 }
 
 // Color schemes matching the existing design system
@@ -188,7 +190,8 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
   dorms,
   students,
   users,
-  currentUser
+  currentUser,
+  systemSettings
 }) => {
   const { data: queriedUsers = [] } = useUsersQuery();
   const effectiveUsers = users && users.length > 0 ? users : queriedUsers;
@@ -216,6 +219,7 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>("ALL");
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const [isOverviewModalOpen, setIsOverviewModalOpen] = useState<boolean>(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
 
   // Filter available dorms list
   const activeDorms = useMemo(() => {
@@ -344,24 +348,9 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
     return { totalSt, totalRooms };
   }, [dormsRoomData]);
 
-  // Print / PDF export handler (A4 Portrait, 2-column layout)
+  // Print / PDF export handler (Opens Modal with Page 1 Cover + Page 2+ 2-Column layout & Orientation switcher)
   const handleExportPdf = () => {
-    try {
-      setIsExportingPdf(true);
-      const today = new Date().toISOString().split("T")[0];
-      const dormLabel = selectedDormId === "ALL" ? "ทุกหอพัก" : dorms.find((d) => d.id === selectedDormId)?.name || "หอพัก";
-      printOrSaveElementAsPdf(
-        "dorm-layout-table-export-container",
-        `ผังการจัดห้องนอน_${dormLabel}_${today}`,
-        "portrait"
-      );
-    } catch (err: any) {
-      alert("เกิดข้อผิดพลาดในการพิมพ์/บันทึก PDF: " + err.message);
-    } finally {
-      setTimeout(() => {
-        setIsExportingPdf(false);
-      }, 600);
-    }
+    setIsPrintModalOpen(true);
   };
 
   return (
@@ -403,12 +392,11 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
             <button
               type="button"
               onClick={handleExportPdf}
-              disabled={isExportingPdf}
-              className="px-5 py-2.5 bg-white hover:bg-purple-50 text-purple-900 font-black text-xs rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 active:scale-95 border border-white/60"
-              title="พิมพ์เอกสาร หรือ บันทึกเป็นไฟล์ PDF คุณภาพสูง (A4)"
+              className="px-5 py-2.5 bg-white hover:bg-purple-50 text-purple-900 font-black text-xs rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer active:scale-95 border border-white/60"
+              title="พิมพ์เอกสารผังห้องนอน A4 (หน้าแรกข้อมูลหอพัก & ครู หน้าที่ 2+ ตาราง 2 คอลัมน์ต่อแถว)"
             >
               <Printer className="w-4 h-4 text-purple-700" />
-              <span>{isExportingPdf ? "กำลังเปิดหน้าต่างพิมพ์..." : "พิมพ์ / บันทึก PDF"}</span>
+              <span>พิมพ์ผังห้องนอน (A4)</span>
             </button>
           </div>
         </div>
@@ -704,13 +692,13 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
                               <table className="w-full table-fixed text-left border-collapse">
                                 <thead>
                                   <tr className="bg-slate-100 text-slate-700 font-extrabold border-b border-slate-200 text-xs">
-                                    <th className="w-[20%] py-2 px-1.5 text-center border-r border-slate-200 text-slate-800 whitespace-nowrap">
+                                    <th className="w-[28%] py-2 px-2 text-center border-r border-slate-200 text-slate-800 whitespace-nowrap">
                                       เตียง
                                     </th>
-                                    <th className="w-[58%] py-2 px-2.5 border-r border-slate-200 text-slate-800">
+                                    <th className="w-[52%] py-2 px-2.5 border-r border-slate-200 text-slate-800">
                                       ชื่อ-สกุลนักเรียน
                                     </th>
-                                    <th className="w-[22%] py-2 px-1 text-center text-slate-800 whitespace-nowrap">
+                                    <th className="w-[20%] py-2 px-1 text-center text-slate-800 whitespace-nowrap">
                                       ชั้น/ห้อง
                                     </th>
                                   </tr>
@@ -819,6 +807,20 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
         users={effectiveUsers}
         currentUser={currentUser}
       />
+
+      {/* Print Configuration & Preview Modal (Page 1 Cover + Page 2+ 2-Column Tables on A4) */}
+      {isPrintModalOpen && (
+        <DormLayoutPrintModal
+          isOpen={isPrintModalOpen}
+          onClose={() => setIsPrintModalOpen(false)}
+          dorms={dorms}
+          students={students}
+          users={effectiveUsers}
+          systemSettings={systemSettings}
+          currentUser={currentUser}
+          initialSelectedDormId={selectedDormId}
+        />
+      )}
     </div>
   );
 };

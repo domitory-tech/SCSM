@@ -298,6 +298,7 @@ function MainAppContent() {
               students={students}
               users={users}
               currentUser={currentUser}
+              systemSettings={systemSettings}
             />
           )}
 
