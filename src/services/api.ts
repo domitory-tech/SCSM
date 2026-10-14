@@ -28,6 +28,7 @@ import {
   UserProfile
 } from "../types";
 import { getTodayDateString, getPreviousDateString, getNextDateString } from "../utils/dateUtils";
+import { cleanBedValue } from "../utils/dormUtils";
 
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
 import { DEFAULT_SYSTEM_USERS } from "../data/userProfiles";
@@ -183,7 +184,16 @@ export async function fetchStudents(params?: {
     let students: Student[] = [];
 
     if (!snapshot.empty) {
-      students = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
+      students = snapshot.docs.map((d) => {
+        const raw = d.data();
+        const cleanedBed = cleanBedValue(raw.dormBed ?? raw.bed);
+        return {
+          id: d.id,
+          ...raw,
+          dormBed: cleanedBed,
+          bed: cleanedBed
+        } as Student;
+      });
       setLocalCache(CACHE_KEYS.STUDENTS, students);
     } else {
       // If collection is empty in Firestore, return empty array (do NOT seed mock data)
@@ -203,7 +213,14 @@ export async function fetchStudents(params?: {
     return students.sort((a, b) => (a.no || 0) - (b.no || 0));
   } catch (err: any) {
     console.warn("Firestore fetchStudents offline fallback:", err?.message || err);
-    let students = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
+    let students = (getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || []).map((s) => {
+      const cleanedBed = cleanBedValue(s.dormBed ?? (s as any).bed);
+      return {
+        ...s,
+        dormBed: cleanedBed,
+        bed: cleanedBed
+      };
+    });
     if (params?.dormId) students = students.filter((s) => s.dormId === params.dormId);
     if (params?.grade) students = students.filter((s) => s.grade === params.grade);
     if (params?.room) students = students.filter((s) => Number(s.room) === Number(params.room));
@@ -217,6 +234,7 @@ export async function importStudents(dormId: string, students: Partial<Student>[
   students.forEach((s, idx) => {
     const targetDormId = s.dormId || dormId;
     const id = s.id || `std-${targetDormId}-${Date.now()}-${idx}`;
+    const cleanedBed = cleanBedValue(s.dormBed ?? (s as any).bed);
     const newStudent: Student = {
       id,
       studentId: s.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
@@ -229,8 +247,8 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       room: Number(s.room) || 1,
       dormId: targetDormId,
       dormRoom: s.dormRoom || "101",
-      dormBed: s.dormBed ? String(s.dormBed).trim() : "",
-      bed: s.dormBed ? String(s.dormBed).trim() : (s.bed ? String(s.bed).trim() : ""),
+      dormBed: cleanedBed,
+      bed: cleanedBed,
       gender: (s.gender as any) || "male"
     };
     createdStudents.push(newStudent);
@@ -255,6 +273,7 @@ export async function importStudents(dormId: string, students: Partial<Student>[
 
 export async function addStudent(studentData: Partial<Student>): Promise<Student> {
   const id = studentData.id || `std-${Date.now()}`;
+  const cleanedBed = cleanBedValue(studentData.dormBed ?? (studentData as any).bed);
   const newStudent: Student = {
     id,
     studentId: studentData.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
@@ -267,6 +286,8 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
     room: Number(studentData.room) || 1,
     dormId: studentData.dormId || "dorm-1",
     dormRoom: studentData.dormRoom || "101",
+    dormBed: cleanedBed,
+    bed: cleanedBed,
     gender: studentData.gender || "male"
   };
 
@@ -283,10 +304,15 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
 export async function updateStudent(id: string, studentData: Partial<Student>): Promise<Student> {
   const docRef = doc(db, "students", id);
   let updated: any = { ...studentData, id };
+  if (studentData.dormBed !== undefined || (studentData as any).bed !== undefined) {
+    const cleanedBed = cleanBedValue(studentData.dormBed ?? (studentData as any).bed);
+    updated.dormBed = cleanedBed;
+    updated.bed = cleanedBed;
+  }
   try {
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      updated = { ...snap.data(), ...studentData };
+      updated = { ...snap.data(), ...updated };
     }
     await setDoc(docRef, cleanFirestoreData(updated), { merge: true });
   } catch (e) {

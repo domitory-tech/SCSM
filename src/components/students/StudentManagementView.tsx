@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
-import { matchStudentToDorm, findDormForStudent, countStudentsInDorm } from "../../utils/dormUtils";
+import { matchStudentToDorm, findDormForStudent, countStudentsInDorm, cleanBedValue, formatBedDisplay } from "../../utils/dormUtils";
 import { deleteSampleData } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
@@ -98,6 +98,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   const [excelFileName, setExcelFileName] = useState<string | null>(null);
   const [previewStudents, setPreviewStudents] = useState<Partial<Student>[]>([]);
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [isCleaningBeds, setIsCleaningBeds] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -229,7 +230,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         "ห้อง": s.room,
         "หอพัก": dormObj?.name || s.dormId,
         "ห้องพักหอ": s.dormRoom,
-        "เตียง": s.dormBed || "-"
+        "เตียง": cleanBedValue(s.dormBed) || "-"
       };
     });
 
@@ -320,7 +321,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           let grade = (colIdxGrade >= 0 && colStr[colIdxGrade]) ? colStr[colIdxGrade] : "";
           let room = (colIdxRoom >= 0 && colStr[colIdxRoom] ? parseInt(colStr[colIdxRoom]) : 0) || 1;
           let dormRoom = (colIdxDormRoom >= 0 && colStr[colIdxDormRoom]) ? colStr[colIdxDormRoom] : "101";
-          let dormBed = (colIdxBed >= 0 && colStr[colIdxBed]) ? colStr[colIdxBed] : "";
+          let dormBed = (colIdxBed >= 0 && colStr[colIdxBed]) ? cleanBedValue(colStr[colIdxBed]) : "";
 
           // Auto-detect dormitory from column if present
           let matchedDormId = importDormId;
@@ -345,7 +346,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               grade = colStr[6] || colStr[5] || "ม.1";
               room = parseInt(colStr[7]) || parseInt(colStr[6]) || 1;
               dormRoom = colStr[8] || colStr[7] || "101";
-              dormBed = colStr[9] || colStr[8] || "";
+              dormBed = cleanBedValue(colStr[9] || colStr[8] || "");
             }
           }
           if (!grade) grade = "ม.1";
@@ -422,19 +423,19 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           const matched = dorms.find((d) => d.id === dormPart || d.name.includes(dormPart) || (dormPart.match(/\d+/) && d.name.includes(dormPart.match(/\d+/)![0])));
           if (matched) matchedDormId = matched.id;
           dormRoom = parts[9] || "101";
-          dormBed = parts[10] ? parts[10].trim() : "";
+          dormBed = parts[10] ? cleanBedValue(parts[10]) : "";
         } else if (parts.length >= 9) {
           nickname = parts[5] || "";
           grade = parts[6] || "ม.1";
           room = parseInt(parts[7]) || 1;
           dormRoom = parts[8] || "101";
-          dormBed = parts[9] ? parts[9].trim() : "";
+          dormBed = parts[9] ? cleanBedValue(parts[9]) : "";
         } else {
           nickname = "";
           grade = parts[5] || "ม.1";
           room = parseInt(parts[6]) || 1;
           dormRoom = parts[7] || "101";
-          dormBed = parts[8] ? parts[8].trim() : "";
+          dormBed = parts[8] ? cleanBedValue(parts[8]) : "";
         }
 
         if (!lastName && firstName.includes(" ")) {
@@ -575,6 +576,38 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
   };
 
+  // Handler: Clean and Standardize Bed Data for current dorm or all
+  const handleCleanBedData = async () => {
+    const targetStudents = selectedDormFilter === "ALL" ? students : students.filter((s) => s.dormId === selectedDormFilter);
+    if (targetStudents.length === 0) {
+      alert("ไม่พบข้อมูลนักเรียนที่จะทำการจัดระเบียบ");
+      return;
+    }
+
+    const currentDormName = dorms.find((d) => d.id === selectedDormFilter)?.name || "ทุกหอพัก";
+    if (!window.confirm(`ยืนยันการตรวจสอบและจัดระเบียบข้อมูลเตียงสำหรับ (${currentDormName}) หรือไม่?\nระบบจะปรับปรุงและตัดคำว่า 'เตียง' หรือ 'เตียงคู่' ที่ซ้ำซ้อนให้ถูกต้องเป็นมาตรฐานเดียวกันทั้งหมด`)) {
+      return;
+    }
+
+    setIsCleaningBeds(true);
+    try {
+      let count = 0;
+      for (const st of targetStudents) {
+        const raw = st.dormBed ?? (st as any).bed;
+        const cleaned = cleanBedValue(raw);
+        if (raw !== cleaned && onUpdateStudent) {
+          await onUpdateStudent(st.id, { dormBed: cleaned, bed: cleaned });
+          count++;
+        }
+      }
+      alert(`ตรวจสอบและจัดระเบียบข้อมูลเตียงเรียบร้อยแล้ว (${count > 0 ? `ปรับปรุงแก้ไข ${count} รายการ` : "ข้อมูลเตียงถูกต้องเรียบร้อยแล้วทุกรายการ"}) ปัญหาคำว่าเตียงซ้อนได้รับการแก้ไขทั้งหมดแล้ว`);
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการจัดระเบียบข้อมูลเตียง: " + (err?.message || err));
+    } finally {
+      setIsCleaningBeds(false);
+    }
+  };
+
   // Handler: Execute Batch Transfer Students to Another Dorm
   const handleConfirmTransferStudents = async () => {
     if (selectedStudentIds.length === 0) return;
@@ -611,11 +644,16 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
 
     try {
+      const studentToSave = {
+        ...newStudent,
+        dormBed: cleanBedValue(newStudent.dormBed),
+        bed: cleanBedValue(newStudent.dormBed)
+      };
       if (editingStudent && onUpdateStudent) {
-        await onUpdateStudent(editingStudent.id, newStudent);
+        await onUpdateStudent(editingStudent.id, studentToSave);
         alert("อัปเดตข้อมูลนักเรียนสำเร็จ");
       } else {
-        await onAddStudent(newStudent);
+        await onAddStudent(studentToSave);
         alert("เพิ่มข้อมูลนักเรียนสำเร็จ");
       }
       setIsAddModalOpen(false);
@@ -888,6 +926,19 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               <FileSpreadsheet className="w-4 h-4" />
               <span>นำเข้านักเรียนจำนวนมาก</span>
             </button>
+
+            {canManagePause && (
+              <button
+                type="button"
+                onClick={handleCleanBedData}
+                disabled={isCleaningBeds}
+                className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+                title="ตรวจสอบและล้างคำว่าเตียงที่ซ้ำซ้อนในฐานข้อมูลให้ถูกต้อง"
+              >
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>{isCleaningBeds ? "กำลังจัดระเบียบ..." : "จัดระเบียบข้อมูลเตียง"}</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -1175,7 +1226,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                       </td>
                       <td className="py-3 px-4 text-gray-600">ห้อง {s.dormRoom}</td>
                       <td className="py-3 px-3 text-center font-bold text-purple-800">
-                        {s.dormBed ? `เตียง ${s.dormBed}` : "-"}
+                        {formatBedDisplay(s.dormBed)}
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -1294,7 +1345,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         <span>ดาวน์โหลดไฟล์แบบฟอร์มตัวอย่าง (Excel Template)</span>
                       </div>
                       <p className="text-[11px] text-emerald-700 mt-0.5">
-                        ใช้โครงสร้างคอลัมน์: เลขที่ | รหัสนักเรียน | คำนำหน้า | ชื่อ | นามสกุล | ชั้น | ห้อง | ห้องพักหอ
+                        ใช้โครงสร้างคอลัมน์: เลขที่ | รหัสนักเรียน | คำนำหน้า | ชื่อ | นามสกุล | ชื่อเล่น | ระดับชั้น | ห้อง | ห้องพักหอ | เตียง (เช่น 1, 2 ระบบจัดระเบียบคำว่าเตียงให้อัตโนมัติ)
                       </p>
                     </div>
                     <button
@@ -1401,7 +1452,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                               </span>
                             </td>
                             <td className="p-2">ห้อง {st.dormRoom}</td>
-                            <td className="p-2 text-center font-bold text-purple-800">{st.dormBed ? `เตียง ${st.dormBed}` : "-"}</td>
+                            <td className="p-2 text-center font-bold text-purple-800">{formatBedDisplay(st.dormBed)}</td>
                           </tr>
                         );
                       })}
@@ -1550,8 +1601,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   <input
                     type="text"
                     value={newStudent.dormBed || ""}
-                    onChange={(e) => setNewStudent({ ...newStudent, dormBed: e.target.value })}
-                    placeholder="เช่น 1, 2, 3"
+                    onChange={(e) => setNewStudent({ ...newStudent, dormBed: cleanBedValue(e.target.value) })}
+                    placeholder="เช่น 1, 2, 3 หรือ 1A (ระบบจะเติมคำว่า เตียง ให้อัตโนมัติ)"
                     className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
                   />
                 </div>

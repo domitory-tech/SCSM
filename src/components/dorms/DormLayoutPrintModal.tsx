@@ -6,7 +6,7 @@ import {
   triggerPrintDormLayout,
   downloadDormLayoutHtml
 } from "../../utils/dormLayoutPrintExporter";
-import { getDormTeachers, getDormTypeLabel, matchStudentToDorm } from "../../utils/dormUtils";
+import { getDormTeachers, getDormTypeLabel, matchStudentToDorm, cleanBedValue, formatBedDisplay } from "../../utils/dormUtils";
 import { formatThaiFullDate } from "../../utils/dateUtils";
 import {
   Printer,
@@ -45,13 +45,8 @@ interface BedRowItem {
 
 function getRoomBedRows(studentsInRoom: Student[]): BedRowItem[] {
   const mapped = studentsInRoom.map((st, idx) => {
-    let bedStr = "";
     const raw = (st.dormBed ?? (st as any).bed ?? "").toString().trim();
-    if (raw) {
-      bedStr = raw.startsWith("เตียง") ? raw : `เตียง ${raw}`;
-    } else {
-      bedStr = `เตียง ${idx + 1}`;
-    }
+    const bedStr = raw ? formatBedDisplay(raw) : `เตียง ${idx + 1}`;
     return {
       student: st,
       bedLabel: bedStr
@@ -527,11 +522,7 @@ export const DormLayoutPrintModal: React.FC<DormLayoutPrintModalProps> = ({
                                         className="py-1 px-2 text-center font-bold text-slate-800 bg-slate-50/70 border-r border-b border-slate-200 align-middle text-[11px] w-28"
                                       >
                                         <div>{rowItem.bedLabel}</div>
-                                        {rowItem.bedRowSpan > 1 && (
-                                          <span className="text-[9px] text-purple-700 font-bold bg-purple-100 px-1 py-0.5 rounded whitespace-nowrap block mt-0.5">
-                                            (เตียงคู่ {rowItem.bedRowSpan})
-                                          </span>
-                                        )}
+
                                       </td>
                                     )}
                                     <td className="py-1 px-2 text-slate-800 border-r border-slate-100 truncate">

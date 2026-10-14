@@ -5,7 +5,9 @@ import {
   getDormTypeLabel,
   getPositionBadgeStyle,
   getPositionDotColor,
-  matchStudentToDorm
+  matchStudentToDorm,
+  cleanBedValue,
+  formatBedDisplay
 } from "./dormUtils";
 
 export interface DormLayoutRoomGroup {
@@ -43,13 +45,8 @@ interface BedRowItem {
 // Group students in a room by bed number (sorted 1 to N, merging rows if sharing bed)
 function getRoomBedRows(studentsInRoom: Student[]): BedRowItem[] {
   const mapped = studentsInRoom.map((st, idx) => {
-    let bedStr = "";
     const raw = (st.dormBed ?? (st as any).bed ?? "").toString().trim();
-    if (raw) {
-      bedStr = raw.startsWith("เตียง") ? raw : `เตียง ${raw}`;
-    } else {
-      bedStr = `เตียง ${idx + 1}`;
-    }
+    const bedStr = raw ? formatBedDisplay(raw) : `เตียง ${idx + 1}`;
     return {
       student: st,
       bedLabel: bedStr
@@ -307,11 +304,6 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
                       rowItem.bedGroupIndex % 2 === 0 ? "#faf5ff" : "#f8fafc"
                     }; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; vertical-align: middle; width: 125px;">
                     <div>${rowItem.bedLabel}</div>
-                    ${
-                      rowItem.bedRowSpan > 1
-                        ? `<div style="font-size: 8.5px; color: #7e22ce; font-weight: 700; margin-top: 1px;">(เตียงคู่ ${rowItem.bedRowSpan})</div>`
-                        : ""
-                    }
                   </td>
                 `
                   : ""

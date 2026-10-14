@@ -7,7 +7,9 @@ import {
   getDormTypeBadgeStyle,
   getDormTeachers,
   getPositionBadgeStyle,
-  getPositionDotColor
+  getPositionDotColor,
+  cleanBedValue,
+  formatBedDisplay
 } from "../../utils/dormUtils";
 import { printOrSaveElementAsPdf } from "../../utils/htmlReportExporter";
 import { DormLayoutOverviewModal } from "./DormLayoutOverviewModal";
@@ -105,13 +107,8 @@ interface BedRowItem {
 // Group students in a room by bed number (sorted 1 to N, merging rows if sharing bed)
 function getRoomBedRows(studentsInRoom: Student[]): BedRowItem[] {
   const mapped = studentsInRoom.map((st, idx) => {
-    let bedStr = "";
     const raw = (st.dormBed ?? (st as any).bed ?? "").toString().trim();
-    if (raw) {
-      bedStr = raw.startsWith("เตียง") ? raw : `เตียง ${raw}`;
-    } else {
-      bedStr = `เตียง ${idx + 1}`;
-    }
+    const bedStr = raw ? formatBedDisplay(raw) : `เตียง ${idx + 1}`;
     return {
       student: st,
       bedLabel: bedStr
@@ -731,11 +728,7 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
                                               <span className="whitespace-nowrap font-bold text-slate-900 text-xs">
                                                 {rowItem.bedLabel}
                                               </span>
-                                              {rowItem.bedRowSpan > 1 && (
-                                                <span className="text-[9px] text-purple-700 font-bold bg-purple-200/90 px-1 py-0.2 rounded whitespace-nowrap">
-                                                  (เตียงคู่ {rowItem.bedRowSpan})
-                                                </span>
-                                              )}
+
                                             </div>
                                           </td>
                                         )}
