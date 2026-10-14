@@ -25,6 +25,8 @@
         "lastName": { "type": "string" },
         "nickname": { "type": "string" },
         "dormId": { "type": "string" },
+        "dormRoom": { "type": "string" },
+        "dormBed": { "type": "string" },
         "grade": { "type": "string" },
         "room": { "type": "string" },
         "status": { "type": "string" }

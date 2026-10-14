@@ -99,6 +99,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   const [previewStudents, setPreviewStudents] = useState<Partial<Student>[]>([]);
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [isCleaningBeds, setIsCleaningBeds] = useState<boolean>(false);
+  const [isConflictAlertModalOpen, setIsConflictAlertModalOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -186,9 +187,9 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     const headers = ["เลขที่", "รหัสนักเรียน", "คำนำหน้า", "ชื่อ", "นามสกุล", "ชื่อเล่น", "ระดับชั้น", "ห้อง", "ห้องพักหอ", "เตียง"];
     const sampleRows = [
       [1, "66001", "นาย", "กิตติพงษ์", "สุขเจริญ", "กิต", "ม.1", 1, "101", "1"],
-      [2, "66002", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "101", "1"],
-      [3, "66003", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201", "1"],
-      [4, "66004", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103", "2"]
+      [2, "66002", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "101", "2"],
+      [3, "66003", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201", "เตียง 1"],
+      [4, "66004", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103", "1A"]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
@@ -219,6 +220,9 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
     const exportData = filteredStudents.map((s) => {
       const dormObj = dorms.find((d) => d.id === s.dormId);
+      const bedVal = (s.dormBed !== undefined && s.dormBed !== null && String(s.dormBed).trim() !== "")
+        ? String(s.dormBed).trim()
+        : ((s.bed !== undefined && s.bed !== null && String(s.bed).trim() !== "") ? String(s.bed).trim() : "-");
       return {
         "เลขที่": s.no,
         "รหัสนักเรียน": s.studentId,
@@ -230,7 +234,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         "ห้อง": s.room,
         "หอพัก": dormObj?.name || s.dormId,
         "ห้องพักหอ": s.dormRoom,
-        "เตียง": cleanBedValue(s.dormBed) || "-"
+        "เตียง": bedVal
       };
     });
 
@@ -321,7 +325,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           let grade = (colIdxGrade >= 0 && colStr[colIdxGrade]) ? colStr[colIdxGrade] : "";
           let room = (colIdxRoom >= 0 && colStr[colIdxRoom] ? parseInt(colStr[colIdxRoom]) : 0) || 1;
           let dormRoom = (colIdxDormRoom >= 0 && colStr[colIdxDormRoom]) ? colStr[colIdxDormRoom] : "101";
-          let dormBed = (colIdxBed >= 0 && colStr[colIdxBed]) ? cleanBedValue(colStr[colIdxBed]) : "";
+          let dormBed = (colIdxBed >= 0 && colStr[colIdxBed] !== undefined && colStr[colIdxBed] !== null) ? String(colStr[colIdxBed]).trim() : "";
 
           // Auto-detect dormitory from column if present
           let matchedDormId = importDormId;
@@ -346,7 +350,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               grade = colStr[6] || colStr[5] || "ม.1";
               room = parseInt(colStr[7]) || parseInt(colStr[6]) || 1;
               dormRoom = colStr[8] || colStr[7] || "101";
-              dormBed = cleanBedValue(colStr[9] || colStr[8] || "");
+              dormBed = String(colStr[9] || colStr[8] || "").trim();
             }
           }
           if (!grade) grade = "ม.1";
@@ -423,19 +427,19 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           const matched = dorms.find((d) => d.id === dormPart || d.name.includes(dormPart) || (dormPart.match(/\d+/) && d.name.includes(dormPart.match(/\d+/)![0])));
           if (matched) matchedDormId = matched.id;
           dormRoom = parts[9] || "101";
-          dormBed = parts[10] ? cleanBedValue(parts[10]) : "";
+          dormBed = parts[10] ? String(parts[10]).trim() : "";
         } else if (parts.length >= 9) {
           nickname = parts[5] || "";
           grade = parts[6] || "ม.1";
           room = parseInt(parts[7]) || 1;
           dormRoom = parts[8] || "101";
-          dormBed = parts[9] ? cleanBedValue(parts[9]) : "";
+          dormBed = parts[9] ? String(parts[9]).trim() : "";
         } else {
           nickname = "";
           grade = parts[5] || "ม.1";
           room = parseInt(parts[6]) || 1;
           dormRoom = parts[7] || "101";
-          dormBed = parts[8] ? cleanBedValue(parts[8]) : "";
+          dormBed = parts[8] ? String(parts[8]).trim() : "";
         }
 
         if (!lastName && firstName.includes(" ")) {
@@ -468,8 +472,209 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     setPreviewStudents(parsed);
   };
 
-  // Confirm Import parsed students
-  const handleConfirmImport = async () => {
+  // Helper to normalize bed value for room duplicate matching
+  const normBedForComparison = (val?: string | number | null): string => {
+    if (val === undefined || val === null) return "";
+    const s = String(val).trim().toLowerCase();
+    if (!s || s === "-") return "";
+    return s.replace(/^(เตียงคู่|เตียงเดี่ยว|เตียง)\s*/i, "").trim() || s;
+  };
+
+  // Analyze duplicates in each room (เตียงซ้ำ หรือ ข้อมูลซ้ำในแต่ละห้อง)
+  const roomConflicts = useMemo(() => {
+    if (previewStudents.length === 0) return [];
+
+    const roomGroups = new Map<string, {
+      dormId: string;
+      dormName: string;
+      dormRoom: string;
+      students: { student: Partial<Student>; index: number }[];
+    }>();
+
+    previewStudents.forEach((st, idx) => {
+      const dormId = st.dormId || importDormId;
+      const dormObj = dorms.find((d) => d.id === dormId);
+      const dormName = dormObj?.name || dormId;
+      const dormRoom = String(st.dormRoom || "101").trim();
+      const key = `${dormId}:::${dormRoom}`;
+
+      if (!roomGroups.has(key)) {
+        roomGroups.set(key, {
+          dormId,
+          dormName,
+          dormRoom,
+          students: []
+        });
+      }
+      roomGroups.get(key)!.students.push({ student: st, index: idx });
+    });
+
+    const result: {
+      key: string;
+      dormId: string;
+      dormName: string;
+      dormRoom: string;
+      conflicts: {
+        type: "BED_DUPLICATE_IMPORT" | "BED_CONFLICT_EXISTING" | "STUDENT_ID_DUPLICATE" | "STUDENT_NAME_DUPLICATE";
+        title: string;
+        description: string;
+        bed?: string;
+        studentNames: string[];
+        rowIndices: number[];
+      }[];
+      conflictedRowIndices: number[];
+    }[] = [];
+
+    roomGroups.forEach((group, key) => {
+      const conflicts: {
+        type: "BED_DUPLICATE_IMPORT" | "BED_CONFLICT_EXISTING" | "STUDENT_ID_DUPLICATE" | "STUDENT_NAME_DUPLICATE";
+        title: string;
+        description: string;
+        bed?: string;
+        studentNames: string[];
+        rowIndices: number[];
+      }[] = [];
+      const roomRowIndicesSet = new Set<number>();
+
+      // 1. Bed duplicates inside the import batch for this room
+      const bedMap = new Map<string, { student: Partial<Student>; index: number }[]>();
+      group.students.forEach((item) => {
+        const rawBed = String(item.student.dormBed ?? "").trim();
+        const nb = normBedForComparison(rawBed);
+        if (nb) {
+          if (!bedMap.has(nb)) bedMap.set(nb, []);
+          bedMap.get(nb)!.push(item);
+        }
+      });
+
+      bedMap.forEach((items) => {
+        if (items.length > 1) {
+          const names = items.map(
+            (it) => `${it.student.title || ""}${it.student.firstName || ""} ${it.student.lastName || ""}`.trim()
+          );
+          const rowIndices = items.map((it) => it.index);
+          rowIndices.forEach((i) => roomRowIndicesSet.add(i));
+          conflicts.push({
+            type: "BED_DUPLICATE_IMPORT",
+            title: `เตียงซ้ำในห้อง (${items[0].student.dormBed})`,
+            description: `เตียง "${items[0].student.dormBed}" ซ้ำกัน ${items.length} คนในห้องพัก: ${names.join(", ")}`,
+            bed: String(items[0].student.dormBed),
+            studentNames: names,
+            rowIndices
+          });
+        }
+      });
+
+      // 2. Bed conflict with existing students in this dorm & room
+      const existingInRoom = students.filter(
+        (ex) => matchStudentToDorm(ex, { id: group.dormId, name: group.dormName } as any) &&
+                String(ex.dormRoom).trim() === group.dormRoom
+      );
+
+      group.students.forEach((item) => {
+        const rawBed = String(item.student.dormBed ?? "").trim();
+        const nb = normBedForComparison(rawBed);
+        if (nb) {
+          const matchedExisting = existingInRoom.find((ex) => {
+            const exNb = normBedForComparison(ex.dormBed ?? (ex as any).bed);
+            if (!exNb) return false;
+            const isSameStudent = item.student.studentId && ex.studentId &&
+              String(item.student.studentId).trim().toLowerCase() === String(ex.studentId).trim().toLowerCase();
+            return exNb === nb && !isSameStudent;
+          });
+
+          if (matchedExisting) {
+            const importName = `${item.student.title || ""}${item.student.firstName || ""} ${item.student.lastName || ""}`.trim();
+            const existingName = `${matchedExisting.title || ""}${matchedExisting.firstName || ""} ${matchedExisting.lastName || ""}`.trim();
+            roomRowIndicesSet.add(item.index);
+            conflicts.push({
+              type: "BED_CONFLICT_EXISTING",
+              title: `เตียงซ้ำกับนักเรียนเดิมในระบบ (${rawBed})`,
+              description: `เตียง "${rawBed}" ของ ${importName} ซ้ำกับนักเรียนเดิมในระบบ: ${existingName} (รหัส: ${matchedExisting.studentId})`,
+              bed: rawBed,
+              studentNames: [importName, existingName],
+              rowIndices: [item.index]
+            });
+          }
+        }
+      });
+
+      // 3. Duplicate student in the same room (by studentId or full name)
+      const idMap = new Map<string, { student: Partial<Student>; index: number }[]>();
+      group.students.forEach((item) => {
+        const sid = String(item.student.studentId || "").trim();
+        if (sid) {
+          if (!idMap.has(sid)) idMap.set(sid, []);
+          idMap.get(sid)!.push(item);
+        }
+      });
+      idMap.forEach((items, sid) => {
+        if (items.length > 1) {
+          const names = items.map(
+            (it) => `${it.student.title || ""}${it.student.firstName || ""} ${it.student.lastName || ""}`.trim()
+          );
+          const rowIndices = items.map((it) => it.index);
+          rowIndices.forEach((i) => roomRowIndicesSet.add(i));
+          conflicts.push({
+            type: "STUDENT_ID_DUPLICATE",
+            title: `รหัสนักเรียนซ้ำในห้อง (${sid})`,
+            description: `รหัสนักเรียน "${sid}" ซ้ำกัน ${items.length} รายการในห้องนี้: ${names.join(", ")}`,
+            studentNames: names,
+            rowIndices
+          });
+        }
+      });
+
+      // 4. Duplicate student against existing student in this room
+      group.students.forEach((item) => {
+        const sid = String(item.student.studentId || "").trim();
+        const importName = `${item.student.firstName || ""} ${item.student.lastName || ""}`.trim().toLowerCase();
+        const conflictExisting = existingInRoom.find(
+          (ex) => (sid && String(ex.studentId || "").trim() === sid) ||
+                  (importName && `${ex.firstName || ""} ${ex.lastName || ""}`.trim().toLowerCase() === importName)
+        );
+        if (conflictExisting) {
+          const stName = `${item.student.title || ""}${item.student.firstName || ""} ${item.student.lastName || ""}`.trim();
+          roomRowIndicesSet.add(item.index);
+          conflicts.push({
+            type: "STUDENT_NAME_DUPLICATE",
+            title: `รายชื่อซ้ำกับนักเรียนเดิมในห้อง`,
+            description: `${stName} (รหัส: ${item.student.studentId || "-"}) มีข้อมูลอยู่ในห้องนี้แล้วในระบบ`,
+            studentNames: [stName],
+            rowIndices: [item.index]
+          });
+        }
+      });
+
+      if (conflicts.length > 0) {
+        result.push({
+          key,
+          dormId: group.dormId,
+          dormName: group.dormName,
+          dormRoom: group.dormRoom,
+          conflicts,
+          conflictedRowIndices: Array.from(roomRowIndicesSet)
+        });
+      }
+    });
+
+    return result;
+  }, [previewStudents, students, dorms, importDormId]);
+
+  const conflictedRowIndicesSet = useMemo(() => {
+    const set = new Set<number>();
+    roomConflicts.forEach((rc) => {
+      rc.conflictedRowIndices.forEach((idx) => set.add(idx));
+    });
+    return set;
+  }, [roomConflicts]);
+
+  const totalConflictCount = useMemo(() => {
+    return roomConflicts.reduce((sum, rc) => sum + rc.conflicts.length, 0);
+  }, [roomConflicts]);
+
+  // Execute Import parsed students
+  const executeConfirmImport = async () => {
     if (previewStudents.length === 0) {
       alert("ไม่มีรายชื่อนักเรียนที่จะนำเข้า");
       return;
@@ -503,11 +708,27 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       setExcelFileName(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setIsImportModalOpen(false);
+      setIsConflictAlertModalOpen(false);
     } catch (err: any) {
       alert("เกิดข้อผิดพลาดในการนำเข้า: " + (err.message || err));
     } finally {
       setIsImporting(false);
     }
+  };
+
+  // Confirm Import: If duplicates exist in each/any room, alert before import!
+  const handleConfirmImport = async () => {
+    if (previewStudents.length === 0) {
+      alert("ไม่มีรายชื่อนักเรียนที่จะนำเข้า");
+      return;
+    }
+
+    if (roomConflicts.length > 0) {
+      setIsConflictAlertModalOpen(true);
+      return;
+    }
+
+    await executeConfirmImport();
   };
 
   // Handler: Execute Clear All Students across all dorms
@@ -644,14 +865,15 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
 
     try {
+      const bedValue = newStudent.dormBed !== undefined && newStudent.dormBed !== null ? String(newStudent.dormBed).trim() : "";
       const studentToSave = {
         ...newStudent,
-        dormBed: cleanBedValue(newStudent.dormBed),
-        bed: cleanBedValue(newStudent.dormBed)
+        dormBed: bedValue,
+        bed: bedValue
       };
       if (editingStudent && onUpdateStudent) {
         await onUpdateStudent(editingStudent.id, studentToSave);
-        alert("อัปเดตข้อมูลนักเรียนสำเร็จ");
+        alert("อัปเดตข้อมูลนักเรียนและข้อมูลเตียงเรียบร้อยแล้ว");
       } else {
         await onAddStudent(studentToSave);
         alert("เพิ่มข้อมูลนักเรียนสำเร็จ");
@@ -668,7 +890,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         nickname: "",
         grade: "ม.1",
         room: 1,
-        dormRoom: "101"
+        dormRoom: "101",
+        dormBed: ""
       });
     } catch (err: any) {
       alert("เกิดข้อผิดพลาด: " + err.message);
@@ -1233,7 +1456,10 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                           <button
                             onClick={() => {
                               setEditingStudent(s);
-                              setNewStudent(s);
+                              setNewStudent({
+                                ...s,
+                                dormBed: s.dormBed !== undefined && s.dormBed !== null ? String(s.dormBed) : (s.bed !== undefined && s.bed !== null ? String(s.bed) : "")
+                              });
                               setIsAddModalOpen(true);
                             }}
                             className="text-blue-600 hover:text-blue-800 p-1.5 rounded-lg hover:bg-blue-50 cursor-pointer"
@@ -1345,7 +1571,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         <span>ดาวน์โหลดไฟล์แบบฟอร์มตัวอย่าง (Excel Template)</span>
                       </div>
                       <p className="text-[11px] text-emerald-700 mt-0.5">
-                        ใช้โครงสร้างคอลัมน์: เลขที่ | รหัสนักเรียน | คำนำหน้า | ชื่อ | นามสกุล | ชื่อเล่น | ระดับชั้น | ห้อง | ห้องพักหอ | เตียง (เช่น 1, 2 ระบบจัดระเบียบคำว่าเตียงให้อัตโนมัติ)
+                        ใช้โครงสร้างคอลัมน์: เลขที่ | รหัสนักเรียน | คำนำหน้า | ชื่อ | นามสกุล | ชื่อเล่น | ระดับชั้น | ห้อง | ห้องพักหอ | เตียง (บันทึกข้อมูลเตียงตามที่ท่านนำเข้า เช่น 1, 2, เตียง 1, 1A)
                       </p>
                     </div>
                     <button
@@ -1411,7 +1637,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
             {/* PREVIEW TABLE */}
             {previewStudents.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-slate-200">
+              <div className="space-y-3 pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-800">
                   <span className="flex items-center gap-1.5 text-emerald-700">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -1422,9 +1648,54 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   </span>
                 </div>
 
-                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50">
+                {/* Warning Alert Banner if Room Duplicates Found */}
+                {roomConflicts.length > 0 && (
+                  <div className="bg-gradient-to-r from-rose-50 via-amber-50 to-orange-50 border border-rose-300 rounded-2xl p-4 space-y-2.5 animate-fade-in shadow-2xs">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <AlertCircle className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h4 className="text-xs font-black text-rose-950 uppercase tracking-wide">
+                            ⚠️ แจ้งเตือน: ตรวจพบข้อมูลซ้ำในแต่ละห้อง ({roomConflicts.length} ห้อง / {totalConflictCount} รายการ)
+                          </h4>
+                          <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-200 text-rose-900 rounded-md">
+                            ระบบจะแจ้งเตือนยืนยันก่อนนำเข้า
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-rose-800 mt-0.5 font-medium">
+                          พบเตียงซ้ำหรือข้อมูลนักเรียนซ้ำในห้องพักเดียวกันด้านล่าง โปรดตรวจสอบแถบสีชมพูด้านล่างก่อนกดยืนยัน
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto bg-white/90 rounded-xl p-3 border border-rose-200 text-[11px] space-y-2">
+                      {roomConflicts.map((rg, idx) => (
+                        <div key={idx} className="pb-1.5 border-b border-rose-100 last:border-b-0 last:pb-0">
+                          <div className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                            <Home className="w-3.5 h-3.5 text-purple-600" />
+                            <span>{rg.dormName} • ห้อง {rg.dormRoom}</span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 font-bold ml-auto">
+                              ซ้ำ {rg.conflicts.length} รายการ
+                            </span>
+                          </div>
+                          <ul className="mt-1 pl-4 list-disc space-y-0.5 text-rose-700">
+                            {rg.conflicts.map((c, cIdx) => (
+                              <li key={cIdx} className="font-medium">
+                                {c.description}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50">
                   <table className="w-full text-left text-[11px] text-slate-700">
-                    <thead className="bg-slate-200 text-slate-700 font-bold sticky top-0">
+                    <thead className="bg-slate-200 text-slate-700 font-bold sticky top-0 z-10">
                       <tr>
                         <th className="p-2 w-8 text-center">#</th>
                         <th className="p-2">รหัสนักเรียน</th>
@@ -1437,10 +1708,16 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {previewStudents.slice(0, 30).map((st, idx) => {
+                      {previewStudents.slice(0, 50).map((st, idx) => {
                         const targetDorm = dorms.find((d) => d.id === st.dormId) || dorms.find((d) => d.id === importDormId);
+                        const isConflicted = conflictedRowIndicesSet.has(idx);
                         return (
-                          <tr key={idx} className="hover:bg-white">
+                          <tr
+                            key={idx}
+                            className={`transition-colors ${
+                              isConflicted ? "bg-rose-50/90 hover:bg-rose-100/90 font-medium" : "hover:bg-white"
+                            }`}
+                          >
                             <td className="p-2 text-center font-bold text-slate-500">{st.no || idx + 1}</td>
                             <td className="p-2 font-mono font-bold">{st.studentId}</td>
                             <td className="p-2 font-bold">{st.title}{st.firstName} {st.lastName}</td>
@@ -1451,16 +1728,23 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                                 {targetDorm?.name || st.dormId || "หอพัก"}
                               </span>
                             </td>
-                            <td className="p-2">ห้อง {st.dormRoom}</td>
-                            <td className="p-2 text-center font-bold text-purple-800">{formatBedDisplay(st.dormBed)}</td>
+                            <td className="p-2 font-semibold">ห้อง {st.dormRoom}</td>
+                            <td className="p-2 text-center font-bold text-purple-800">
+                              <div>{formatBedDisplay(st.dormBed)}</div>
+                              {isConflicted && (
+                                <span className="inline-block mt-0.5 text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.2 rounded border border-rose-300">
+                                  ⚠️ ซ้ำในห้อง
+                                </span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  {previewStudents.length > 30 && (
+                  {previewStudents.length > 50 && (
                     <div className="p-2 text-center text-[10px] text-slate-500 font-bold bg-slate-100">
-                      และอีก {previewStudents.length - 30} รายการ...
+                      และอีก {previewStudents.length - 50} รายการ...
                     </div>
                   )}
                 </div>
@@ -1480,12 +1764,98 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                 disabled={isImporting || previewStudents.length === 0}
                 className={`px-5 py-2 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
                   previewStudents.length > 0
-                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    ? roomConflicts.length > 0
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-slate-300 cursor-not-allowed"
                 }`}
               >
+                {roomConflicts.length > 0 ? (
+                  <AlertCircle className="w-4 h-4 text-white" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-white" />
+                )}
+                <span>
+                  {isImporting
+                    ? "กำลังบันทึกนำเข้า..."
+                    : roomConflicts.length > 0
+                    ? `ยืนยันนำเข้า (${previewStudents.length} รายการ - พบซ้ำ ${totalConflictCount})`
+                    : `ยืนยันนำเข้า (${previewStudents.length} รายการ)`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 1.5: Room Duplicate Conflict Alert Warning Before Import */}
+      {isConflictAlertModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-amber-200 space-y-4">
+            <div className="flex items-start gap-3.5 text-amber-600">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-7 h-7 text-amber-600 animate-pulse" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span>แจ้งเตือน: พบข้อมูลซ้ำในแต่ละห้องก่อนนำเข้า</span>
+                </h3>
+                <p className="text-xs text-slate-600 mt-1">
+                  ระบบตรวจสอบพบข้อมูลซ้ำทั้งหมด <span className="font-bold text-rose-600">{totalConflictCount} รายการ</span> ในห้องพักหอพัก <span className="font-bold text-rose-600">{roomConflicts.length} ห้อง</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-xs text-amber-950 space-y-3">
+              <p className="font-bold text-amber-900">
+                หากนำเข้าข้อมูลโดยไม่แก้ไข อาจทำให้มีเตียงซ้ำหรือรายชื่อนักเรียนซ้ำในห้องเดียวกันได้ ดังนี้:
+              </p>
+
+              <div className="max-h-56 overflow-y-auto space-y-2.5 pr-1">
+                {roomConflicts.map((group, gIdx) => (
+                  <div key={gIdx} className="bg-white rounded-xl p-3 border border-amber-200 shadow-2xs space-y-1.5">
+                    <div className="font-black text-slate-800 flex items-center gap-1.5 text-xs">
+                      <Home className="w-4 h-4 text-purple-600" />
+                      <span>{group.dormName} • ห้อง {group.dormRoom}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold ml-auto">
+                        พบ {group.conflicts.length} ข้อความซ้ำ
+                      </span>
+                    </div>
+                    <ul className="pl-4 list-disc space-y-1 text-[11px] text-rose-700">
+                      {group.conflicts.map((c, cIdx) => (
+                        <li key={cIdx} className="font-medium">
+                          {c.description}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 font-medium">
+              💡 แนะนำ: ท่านสามารถกดยกเลิกเพื่อกลับไปตรวจสอบและแก้ไขไฟล์ Excel ให้ถูกต้อง หรือกดยืนยันนำเข้าข้อมูลต่อได้ทันที
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsConflictAlertModalOpen(false)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer transition-colors"
+              >
+                ย้อนกลับไปแก้ไขข้อมูล
+              </button>
+              <button
+                type="button"
+                disabled={isImporting}
+                onClick={async () => {
+                  setIsConflictAlertModalOpen(false);
+                  await executeConfirmImport();
+                }}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
+              >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{isImporting ? "กำลังบันทึกนำเข้า..." : `ยืนยันนำเข้า (${previewStudents.length} รายการ)`}</span>
+                <span>{isImporting ? "กำลังนำเข้าข้อมูล..." : "ยืนยันนำเข้าข้อมูลต่อ"}</span>
               </button>
             </div>
           </div>
@@ -1597,13 +1967,15 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">เตียง</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    เตียง <span className="text-gray-400 font-normal">(กรอกได้ตามต้องการ)</span>
+                  </label>
                   <input
                     type="text"
-                    value={newStudent.dormBed || ""}
-                    onChange={(e) => setNewStudent({ ...newStudent, dormBed: cleanBedValue(e.target.value) })}
-                    placeholder="เช่น 1, 2, 3 หรือ 1A (ระบบจะเติมคำว่า เตียง ให้อัตโนมัติ)"
-                    className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
+                    value={newStudent.dormBed ?? ""}
+                    onChange={(e) => setNewStudent({ ...newStudent, dormBed: e.target.value, bed: e.target.value })}
+                    placeholder="เช่น 1, 2, เตียง 1, 1A, เตียงคู่ 1"
+                    className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-pink-500 focus:bg-white transition-all font-medium"
                   />
                 </div>
               </div>

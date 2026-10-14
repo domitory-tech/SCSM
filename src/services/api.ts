@@ -186,12 +186,14 @@ export async function fetchStudents(params?: {
     if (!snapshot.empty) {
       students = snapshot.docs.map((d) => {
         const raw = d.data();
-        const cleanedBed = cleanBedValue(raw.dormBed ?? raw.bed);
+        const bedVal = (raw.dormBed !== undefined && raw.dormBed !== null && String(raw.dormBed).trim() !== "")
+          ? String(raw.dormBed).trim()
+          : ((raw.bed !== undefined && raw.bed !== null) ? String(raw.bed).trim() : "");
         return {
           id: d.id,
           ...raw,
-          dormBed: cleanedBed,
-          bed: cleanedBed
+          dormBed: bedVal,
+          bed: bedVal
         } as Student;
       });
       setLocalCache(CACHE_KEYS.STUDENTS, students);
@@ -214,11 +216,13 @@ export async function fetchStudents(params?: {
   } catch (err: any) {
     console.warn("Firestore fetchStudents offline fallback:", err?.message || err);
     let students = (getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || []).map((s) => {
-      const cleanedBed = cleanBedValue(s.dormBed ?? (s as any).bed);
+      const bedVal = (s.dormBed !== undefined && s.dormBed !== null && String(s.dormBed).trim() !== "")
+        ? String(s.dormBed).trim()
+        : ((s as any).bed !== undefined && (s as any).bed !== null ? String((s as any).bed).trim() : "");
       return {
         ...s,
-        dormBed: cleanedBed,
-        bed: cleanedBed
+        dormBed: bedVal,
+        bed: bedVal
       };
     });
     if (params?.dormId) students = students.filter((s) => s.dormId === params.dormId);
@@ -234,7 +238,9 @@ export async function importStudents(dormId: string, students: Partial<Student>[
   students.forEach((s, idx) => {
     const targetDormId = s.dormId || dormId;
     const id = s.id || `std-${targetDormId}-${Date.now()}-${idx}`;
-    const cleanedBed = cleanBedValue(s.dormBed ?? (s as any).bed);
+    const bedVal = (s.dormBed !== undefined && s.dormBed !== null)
+      ? String(s.dormBed).trim()
+      : ((s.bed !== undefined && s.bed !== null) ? String(s.bed).trim() : "");
     const newStudent: Student = {
       id,
       studentId: s.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
@@ -247,8 +253,8 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       room: Number(s.room) || 1,
       dormId: targetDormId,
       dormRoom: s.dormRoom || "101",
-      dormBed: cleanedBed,
-      bed: cleanedBed,
+      dormBed: bedVal,
+      bed: bedVal,
       gender: (s.gender as any) || "male"
     };
     createdStudents.push(newStudent);
@@ -273,7 +279,9 @@ export async function importStudents(dormId: string, students: Partial<Student>[
 
 export async function addStudent(studentData: Partial<Student>): Promise<Student> {
   const id = studentData.id || `std-${Date.now()}`;
-  const cleanedBed = cleanBedValue(studentData.dormBed ?? (studentData as any).bed);
+  const bedVal = (studentData.dormBed !== undefined && studentData.dormBed !== null)
+    ? String(studentData.dormBed).trim()
+    : ((studentData.bed !== undefined && studentData.bed !== null) ? String(studentData.bed).trim() : "");
   const newStudent: Student = {
     id,
     studentId: studentData.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
@@ -286,8 +294,8 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
     room: Number(studentData.room) || 1,
     dormId: studentData.dormId || "dorm-1",
     dormRoom: studentData.dormRoom || "101",
-    dormBed: cleanedBed,
-    bed: cleanedBed,
+    dormBed: bedVal,
+    bed: bedVal,
     gender: studentData.gender || "male"
   };
 
@@ -305,9 +313,11 @@ export async function updateStudent(id: string, studentData: Partial<Student>): 
   const docRef = doc(db, "students", id);
   let updated: any = { ...studentData, id };
   if (studentData.dormBed !== undefined || (studentData as any).bed !== undefined) {
-    const cleanedBed = cleanBedValue(studentData.dormBed ?? (studentData as any).bed);
-    updated.dormBed = cleanedBed;
-    updated.bed = cleanedBed;
+    const bedVal = (studentData.dormBed !== undefined && studentData.dormBed !== null)
+      ? String(studentData.dormBed).trim()
+      : ((studentData.bed !== undefined && studentData.bed !== null) ? String(studentData.bed).trim() : "");
+    updated.dormBed = bedVal;
+    updated.bed = bedVal;
   }
   try {
     const snap = await getDoc(docRef);

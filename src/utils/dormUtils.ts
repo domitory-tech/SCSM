@@ -363,49 +363,53 @@ export function formatDormShort(dormNameOrObj?: string | Dormitory | null): stri
 }
 
 /**
- * Cleans a bed value by stripping any leading or duplicated "เตียง", "เตียงคู่", "เตียงเดี่ยว" prefixes and extra whitespace.
- * e.g.:
- *  "เตียง 1" -> "1"
- *  "เตียง เตียง 1" -> "1"
- *  "เตียง1" -> "1"
- *  "เตียง 1A" -> "1A"
- *  "เตียงคู่ 2" -> "2"
- *  "1" -> "1"
+ * Cleans a bed value by trimming whitespace and normalizing duplicated "เตียง เตียง" prefixes if any,
+ * while preserving the user's entered text and format (e.g. "1", "2", "เตียง 1", "เตียงคู่ 1", "1A").
  */
 export function cleanBedValue(bed: string | number | undefined | null): string {
   if (bed === undefined || bed === null) return "";
   let s = String(bed).trim();
   if (!s || s === "-") return "";
-  while (/^(เตียงคู่|เตียงเดี่ยว|เตียง)\s*/i.test(s)) {
-    s = s.replace(/^(เตียงคู่|เตียงเดี่ยว|เตียง)\s*/i, "").trim();
+  // Strip duplicate "เตียง เตียง" prefixes if present
+  while (/^(เตียง\s*){2,}/i.test(s)) {
+    s = s.replace(/^(เตียง\s*){2,}/i, "เตียง ").trim();
   }
   return s;
 }
 
 /**
  * Formats a bed value for display.
- * Always ensures "เตียง " appears cleanly at most once, and never duplicates "เตียง".
+ * If the value already includes "เตียง" (e.g. "เตียง 1", "เตียงคู่ 2"), display as is.
+ * If the value is a number or alphanumeric code (e.g. "1", "2", "1A"), prefix with "เตียง ".
  * If empty and defaultIdx is provided, outputs `เตียง ${defaultIdx}`.
  * If empty and no defaultIdx, returns "-".
  */
 export function formatBedDisplay(bed: string | number | undefined | null, defaultIdx?: number): string {
-  const cleaned = cleanBedValue(bed);
-  if (cleaned) {
-    return `เตียง ${cleaned}`;
+  if (bed === undefined || bed === null) {
+    if (defaultIdx !== undefined && defaultIdx !== null) {
+      return `เตียง ${defaultIdx}`;
+    }
+    return "-";
   }
-  if (defaultIdx !== undefined && defaultIdx !== null) {
-    return `เตียง ${defaultIdx}`;
+  let s = cleanBedValue(bed);
+  if (!s || s === "-") {
+    if (defaultIdx !== undefined && defaultIdx !== null) {
+      return `เตียง ${defaultIdx}`;
+    }
+    return "-";
   }
-  return "-";
+  if (s.startsWith("เตียง")) {
+    return s;
+  }
+  return `เตียง ${s}`;
 }
 
 /**
- * Parses numeric bed number for sorting (e.g. 1, 2, "เตียง 1", "เตียง เตียง 1", "1A").
+ * Parses numeric bed number for sorting (e.g. 1, 2, "เตียง 1", "เตียงคู่ 2", "1A").
  */
 export function parseBedNumber(bedVal: string | number | undefined | null): number {
   if (bedVal === undefined || bedVal === null || String(bedVal).trim() === "") return 99999;
-  const cleaned = cleanBedValue(bedVal);
-  const num = parseInt(cleaned.replace(/\D/g, ""), 10);
+  const num = parseInt(String(bedVal).replace(/\D/g, ""), 10);
   return isNaN(num) ? 99999 : num;
 }
 
