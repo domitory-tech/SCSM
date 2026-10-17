@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { DailyAttendance, Dormitory, Notice, Student, StudentAttendanceRecord, UserProfile, SystemSettings } from "../../types";
-import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString } from "../../utils/dateUtils";
+import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString, isDormAttendancePaused } from "../../utils/dateUtils";
 import { fetchAttendance } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
@@ -46,7 +46,9 @@ import {
   UserX,
   X,
   PauseCircle,
-  PlayCircle
+  PlayCircle,
+  Unlock,
+  Shield
 } from "lucide-react";
 
 interface AttendanceCheckViewProps {
@@ -65,6 +67,7 @@ interface AttendanceCheckViewProps {
   systemSettings?: SystemSettings;
   onUpdateSystemSettings?: (settings: SystemSettings) => Promise<void> | void;
   onNavigateToStudents?: () => void;
+  onBulkHomeBreak?: (mode: "SET_HOME_BREAK" | "REVERT_NORMAL") => Promise<void>;
 }
 
 export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
@@ -82,7 +85,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   onReturnToDashboard,
   systemSettings,
   onUpdateSystemSettings,
-  onNavigateToStudents
+  onNavigateToStudents,
+  onBulkHomeBreak
 }) => {
   const todayStr = getTodayDateString();
   const [internalSelectedDate, setInternalSelectedDate] = useState<string>(todayStr);
@@ -97,13 +101,14 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
 
   // Editing Permissions Logic:
   // Level 1 (Admin) & Level 2 (Staff) can edit anytime
-  // Level 3 (Teacher) can edit ONLY if selectedDate === todayStr AND attendance is not paused
+  // Level 3 (Teacher) can edit ONLY if selectedDate === todayStr AND this dorm is not paused
   const isToday = selectedDate === todayStr;
-  const isAttendancePaused = Boolean(systemSettings?.isAttendancePaused);
+  const isGlobalPaused = Boolean(systemSettings?.isAttendancePaused);
+  const isThisDormPaused = isDormAttendancePaused(selectedDormId, systemSettings);
   const isAdminOrStaff = Boolean(currentUser && (currentUser.roleLevel === 1 || currentUser.roleLevel === 2));
   const canEditAttendance = Boolean(
     currentUser &&
-    (isAdminOrStaff || (currentUser.roleLevel === 3 && isToday && !isAttendancePaused))
+    (isAdminOrStaff || (currentUser.roleLevel === 3 && isToday && !isThisDormPaused))
   );
 
   const [isHomeBreak, setIsHomeBreak] = useState<boolean>(false);
@@ -472,8 +477,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
 
   // Submit Handler - opens confirmation modal
   const handleSave = () => {
-    if (isAttendancePaused && !isAdminOrStaff) {
-      alert("⚠️ ขณะนี้ระบบปิดการเช็คยอดชั่วคราว เนื่องจากอยู่ระหว่างการปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่ กรุณารอเจ้าหน้าที่เปิดระบบ");
+    if (isThisDormPaused && !isAdminOrStaff) {
+      alert("⚠️ ขณะนี้หอพักนี้ถูกหยุดการเช็คยอดชั่วคราว เนื่องจากอยู่ระหว่างการปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่ กรุณารอเจ้าหน้าที่เปิดระบบ");
       return;
     }
     if (!canEditAttendance) {
@@ -589,8 +594,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Attendance Check Paused High-Visibility Banner */}
-      {isAttendancePaused && (
-        <div className="bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white rounded-2xl p-4 shadow-lg border border-rose-400 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
+      {isThisDormPaused && (
+        <div className="bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-rose-400 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <PauseCircle className="w-6 h-6 text-white animate-pulse" />
@@ -598,7 +603,9 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="bg-white text-rose-700 text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  ⛔ แจ้งเตือน: ระบบหยุดการเช็คยอดชั่วคราว
+                  {isGlobalPaused
+                    ? "⛔ แจ้งเตือน: ระบบหยุดการเช็คยอดชั่วคราวทุกหอพัก"
+                    : `⛔ แจ้งเตือน: หอพักนี้ (${currentDorm?.name}) อยู่ในสถานะหยุดการเช็คยอดชั่วคราว`}
                 </span>
                 {systemSettings?.attendancePausedAt && (
                   <span className="text-[11px] text-white/90">
@@ -610,19 +617,45 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 {systemSettings?.attendancePauseReason || "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"}
               </p>
               <p className="text-xs text-rose-100 mt-0.5">
-                ครูประจำหอพักไม่ต้องทำการเช็คยอดจนกว่าเจ้าหน้าที่จะปรับปรุงข้อมูลนักเรียนเสร็จสิ้นและเปิดระบบตามปกติ
+                {isAdminOrStaff
+                  ? "ท่านมีสิทธิ์ผู้ดูแล/เจ้าหน้าที่ สามารถจัดการและบันทึกข้อมูลได้ตามปกติ หรือเปิดระบบให้ครูหอพักได้ทันที"
+                  : "ครูประจำหอพักไม่ต้องทำการเช็คยอดจนกว่าเจ้าหน้าที่จะปรับปรุงข้อมูลนักเรียนเสร็จสิ้นและเปิดระบบตามปกติ"}
               </p>
             </div>
           </div>
-          {onNavigateToStudents && isAdminOrStaff && (
-            <button
-              type="button"
-              onClick={onNavigateToStudents}
-              className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 font-black text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center gap-1.5 self-start md:self-auto"
-            >
-              <span>ไปที่จัดการรายชื่อนักเรียน</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+            {isAdminOrStaff && onUpdateSystemSettings && (
+              <button
+                type="button"
+                onClick={async () => {
+                  let newPausedList = systemSettings?.pausedDormIds || [];
+                  if (isGlobalPaused) {
+                    newPausedList = dorms.map((d) => d.id).filter((id) => id !== selectedDormId);
+                  } else {
+                    newPausedList = newPausedList.filter((id) => id !== selectedDormId);
+                  }
+                  await onUpdateSystemSettings({
+                    ...systemSettings!,
+                    isAttendancePaused: false,
+                    pausedDormIds: newPausedList
+                  });
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Unlock className="w-4 h-4" />
+                <span>เปิดระบบหอพักนี้</span>
+              </button>
+            )}
+            {onNavigateToStudents && isAdminOrStaff && (
+              <button
+                type="button"
+                onClick={onNavigateToStudents}
+                className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 font-black text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <span>ไปที่จัดการรายชื่อนักเรียน</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -704,9 +737,11 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               </div>
             </div>
 
-            {/* Home Break Toggle */}
+            {/* Home Break Toggle (ครูหอพักคงไว้แบบเดิม) */}
             <div>
-              <label className="block text-[10px] font-bold text-gray-400 mb-1 uppercase">โหมดรอบวันกลับบ้าน</label>
+              <label className="block text-[10px] font-bold text-gray-400 mb-1 uppercase">
+                {isAdminOrStaff ? "รอบกลับบ้าน (หอพักนี้)" : "โหมดรอบวันกลับบ้าน"}
+              </label>
               <button
                 type="button"
                 onClick={handleToggleHomeBreak}
@@ -721,6 +756,39 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 <span>{isHomeBreak ? "วันรอบกลับบ้าน (เปิดอยู่)" : "ปิด (วันปกติ)"}</span>
               </button>
             </div>
+
+            {/* ปุ่มสถานะรอบกลับบ้าน (ทุกหอพัก) สำหรับผู้ดูแลและเจ้าหน้าที่ (คลิกเดียวเปลี่ยนทุกหอพัก) */}
+            {isAdminOrStaff && onBulkHomeBreak && (
+              <div>
+                <label className="block text-[10px] font-bold text-amber-700 mb-1 uppercase">
+                  รอบกลับบ้าน (ทุกหอพัก)
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const confirmAction = window.confirm(
+                      `ยืนยันเปลี่ยนสถานะ "ทุกหอพัก" เป็นรอบกลับบ้านสำหรับวันที่ ${formatThaiFullDate(selectedDate)} หรือไม่?\n\nนักเรียนทุกคนในทุกหอพักจะถูกเปลี่ยนสถานะเป็น 'รอบกลับบ้าน' ทันที`
+                    );
+                    if (confirmAction) {
+                      await onBulkHomeBreak("SET_HOME_BREAK");
+                      setIsHomeBreak(true);
+                      // Update current view records
+                      const updated: Record<string, StudentAttendanceRecord> = {};
+                      students.forEach((s) => {
+                        updated[s.studentId] = { studentId: s.studentId, status: "ROUND_HOME", reason: "รอบกลับบ้าน" };
+                      });
+                      setRecordsMap(updated);
+                      alert(`เปลี่ยนสถานะทุกหอพักเป็น "รอบกลับบ้าน" เรียบร้อยแล้ว`);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
+                  title="คลิกเดียวเปลี่ยนสถานะทุกหอพักเป็นรอบกลับบ้าน"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>รอบกลับบ้านทุกหอพัก</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1175,10 +1243,10 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 <CheckCircle2 className="w-4 h-4" />
                 {saveSuccessMsg}
               </span>
-            ) : isAttendancePaused ? (
+            ) : isThisDormPaused ? (
               <span className="font-bold text-rose-600 flex items-center gap-1.5">
                 <PauseCircle className="w-4 h-4 text-rose-600 animate-pulse" />
-                ระบบหยุดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่
+                {systemSettings?.attendancePauseReason || "ระบบหยุดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"}
               </span>
             ) : !canEditAttendance ? (
               <span className="text-amber-700 font-medium">
@@ -1189,7 +1257,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
             )}
           </div>
 
-          {isAttendancePaused && !isAdminOrStaff ? (
+          {isThisDormPaused && !isAdminOrStaff ? (
             <div className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
               <PauseCircle className="w-4 h-4 text-rose-600 shrink-0" />
               <span>⛔ ระบบปิดการเช็คยอดชั่วคราว กรุณารอเจ้าหน้าที่เปิดระบบ</span>

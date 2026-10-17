@@ -1589,13 +1589,14 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                 </span>
               </div>
 
-              {/* Attendance Pause Switch Card */}
-              <div className={`p-4 rounded-xl border-2 transition-all ${
-                settingsForm.isAttendancePaused
-                  ? "bg-rose-50 border-rose-400 shadow-xs"
+              {/* Attendance Pause Switch Card (ทุกหอพัก & แยกตามหอพัก) */}
+              <div className={`p-5 rounded-2xl border-2 transition-all space-y-4 ${
+                settingsForm.isAttendancePaused || (Array.isArray(settingsForm.pausedDormIds) && settingsForm.pausedDormIds.length > 0)
+                  ? "bg-rose-50/80 border-rose-400 shadow-xs"
                   : "bg-white border-amber-200"
               }`}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {/* 1. Global Pause (ทุกหอพัก) */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-rose-200/60 pb-3.5">
                   <div className="flex items-start gap-3">
                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                       settingsForm.isAttendancePaused
@@ -1609,25 +1610,25 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className={`text-xs font-black ${settingsForm.isAttendancePaused ? "text-rose-900" : "text-slate-800"}`}>
-                          หยุดการเช็คยอดนักเรียนชั่วคราว (Pause Attendance Checks)
+                          1. หยุดการเช็คยอดชั่วคราว "ทุกหอพัก" (Pause All Dorms)
                         </span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                           settingsForm.isAttendancePaused
-                            ? "bg-rose-200 text-rose-800"
+                            ? "bg-rose-200 text-rose-800 font-black"
                             : "bg-slate-100 text-slate-600"
                         }`}>
-                          {settingsForm.isAttendancePaused ? "สถานะ: ปิดเช็คยอดอยู่" : "สถานะ: เปิดปกติ"}
+                          {settingsForm.isAttendancePaused ? "สถานะ: ปิดเช็คยอดทุกหอ" : "สถานะ: เปิดปกติ"}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed font-medium">
-                        เมื่อเปิดตัวเลือกนี้ ครูประจำหอพักจะไม่สามารถบันทึกการเช็คยอดได้ ใช้เมื่อต้องการ <strong>ลบรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่</strong>
+                        เมื่อเปิดตัวเลือกนี้ ครูประจำหอพักทุกหอจะไม่สามารถบันทึกการเช็คยอดได้ ใช้เมื่อต้องการ <strong>ปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่</strong>
                       </p>
                     </div>
                   </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer select-none shrink-0 self-start sm:self-center">
+                  <label className="flex items-center gap-2 cursor-pointer select-none shrink-0 self-start sm:self-center bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
                     <input
                       type="checkbox"
                       checked={settingsForm.isAttendancePaused ?? false}
@@ -1641,19 +1642,99 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                           ...settingsForm,
                           isAttendancePaused: checked,
                           attendancePausedAt: checked ? timeStr : undefined,
-                          attendancePausedBy: checked ? currentUser?.name || "ผู้ดูแลระบบ" : undefined
+                          attendancePausedBy: checked ? currentUser?.name || "ผู้ดูแลระบบ" : undefined,
+                          pausedDormIds: checked ? (settingsForm.pausedDormIds || []) : []
                         });
                       }}
                       className="w-5 h-5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
                     />
                     <span className="text-xs font-black text-slate-800">
-                      {settingsForm.isAttendancePaused ? "หยุดการเช็คยอด" : "เปิดเช็คปกติ"}
+                      {settingsForm.isAttendancePaused ? "หยุดทุกหอพัก" : "เปิดเช็คปกติทุกหอ"}
                     </span>
                   </label>
                 </div>
 
-                {settingsForm.isAttendancePaused && (
-                  <div className="mt-3 pt-3 border-t border-rose-200">
+                {/* 2. Per-Dormitory Pause (แยกตามหอพัก) */}
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4 text-purple-600" />
+                      <span>2. หยุดการเช็คยอดชั่วคราว "แยกตามหอพัก" (หอพัก 1 - 6)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-semibold">
+                      {settingsForm.isAttendancePaused ? "(กำลังหยุดทุกหอพักอยู่)" : `หยุดเฉพาะ: ${settingsForm.pausedDormIds?.length || 0} หอพัก`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    {dorms.map((dorm) => {
+                      const isPausedIndividually = Array.isArray(settingsForm.pausedDormIds) && settingsForm.pausedDormIds.includes(dorm.id);
+                      const isDormEffectivelyPaused = Boolean(settingsForm.isAttendancePaused || isPausedIndividually);
+
+                      return (
+                        <div
+                          key={dorm.id}
+                          className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                            isDormEffectivelyPaused
+                              ? "bg-rose-100/70 border-rose-300 text-rose-950 font-bold"
+                              : "bg-white border-slate-200 text-slate-800"
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <span className="text-xs font-black block truncate">{dorm.name}</span>
+                            <span className="text-[10px] text-slate-500 block truncate">
+                              {isDormEffectivelyPaused ? "⛔ หยุดเช็คยอด" : "🟢 เปิดเช็คปกติ"}
+                            </span>
+                          </div>
+
+                          <label className="flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isDormEffectivelyPaused}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                const currentList = Array.isArray(settingsForm.pausedDormIds) ? [...settingsForm.pausedDormIds] : [];
+                                let nextList: string[];
+
+                                if (settingsForm.isAttendancePaused) {
+                                  // Switch off global pause and pause all others except this one if unchecked
+                                  if (!checked) {
+                                    nextList = dorms.map((d) => d.id).filter((id) => id !== dorm.id);
+                                  } else {
+                                    nextList = dorms.map((d) => d.id);
+                                  }
+                                } else {
+                                  if (checked) {
+                                    nextList = Array.from(new Set([...currentList, dorm.id]));
+                                  } else {
+                                    nextList = currentList.filter((id) => id !== dorm.id);
+                                  }
+                                }
+
+                                const now = new Date();
+                                const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+                                const timeStr = `${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} น.`;
+
+                                setSettingsForm({
+                                  ...settingsForm,
+                                  isAttendancePaused: false,
+                                  pausedDormIds: nextList,
+                                  attendancePausedAt: nextList.length > 0 ? timeStr : undefined,
+                                  attendancePausedBy: nextList.length > 0 ? currentUser?.name || "ผู้ดูแลระบบ" : undefined
+                                });
+                              }}
+                              className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Pause Reason Field */}
+                {(settingsForm.isAttendancePaused || (Array.isArray(settingsForm.pausedDormIds) && settingsForm.pausedDormIds.length > 0)) && (
+                  <div className="pt-3 border-t border-rose-200">
                     <label className="block text-xs font-bold text-rose-950 mb-1">
                       ระบุเหตุผลในการหยุดเช็คยอด (แสดงในแถบแจ้งเตือน):
                     </label>

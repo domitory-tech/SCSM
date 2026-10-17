@@ -4,7 +4,7 @@ import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile, SystemSettings } from "../../types";
 import { useUsersQuery } from "../../services/useDormQueries";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
-import { getDashboardDefaultDate, getTodayDateString, detectStudentGender } from "../../utils/dateUtils";
+import { getDashboardDefaultDate, getTodayDateString, detectStudentGender, isDormAttendancePaused } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
 import { ThaiCalendarPicker } from "./ThaiCalendarPicker";
 import {
@@ -16,6 +16,7 @@ import { ReasonAnalyticsCard } from "./ReasonAnalyticsCard";
 import { DormLayoutOverviewModal } from "../dorms/DormLayoutOverviewModal";
 import { DormNoticeModal } from "./DormNoticeModal";
 import { DormStatsModal } from "./DormStatsModal";
+import { AttendanceControlModal } from "./AttendanceControlModal";
 import {
   AlertCircle,
   ArrowRight,
@@ -39,7 +40,12 @@ import {
   X,
   Sparkles,
   Layers,
-  PauseCircle
+  PauseCircle,
+  PlayCircle,
+  Shield,
+  ShieldCheck,
+  Unlock,
+  Lock
 } from "lucide-react";
 
 interface DashboardViewProps {
@@ -56,6 +62,8 @@ interface DashboardViewProps {
   onNavigateToStudents?: () => void;
   currentUser?: UserProfile | null;
   systemSettings?: SystemSettings;
+  onUpdateSystemSettings?: (settings: SystemSettings) => Promise<void> | void;
+  onBulkHomeBreak?: (mode: "SET_HOME_BREAK" | "REVERT_NORMAL") => Promise<void>;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -71,7 +79,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToDormLayout,
   onNavigateToStudents,
   currentUser,
-  systemSettings
+  systemSettings,
+  onUpdateSystemSettings,
+  onBulkHomeBreak
 }) => {
   const { data: queriedUsers = [] } = useUsersQuery();
   const effectiveUsers = users && users.length > 0 ? users : queriedUsers;
@@ -81,6 +91,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isDormLayoutModalOpen, setIsDormLayoutModalOpen] = React.useState<boolean>(false);
   const [isNoticesModalOpen, setIsNoticesModalOpen] = React.useState<boolean>(false);
   const [isDormStatsModalOpen, setIsDormStatsModalOpen] = React.useState<boolean>(false);
+  const [isControlModalOpen, setIsControlModalOpen] = React.useState<boolean>(false);
+  const [controlModalInitialTab, setControlModalInitialTab] = React.useState<"PAUSE_RESUME" | "HOME_BREAK">("PAUSE_RESUME");
 
   // Date selection state for Dashboard statistics
   const [selectedDashboardDate, setSelectedDashboardDate] = React.useState<string>("");
@@ -1358,17 +1370,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      {/* Attendance Check Paused Notice Banner */}
-      {systemSettings?.isAttendancePaused && (
-        <div className="bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white p-4 rounded-2xl shadow-lg border border-rose-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+      {/* Attendance Check Paused Notice Banner (Global or Per-Dorm) */}
+      {(systemSettings?.isAttendancePaused || (Array.isArray(systemSettings?.pausedDormIds) && systemSettings.pausedDormIds.length > 0)) && (
+        <div className="bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white p-4 sm:p-5 rounded-2xl shadow-lg border border-rose-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-              <PauseCircle className="w-6 h-6 text-white" />
+              <PauseCircle className="w-6 h-6 text-white animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="bg-white text-rose-700 text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  ⛔ ระบบหยุดการเช็คยอดชั่วคราว
+                  {systemSettings.isAttendancePaused ? "⛔ ระบบหยุดการเช็คยอดชั่วคราวทุกหอพัก" : `⚠️ ระบบหยุดการเช็คยอดชั่วคราว ${systemSettings.pausedDormIds?.length} หอพัก`}
                 </span>
                 {systemSettings.attendancePausedAt && (
                   <span className="text-[11px] text-white/90">
@@ -1380,20 +1392,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {systemSettings.attendancePauseReason || "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่"}
               </p>
               <p className="text-xs text-rose-100 mt-0.5">
-                กำลังอยู่ในช่วงปรับปรุงข้อมูลนักเรียนและการย้ายหอพัก ครูประจำหอพักไม่ต้องทำการเช็คยอดจนกว่าจะเปิดระบบอีกครั้ง
+                {systemSettings.isAttendancePaused
+                  ? "กำลังอยู่ในช่วงปรับปรุงข้อมูลนักเรียนและการย้ายหอพัก ครูประจำหอพักไม่ต้องทำการเช็คยอดจนกว่าจะเปิดระบบอีกครั้ง"
+                  : `หอพักที่หยุดเช็คยอดชั่วคราว: ${dorms.filter((d) => systemSettings.pausedDormIds?.includes(d.id)).map((d) => d.name).join(", ")} (หอพักอื่นยังเช็คยอดได้ตามปกติ)`}
               </p>
             </div>
           </div>
-          {onNavigateToStudents && (currentUser?.roleLevel === 1 || currentUser?.roleLevel === 2) && (
-            <button
-              type="button"
-              onClick={onNavigateToStudents}
-              className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 font-black text-xs rounded-xl shadow-xs shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-            >
-              <span>จัดการรายชื่อนักเรียน</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          )}
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+            {currentUser && (currentUser.roleLevel === 1 || currentUser.roleLevel === 2) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setControlModalInitialTab("PAUSE_RESUME");
+                  setIsControlModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-slate-900/80 hover:bg-slate-900 text-white font-black text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-300" />
+                <span>ควบคุมระบบเช็คยอด</span>
+              </button>
+            )}
+            {onNavigateToStudents && (currentUser?.roleLevel === 1 || currentUser?.roleLevel === 2) && (
+              <button
+                type="button"
+                onClick={onNavigateToStudents}
+                className="px-3.5 py-2 bg-white text-rose-700 hover:bg-rose-50 font-black text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <span>จัดการรายชื่อนักเรียน</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -2046,6 +2075,90 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
+        {/* Admin & Staff Action Toolbar: Bulk Home Break & Pause/Resume Controls */}
+        {currentUser && (currentUser.roleLevel === 1 || currentUser.roleLevel === 2) && (
+          <div className="mb-5 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-slate-800 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3 animate-fade-in">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-amber-300 shrink-0 shadow-inner">
+                <Shield className="w-5 h-5 text-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-extrabold text-xs sm:text-sm text-white">
+                    ศูนย์ควบคุมการเช็คยอด (สิทธิ์ผู้ดูแล / เจ้าหน้าที่)
+                  </span>
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.2 rounded-full uppercase tracking-wider">
+                    คลิกเดียวทุกหอพัก
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  เปลี่ยนสถานะทุกหอพักเป็นรอบกลับบ้าน หรือควบคุมการหยุด/เปิดระบบเช็คยอด (ทุกหอ & แยกหอ)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start md:self-auto">
+              {/* Button 1: สถานะรอบกลับบ้าน ทุกหอพัก */}
+              <button
+                type="button"
+                onClick={() => {
+                  setControlModalInitialTab("HOME_BREAK");
+                  setIsControlModalOpen(true);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                  dorms.length > 0 && dorms.every((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK")
+                    ? "bg-amber-500 text-slate-950 ring-2 ring-amber-300 font-black shadow-amber-500/20"
+                    : dorms.some((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK")
+                    ? "bg-amber-600 hover:bg-amber-500 text-white"
+                    : "bg-amber-500 hover:bg-amber-400 text-slate-950"
+                }`}
+                title="คลิกเดียวเปลี่ยนสถานะทุกหอพักเป็นรอบกลับบ้าน"
+              >
+                <Home className="w-4 h-4 shrink-0" />
+                <span>
+                  {dorms.length > 0 && dorms.every((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK")
+                    ? "✓ รอบกลับบ้านครบทุกหอแล้ว"
+                    : dorms.filter((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK").length > 0
+                    ? `รอบกลับบ้าน (${dorms.filter((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK").length}/${dorms.length} หอ)`
+                    : "รอบกลับบ้านทุกหอพัก"}
+                </span>
+              </button>
+
+              {/* Button 2: หยุด / เปิด เช็คยอดชั่วคราว */}
+              <button
+                type="button"
+                onClick={() => {
+                  setControlModalInitialTab("PAUSE_RESUME");
+                  setIsControlModalOpen(true);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  systemSettings?.isAttendancePaused
+                    ? "bg-rose-600 text-white border-rose-400 animate-pulse"
+                    : Array.isArray(systemSettings?.pausedDormIds) && systemSettings.pausedDormIds.length > 0
+                    ? "bg-amber-600 text-white border-amber-400"
+                    : "bg-slate-800 hover:bg-slate-700 text-white border-slate-700"
+                }`}
+                title="หยุดเช็คยอดชั่วคราว หรือเปิดระบบ (ทุกหอ & แยกหอ)"
+              >
+                {systemSettings?.isAttendancePaused ? (
+                  <PauseCircle className="w-4 h-4 shrink-0 text-white" />
+                ) : Array.isArray(systemSettings?.pausedDormIds) && systemSettings.pausedDormIds.length > 0 ? (
+                  <PauseCircle className="w-4 h-4 shrink-0 text-amber-300" />
+                ) : (
+                  <PlayCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+                )}
+                <span>
+                  {systemSettings?.isAttendancePaused
+                    ? "⛔ หยุดเช็คยอดทุกหอพัก"
+                    : Array.isArray(systemSettings?.pausedDormIds) && systemSettings.pausedDormIds.length > 0
+                    ? `⚠️ หยุดเช็ค ${systemSettings.pausedDormIds.length} หอพัก`
+                    : "หยุด/เปิดระบบเช็คยอด"}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {dorms.map((dorm) => {
             const att =
@@ -2058,6 +2171,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             const checkedBy = att?.checkedBy;
             const checkedAt = att?.checkedAt;
 
+            const isDormPaused = isDormAttendancePaused(dorm.id, systemSettings);
+
             const dormTeachers = getDormTeachers(dorm, effectiveUsers);
             const anyTeacherMatched = Boolean(checkedBy && dormTeachers.some((t) => isTeacherCheckedBy(t.name, checkedBy)));
 
@@ -2068,7 +2183,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div
                 key={dorm.id}
                 className={`p-5 rounded-3xl border transition-all flex flex-col justify-between ${
-                  isTodayChecked
+                  isDormPaused
+                    ? "border-rose-300 bg-rose-50/70 text-slate-900 shadow-2xs"
+                    : isTodayChecked
                     ? "border-emerald-300 bg-emerald-50/70 text-slate-900 shadow-sm"
                     : isPrepCheckTime
                     ? "border-purple-300 bg-gradient-to-br from-purple-50/90 via-indigo-50/60 to-purple-100/50 text-slate-900 shadow-md ring-1 ring-purple-200/70"
@@ -2090,7 +2207,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </p>
                     </div>
 
-                    {isChecked ? (
+                    {isDormPaused ? (
+                      <span className="bg-rose-100 text-rose-900 border border-rose-300 text-[11px] font-extrabold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-2xs shrink-0 animate-pulse">
+                        <PauseCircle className="w-3.5 h-3.5 text-rose-700" />
+                        <span>หยุดเช็คยอดชั่วคราว</span>
+                      </span>
+                    ) : isChecked ? (
                       <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-extrabold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-2xs shrink-0">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
                         <span>เช็คแล้ว</span>
@@ -2211,14 +2333,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   onClick={() => onNavigateToCheck(dorm.id, targetDate)}
                   className={`mt-4 w-full py-2.5 px-3 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    isTodayChecked
+                    isDormPaused
+                      ? "bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 shadow-2xs"
+                      : isTodayChecked
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 shadow-2xs"
                       : isPrepCheckTime
                       ? "bg-gradient-to-r from-[#A05AFF] to-[#8e45f0] hover:from-[#8e45f0] hover:to-[#7c32e0] text-white border border-purple-500 shadow-md shadow-[#A05AFF]/30 transform active:scale-98"
                       : "bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-slate-700 hover:text-indigo-600"
                   }`}
                 >
-                  {isTodayChecked ? (
+                  {isDormPaused ? (
+                    <>
+                      <PauseCircle className="w-4 h-4 text-rose-700" />
+                      <span>{currentUser?.roleLevel === 1 || currentUser?.roleLevel === 2 ? "จัดการ / ตรวจสอบหอพักนี้" : "ดูข้อมูล (หยุดเช็คยอดชั่วคราว)"}</span>
+                    </>
+                  ) : isTodayChecked ? (
                     <>
                       <Eye className="w-4 h-4 text-white" />
                       <span>ดู / แก้ไขการเช็คยอด</span>
@@ -2268,6 +2397,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         users={effectiveUsers}
         currentUser={currentUser}
       />
+
+      {/* Modal 4: แผงควบคุมระบบการหยุดเช็คยอดชั่วคราว และเปิดระบบ (ทุกหอ & แยกหอ) และรอบกลับบ้านทุกหอพัก */}
+      {systemSettings && onUpdateSystemSettings && onBulkHomeBreak && (
+        <AttendanceControlModal
+          isOpen={isControlModalOpen}
+          onClose={() => setIsControlModalOpen(false)}
+          dorms={dorms}
+          students={students}
+          systemSettings={systemSettings}
+          onUpdateSystemSettings={onUpdateSystemSettings}
+          currentUser={currentUser}
+          selectedDate={effectiveDashboardDate}
+          activeAttendanceMap={activeAttendanceMap}
+          onBulkHomeBreak={onBulkHomeBreak}
+          initialTab={controlModalInitialTab}
+        />
+      )}
     </div>
   );
 };

@@ -159,8 +159,9 @@ export interface SystemSettings {
   maintenanceMessage?: string;
   showMaintenancePopup?: boolean;
   showMaintenanceBox?: boolean;
-  // Attendance Pause / Freeze feature
-  isAttendancePaused?: boolean;
+  // Attendance Pause / Freeze feature (ทุกหอพัก และ แยกตามหอพัก)
+  isAttendancePaused?: boolean; // หยุดเช็คยอดทุกหอพัก
+  pausedDormIds?: string[]; // รายการรหัสหอพักที่หยุดเช็คยอดแยกเฉพาะหอพัก (เช่น ["dorm-1", "dorm-2"])
   attendancePauseReason?: string;
   attendancePausedAt?: string;
   attendancePausedBy?: string;

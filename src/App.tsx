@@ -26,6 +26,7 @@ import {
   useAttendanceQuery,
   useBatchDeleteStudentsMutation,
   useBatchTransferStudentsMutation,
+  useBulkHomeBreakMutation,
   useClearStudentsMutation,
   useDailyReportQuery,
   useDeleteNoticeMutation,
@@ -164,6 +165,7 @@ function MainAppContent() {
   const updateNoticeMutation = useUpdateNoticeMutation();
   const deleteNoticeMutation = useDeleteNoticeMutation();
   const saveAttendanceMutation = useSaveAttendanceMutation();
+  const bulkHomeBreakMutation = useBulkHomeBreakMutation();
   const exportSheetsMutation = useExportGoogleSheetsMutation();
 
   // Count unchecked dorms today
@@ -289,6 +291,16 @@ function MainAppContent() {
               onNavigateToStudents={() => setActiveTab("students")}
               currentUser={currentUser}
               systemSettings={systemSettings}
+              onUpdateSystemSettings={handleUpdateSystemSettings}
+              onBulkHomeBreak={async (mode) => {
+                await bulkHomeBreakMutation.mutateAsync({
+                  targetDate: selectedAttendanceDate || todayStr,
+                  dorms,
+                  students,
+                  operatorName: currentUser?.name || "ผู้ดูแล/เจ้าหน้าที่",
+                  mode
+                });
+              }}
             />
           )}
 
@@ -339,6 +351,15 @@ function MainAppContent() {
               systemSettings={systemSettings}
               onUpdateSystemSettings={handleUpdateSystemSettings}
               onNavigateToStudents={() => setActiveTab("students")}
+              onBulkHomeBreak={async (mode) => {
+                await bulkHomeBreakMutation.mutateAsync({
+                  targetDate: selectedAttendanceDate || todayStr,
+                  dorms,
+                  students,
+                  operatorName: currentUser?.name || "ผู้ดูแล/เจ้าหน้าที่",
+                  mode
+                });
+              }}
             />
           )}
 

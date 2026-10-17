@@ -18,11 +18,21 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   showMaintenancePopup: false,
   showMaintenanceBox: false,
   isAttendancePaused: false,
+  pausedDormIds: [],
   attendancePauseReason: "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
   attendancePausedAt: "",
   attendancePausedBy: "",
   navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS
 };
+
+export function isDormAttendancePaused(dormId: string, settings?: SystemSettings): boolean {
+  if (!settings) return false;
+  if (settings.isAttendancePaused) return true;
+  if (Array.isArray(settings.pausedDormIds) && settings.pausedDormIds.includes(dormId)) {
+    return true;
+  }
+  return false;
+}
 
 export function getTodayDateString(): string {
   const now = new Date();

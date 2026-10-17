@@ -45,6 +45,7 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   systemIcon: "building",
   lastUpdatedDate: "8 สิงหาคม พ.ศ. 2569",
   isAttendancePaused: false,
+  pausedDormIds: [],
   attendancePauseReason: "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
   attendancePausedAt: "",
   attendancePausedBy: "",
@@ -1512,6 +1513,87 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
   }
 
   return updatedRecord;
+}
+
+/**
+ * Bulk updates all dormitories to "ROUND_HOME" (รอบกลับบ้าน) or reverts back.
+ * Used exclusively by Admin (ผู้ดูแล) or Staff (เจ้าหน้าที่) with a single click.
+ */
+export async function bulkSetHomeBreakAllDorms(
+  targetDate: string,
+  dorms: Dormitory[],
+  students: Student[],
+  operatorName: string,
+  mode: "SET_HOME_BREAK" | "REVERT_NORMAL"
+): Promise<{ success: boolean; count: number; message: string; updatedRecords: DailyAttendance[] }> {
+  const updatedRecords: DailyAttendance[] = [];
+  const timeNow = new Date().toLocaleTimeString("th-TH");
+
+  for (const dorm of dorms) {
+    const docId = `${targetDate}_${dorm.id}`;
+    // Find all students for this dorm
+    const dormStudents = students.filter((s) => {
+      const sDormId = String(s.dormId || "").trim();
+      const dNum = dorm.id.replace(/\D/g, "");
+      const sNum = sDormId.replace(/\D/g, "");
+      return sDormId === dorm.id || sDormId === dorm.name || (dNum && sNum && dNum === sNum);
+    });
+
+    const isHome = mode === "SET_HOME_BREAK";
+    const studentRecords: StudentAttendanceRecord[] = dormStudents.map((s) => ({
+      studentId: s.studentId,
+      studentName: `${s.title}${s.firstName} ${s.lastName}`,
+      status: isHome ? "ROUND_HOME" : "PRESENT",
+      reason: isHome ? "รอบกลับบ้าน" : ""
+    }));
+
+    const record: DailyAttendance = {
+      id: docId,
+      date: targetDate,
+      dormId: dorm.id,
+      isHomeBreak: isHome,
+      status: isHome ? "HOME_BREAK" : "CHECKED",
+      checkedAt: timeNow,
+      checkedBy: isHome ? `${operatorName} (รอบกลับบ้านทุกหอพัก)` : operatorName,
+      teacherOrientationNotes: isHome ? ["รอบกลับบ้าน"] : [],
+      records: studentRecords
+    };
+
+    updatedRecords.push(record);
+  }
+
+  // Save chunked batch in Firestore
+  try {
+    const CHUNK_SIZE = 10;
+    for (let i = 0; i < updatedRecords.length; i += CHUNK_SIZE) {
+      const chunk = updatedRecords.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((rec) => {
+        batch.set(doc(db, "attendance", rec.id), cleanFirestoreData(rec), { merge: true });
+      });
+      await batch.commit();
+    }
+  } catch (err: any) {
+    console.warn("Firestore bulkSetHomeBreakAllDorms saved offline locally:", err?.message || err);
+  }
+
+  // Update local cache
+  const cached = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+  const map = new Map<string, DailyAttendance>();
+  cached.forEach((r) => map.set(r.id, r));
+  updatedRecords.forEach((r) => map.set(r.id, r));
+  setLocalCache(CACHE_KEYS.ATTENDANCE, Array.from(map.values()));
+
+  const actionMsg = mode === "SET_HOME_BREAK"
+    ? `เปลี่ยนสถานะทุกหอพักเป็น "รอบกลับบ้าน" เรียบร้อยแล้ว (ครอบคลุม ${dorms.length} หอพัก)`
+    : `ยกเลิกสถานะรอบกลับบ้านทุกหอพักเรียบร้อยแล้ว (ครอบคลุม ${dorms.length} หอพัก)`;
+
+  return {
+    success: true,
+    count: dorms.length,
+    message: actionMsg,
+    updatedRecords
+  };
 }
 
 // ----------------------------------------------------------------------

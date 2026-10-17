@@ -5,6 +5,7 @@ import {
   addUser,
   batchDeleteStudents,
   batchTransferStudentsDorm,
+  bulkSetHomeBreakAllDorms,
   clearStudentsDatabase,
   deleteNotice,
   deleteSampleData,
@@ -283,6 +284,31 @@ export function useSaveAttendanceMutation() {
   return useMutation({
     mutationFn: saveAttendance,
     onSuccess: (_, variables) => {
+      recordLastDbSave();
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+    }
+  });
+}
+
+export function useBulkHomeBreakMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      targetDate,
+      dorms,
+      students,
+      operatorName,
+      mode
+    }: {
+      targetDate: string;
+      dorms: Dormitory[];
+      students: Student[];
+      operatorName: string;
+      mode: "SET_HOME_BREAK" | "REVERT_NORMAL";
+    }) => bulkSetHomeBreakAllDorms(targetDate, dorms, students, operatorName, mode),
+    onSuccess: () => {
       recordLastDbSave();
       queryClient.invalidateQueries({ queryKey: ["attendance"] });
       queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
