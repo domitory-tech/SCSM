@@ -373,6 +373,16 @@ export function saveDbToDisk() {
   }
 }
 
+// Helper to strictly format student IDs to 5 digits with leading zeros
+export function formatStudentId(id: any): string {
+  if (id === undefined || id === null) return "";
+  const s = String(id).trim();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return s.padStart(5, "0");
+  if (s.length < 5) return s.padStart(5, "0");
+  return s;
+}
+
 export function loadDbFromDisk() {
   try {
     if (fs.existsSync(DB_FILE_PATH)) {
@@ -381,13 +391,28 @@ export function loadDbFromDisk() {
       if (Array.isArray(parsed.dormitories) && parsed.dormitories.length > 0) dormitories = parsed.dormitories;
       
       const st = parsed.students || parsed.studentsStore;
-      if (Array.isArray(st)) studentsStore = st;
+      if (Array.isArray(st)) {
+        studentsStore = st.map((s: Student) => ({
+          ...s,
+          studentId: formatStudentId(s.studentId)
+        }));
+      }
 
       const nt = parsed.notices || parsed.noticesStore;
       if (Array.isArray(nt)) noticesStore = nt;
 
       const att = parsed.attendance || parsed.attendanceStore;
-      if (att && typeof att === "object") attendanceStore = att;
+      if (att && typeof att === "object") {
+        for (const k of Object.keys(att)) {
+          if (Array.isArray(att[k]?.records)) {
+            att[k].records = att[k].records.map((r: any) => ({
+              ...r,
+              studentId: formatStudentId(r.studentId)
+            }));
+          }
+        }
+        attendanceStore = att;
+      }
 
       const us = parsed.users || parsed.usersStore;
       if (Array.isArray(us) && us.length > 0) usersStore = us;
@@ -544,7 +569,8 @@ app.put("/api/students/:id", (req, res) => {
 
   studentsStore[index] = {
     ...studentsStore[index],
-    ...req.body
+    ...req.body,
+    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId)
   };
   saveDbToDisk();
   res.json({ success: true, data: studentsStore[index], message: "แก้ไขข้อมูลนักเรียนเรียบร้อย" });
@@ -880,7 +906,7 @@ app.post("/api/students/import", (req, res) => {
   const dorm = dormitories.find((d) => d.id === dormId);
   const newStudentsList: Student[] = students.map((s, idx) => ({
     id: `std-${Date.now()}-${idx}`,
-    studentId: String(s.studentId || `${66000 + idx}`),
+    studentId: formatStudentId(s.studentId) || String(66000 + idx).padStart(5, "0"),
     no: Number(s.no) || idx + 1,
     title: s.title || (dorm?.type === "male" ? "นาย" : "นางสาว"),
     firstName: s.firstName,
@@ -906,7 +932,7 @@ app.post("/api/students/import", (req, res) => {
 app.post("/api/students", (req, res) => {
   const newStudent: Student = {
     id: `std-${Date.now()}`,
-    studentId: req.body.studentId,
+    studentId: formatStudentId(req.body.studentId) || `0${Math.floor(1000 + Math.random() * 8999)}`,
     no: Number(req.body.no) || 1,
     title: req.body.title || "นาย",
     firstName: req.body.firstName,

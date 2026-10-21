@@ -290,6 +290,66 @@ export function formatGradeRoomShort(grade?: string, room?: number | string): st
 }
 
 /**
+ * Normalizes a student's grade string into a canonical grade level, e.g. "ม.1" to "ม.6" or "ป.1" to "ป.6".
+ * Handles formats: "1", "2", "ม.1", "ม. 1", "ม1", "มัธยมศึกษาปีที่ 1", "ม.1/1", "ชั้น ม.1", "1/1".
+ */
+export function normalizeGradeLevel(grade?: string | number | null): string {
+  if (grade === undefined || grade === null) return "";
+  const s = String(grade).trim();
+  if (!s) return "";
+
+  // If already standard e.g. "ม.1" - "ม.6"
+  if (/^ม\.[1-6]$/.test(s)) return s;
+
+  // Match secondary school grade pattern: "ม.1", "ม. 1", "ม1", "มัธยมศึกษาปีที่ 1", "ชั้น ม.1", "ม.1/2"
+  const mMatch = s.match(/(?:มัธยมศึกษาปีที่|ชั้น\s*ม\.?|ม\.?)\s*([1-6])(?:\/|\b|$)/);
+  if (mMatch && mMatch[1]) {
+    return `ม.${mMatch[1]}`;
+  }
+
+  // Match primary school pattern: "ป.1", "ป. 1", "ป1", "ประถมศึกษาปีที่ 1"
+  const pMatch = s.match(/(?:ประถมศึกษาปีที่|ชั้น\s*ป\.?|ป\.?)\s*([1-6])(?:\/|\b|$)/);
+  if (pMatch && pMatch[1]) {
+    return `ป.${pMatch[1]}`;
+  }
+
+  // If numeric only: "1" -> "ม.1", "1/1" -> "ม.1"
+  const numMatch = s.match(/^([1-6])(?:\/.*|\b|$)/);
+  if (numMatch && numMatch[1]) {
+    return `ม.${numMatch[1]}`;
+  }
+
+  // Fallback: check if contains any digit 1-6
+  const anyDigit = s.match(/[1-6]/);
+  if (anyDigit) {
+    return `ม.${anyDigit[0]}`;
+  }
+
+  return s;
+}
+
+/**
+ * Checks if a student's grade matches a target grade (e.g. "ม.1", "ม.2", "1", "ม. 1").
+ */
+export function isGradeMatch(studentGrade?: string | number | null, targetGrade?: string | number | null): boolean {
+  if (studentGrade === undefined || studentGrade === null || targetGrade === undefined || targetGrade === null) {
+    return false;
+  }
+  const s = String(studentGrade).trim();
+  const t = String(targetGrade).trim();
+  if (!s || !t) return false;
+
+  if (s === t) return true;
+
+  const normS = normalizeGradeLevel(s);
+  const normT = normalizeGradeLevel(t);
+
+  if (normS && normT && normS === normT) return true;
+
+  return false;
+}
+
+/**
  * คัดแยกเพศนักเรียน (ชาย/หญิง) จากคำนำหน้านามตามเงื่อนไข:
  * เพศชาย = เด็กชาย, ด.ช., นาย
  * เพศหญิง = เด็กหญิง, ด.ญ., นาง, นางสาว (รวมถึง น.ส.)

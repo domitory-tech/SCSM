@@ -15,10 +15,17 @@
     },
     "Student": {
       "title": "Student",
-      "description": "Student record in the dormitory system",
+      "description": "Student record in the dormitory system with 5-digit studentId",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "studentId": {
+          "type": "string",
+          "pattern": "^[0-9]{5}$",
+          "minLength": 5,
+          "maxLength": 5,
+          "description": "Unique 5-digit student identification number"
+        },
         "no": { "type": "number" },
         "prefix": { "type": "string" },
         "firstName": { "type": "string" },
@@ -31,7 +38,7 @@
         "room": { "type": "string" },
         "status": { "type": "string" }
       },
-      "required": ["id", "firstName", "lastName", "dormId"]
+      "required": ["id", "studentId", "firstName", "lastName", "dormId"]
     },
     "UserProfile": {
       "title": "UserProfile",

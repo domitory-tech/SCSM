@@ -8,9 +8,12 @@ import {
   formatThaiFullDate,
   formatThaiMediumDate,
   getTodayDateString,
-  getYesterdayDateString
+  getYesterdayDateString,
+  isGradeMatch,
+  normalizeGradeLevel
 } from "../../utils/dateUtils";
 import { getStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor } from "../../utils/dormUtils";
+import { formatStudentId } from "../../utils/studentUtils";
 import { exportDormitoryReportHtmlDocument } from "../../utils/dormitoryReportExporter";
 import { useAttendanceQuery, useUsersQuery } from "../../services/useDormQueries";
 import {
@@ -354,7 +357,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
         absents.push({
           index: idx + 1,
           studentNo: s.no,
-          studentId: s.studentId,
+          studentId: formatStudentId(s.studentId),
           fullName: `${s.title}${s.firstName} ${s.lastName}`,
           gradeRoom: formatGradeRoomShort(s.grade, s.room),
           grade: s.grade,
@@ -373,7 +376,8 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     } else if (attendanceForDate?.records && Array.isArray(attendanceForDate.records)) {
       attendanceForDate.records.forEach((rec) => {
         if (rec.status && rec.status !== "PRESENT") {
-          const s = dormStudents.find((st) => st.studentId === rec.studentId);
+          const recSid = formatStudentId(rec.studentId);
+          const s = dormStudents.find((st) => formatStudentId(st.studentId) === recSid || st.studentId === rec.studentId);
           const fullName = s ? `${s.title}${s.firstName} ${s.lastName}` : rec.studentName || rec.studentId;
           const gradeRoom = s ? formatGradeRoomShort(s.grade, s.room) : "-";
           const reasonText = getAttendanceReasonText(rec.status, rec.reason, rec.note);
@@ -382,7 +386,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
           absents.push({
             index: absents.length + 1,
             studentNo: s?.no,
-            studentId: rec.studentId,
+            studentId: recSid,
             fullName,
             gradeRoom,
             grade: s?.grade || "",
@@ -465,13 +469,30 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
 
   // 4. Grade breakdown inside this dormitory
   const gradeStats = useMemo(() => {
-    const grades = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
-    return grades.map((g) => {
-      const gStudents = dormStudents.filter((s) => s.grade === g);
+    const baseGrades = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+
+    // Detect if dormStudents contain other grade categories not in baseGrades
+    const extraGrades = new Set<string>();
+    dormStudents.forEach((s) => {
+      const norm = normalizeGradeLevel(s.grade);
+      if (norm && !baseGrades.includes(norm)) {
+        extraGrades.add(norm);
+      } else if (!norm && s.grade && String(s.grade).trim()) {
+        const raw = String(s.grade).trim();
+        if (!baseGrades.some((bg) => isGradeMatch(raw, bg))) {
+          extraGrades.add(raw);
+        }
+      }
+    });
+
+    const allGrades = [...baseGrades, ...Array.from(extraGrades)];
+
+    return allGrades.map((g) => {
+      const gStudents = dormStudents.filter((s) => isGradeMatch(s.grade, g));
       const total = gStudents.length;
       const male = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "male").length;
       const female = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "female").length;
-      const gOut = absentList.filter((a) => a.grade === g).length;
+      const gOut = absentList.filter((a) => isGradeMatch(a.grade, g)).length;
       const gPresent = Math.max(0, total - gOut);
       const rate = total > 0 ? (gPresent / total) * 100 : 100;
 
@@ -1204,7 +1225,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
                   {absentList.map((st) => (
                     <tr key={st.studentId} className="hover:bg-slate-50 text-xs">
                       <td className="py-2 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-100">{st.index}</td>
-                      <td className="py-2 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-100">{st.studentId}</td>
+                      <td className="py-2 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-100">{formatStudentId(st.studentId)}</td>
                       <td className="py-2 px-3 font-bold text-slate-900 border-r border-slate-100">{st.fullName}</td>
                       <td className="py-2 px-2.5 text-center font-bold text-slate-800 border-r border-slate-100">{st.gradeRoom}</td>
                       <td className="py-2 px-3 font-medium text-slate-800">{st.reason}</td>

@@ -13,13 +13,15 @@ import {
   formatThaiMediumDate,
   getTodayDateString,
   detectStudentGender,
-  formatGradeRoomShort
+  formatGradeRoomShort,
+  isGradeMatch
 } from "../../utils/dateUtils";
 import { matchStudentToDorm, findDormForStudent, getDormTypeLabel } from "../../utils/dormUtils";
 import {
   printStudentSearchReport,
   printIndividualStudentHistory
 } from "../../utils/studentSearchReportExporter";
+import { formatStudentId } from "../../utils/studentUtils";
 import {
   Search,
   Calendar,
@@ -351,13 +353,14 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
       if (att.records && Array.isArray(att.records)) {
         att.records.forEach((rec) => {
           if (!rec.studentId) return;
+          const stdKey = formatStudentId(rec.studentId);
 
           const meta = getStatusMeta(rec.status);
           const isLeave = rec.status !== "PRESENT";
 
           // Record latest status if not recorded yet
-          if (!studentLatestStatusMap.has(rec.studentId)) {
-            studentLatestStatusMap.set(rec.studentId, {
+          if (!studentLatestStatusMap.has(stdKey)) {
+            studentLatestStatusMap.set(stdKey, {
               status: rec.status,
               isOut: isLeave,
               label: meta.label,
@@ -369,7 +372,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
 
           // If it's a leave record, push to student's leave events
           if (isLeave) {
-            const eventList = studentEventsMap.get(rec.studentId) || [];
+            const eventList = studentEventsMap.get(stdKey) || [];
             eventList.push({
               date: attDate,
               dormId: att.dormId,
@@ -389,7 +392,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
               checkedAt: att.checkedAt,
               isHomeBreak: att.isHomeBreak
             });
-            studentEventsMap.set(rec.studentId, eventList);
+            studentEventsMap.set(stdKey, eventList);
           }
         });
       }
@@ -399,7 +402,8 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
     return students.map((student) => {
       const dorm = findDormForStudent(student, dorms);
       const dormName = dorm?.name || student.dormId || "ไม่ระบุหอพัก";
-      const allEvents = studentEventsMap.get(student.studentId) || [];
+      const studentKey = formatStudentId(student.studentId);
+      const allEvents = studentEventsMap.get(studentKey) || studentEventsMap.get(student.studentId) || [];
 
       // Filter leave events by selected start and end date
       const filteredEvents = allEvents.filter((ev) => {
@@ -409,7 +413,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
       });
 
       // Compute latest/current status
-      const latestCheck = studentLatestStatusMap.get(student.studentId);
+      const latestCheck = studentLatestStatusMap.get(studentKey) || studentLatestStatusMap.get(student.studentId);
       let currentStatus: {
         status: AttendanceStatus;
         isOut: boolean;
@@ -487,7 +491,9 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
 
         // 1. Search Query Filter (Student ID, Firstname, Lastname, Nickname, Dorm room, Grade)
         if (q) {
-          const matchId = (s.studentId || "").toLowerCase().includes(q);
+          const rawSid = (s.studentId || "").toLowerCase();
+          const fmtSid = formatStudentId(s.studentId).toLowerCase();
+          const matchId = rawSid.includes(q) || fmtSid.includes(q) || fmtSid.replace(/^0+/, "").includes(q);
           const matchFirst = (s.firstName || "").toLowerCase().includes(q);
           const matchLast = (s.lastName || "").toLowerCase().includes(q);
           const matchFull = `${s.title || ""}${s.firstName || ""} ${s.lastName || ""}`.toLowerCase().includes(q);
@@ -512,7 +518,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
         // 3. Grade / Room Filter
         if (selectedGradeFilter !== "ALL") {
           const sGradeShort = formatGradeRoomShort(s.grade, s.room);
-          if (sGradeShort !== selectedGradeFilter && s.grade !== selectedGradeFilter) {
+          if (sGradeShort !== selectedGradeFilter && s.grade !== selectedGradeFilter && !isGradeMatch(s.grade, selectedGradeFilter)) {
             return false;
           }
         }
@@ -656,7 +662,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
       const s = item.student;
       return {
         "ลำดับ": idx + 1,
-        "รหัสนักเรียน": s.studentId,
+        "รหัสนักเรียน": formatStudentId(s.studentId),
         "คำนำหน้า": s.title || "",
         "ชื่อ": s.firstName,
         "นามสกุล": s.lastName,
@@ -683,7 +689,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
       const s = item.student;
       item.leaveHistory.forEach((ev) => {
         historyData.push({
-          "รหัสนักเรียน": s.studentId,
+          "รหัสนักเรียน": formatStudentId(s.studentId),
           "ชื่อ-นามสกุล": `${s.title || ""}${s.firstName} ${s.lastName}`,
           "ชื่อเล่น": s.nickname || "",
           "ระดับชั้น/ห้อง": formatGradeRoomShort(s.grade, s.room),
@@ -699,6 +705,15 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
 
     const wb = XLSX.utils.book_new();
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    // Explicit string type for studentId in Summary Sheet
+    summaryData.forEach((_, rIdx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: rIdx + 1, c: 1 });
+      if (wsSummary[cellRef]) {
+        wsSummary[cellRef].t = "s";
+        wsSummary[cellRef].v = formatStudentId(wsSummary[cellRef].v);
+      }
+    });
+
     XLSX.utils.book_append_sheet(
       wb,
       wsSummary,
@@ -707,6 +722,14 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
 
     if (historyData.length > 0) {
       const wsHistory = XLSX.utils.json_to_sheet(historyData);
+      // Explicit string type for studentId in History Sheet
+      historyData.forEach((_, rIdx) => {
+        const cellRef = XLSX.utils.encode_cell({ r: rIdx + 1, c: 0 });
+        if (wsHistory[cellRef]) {
+          wsHistory[cellRef].t = "s";
+          wsHistory[cellRef].v = formatStudentId(wsHistory[cellRef].v);
+        }
+      });
       XLSX.utils.book_append_sheet(wb, wsHistory, "ประวัติการออกหอพักละเอียด");
     }
 
@@ -1316,7 +1339,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                           )}
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
-                          <span className="font-mono font-bold text-slate-700">รหัส: {s.studentId}</span>
+                          <span className="font-mono font-bold text-slate-700">รหัส: {formatStudentId(s.studentId)}</span>
                           <span>•</span>
                           <span>ชั้น {formatGradeRoomShort(s.grade, s.room)}</span>
                           {s.no && <span>(เลขที่ {s.no})</span>}
@@ -1505,7 +1528,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                         {startIndex + idx + 1}
                       </td>
                       <td className="py-3 px-4 font-mono font-bold text-slate-700">
-                        {s.studentId}
+                        {formatStudentId(s.studentId)}
                       </td>
                       <td className="py-3 px-4 font-extrabold text-slate-900">
                         {s.title || ""}{s.firstName} {s.lastName}
@@ -1831,7 +1854,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                         return (
                           <tr key={s.studentId} className={idx % 2 === 1 ? "bg-slate-50/60" : "bg-white"}>
                             <td className="p-2 text-center border border-slate-200 font-mono">{idx + 1}</td>
-                            <td className="p-2 border border-slate-200 font-mono font-bold">{s.studentId}</td>
+                            <td className="p-2 border border-slate-200 font-mono font-bold">{formatStudentId(s.studentId)}</td>
                             <td className="p-2 border border-slate-200 font-bold">
                               {s.title || ""}{s.firstName} {s.lastName} {s.nickname && `(${s.nickname})`}
                             </td>
@@ -1921,7 +1944,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                   )}
                 </h3>
                 <div className="flex flex-wrap items-center gap-3 text-xs text-purple-100 font-medium">
-                  <span>รหัสนักเรียน: {selectedStudentForDetail.student.studentId}</span>
+                  <span>รหัสนักเรียน: {formatStudentId(selectedStudentForDetail.student.studentId)}</span>
                   <span>•</span>
                   <span>ชั้น {formatGradeRoomShort(selectedStudentForDetail.student.grade, selectedStudentForDetail.student.room)}</span>
                   <span>•</span>

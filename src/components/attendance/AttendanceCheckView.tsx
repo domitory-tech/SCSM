@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { DailyAttendance, Dormitory, Notice, Student, StudentAttendanceRecord, UserProfile, SystemSettings } from "../../types";
 import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString, isDormAttendancePaused } from "../../utils/dateUtils";
+import { formatStudentId } from "../../utils/studentUtils";
 import { fetchAttendance } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
@@ -189,7 +190,12 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
 
       const map: Record<string, StudentAttendanceRecord> = {};
       attendanceData.records?.forEach((rec) => {
-        map[rec.studentId] = rec;
+        const sid = formatStudentId(rec.studentId);
+        const record = { ...rec, studentId: sid };
+        map[sid] = record;
+        if (rec.studentId !== sid) {
+          map[rec.studentId] = record;
+        }
       });
 
       // Check if all existing records are SEMESTER_BREAK or HOME_BREAK
@@ -205,12 +211,19 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
 
       // Default missing students
       students.forEach((s) => {
-        if (!map[s.studentId]) {
-          map[s.studentId] = {
-            studentId: s.studentId,
+        const sid = formatStudentId(s.studentId);
+        const existingRec = map[sid] || map[s.studentId];
+        if (!existingRec) {
+          const newRec: StudentAttendanceRecord = {
+            studentId: sid,
             status: isAllBreak ? "SEMESTER_BREAK" : isAllHomeBreak ? "ROUND_HOME" : "PRESENT",
             reason: isAllBreak ? "ปิดภาคเรียน" : isAllHomeBreak ? "รอบกลับบ้าน" : ""
           };
+          map[sid] = newRec;
+          map[s.studentId] = newRec;
+        } else {
+          existingRec.studentId = sid;
+          map[sid] = existingRec;
         }
       });
       setRecordsMap(map);
@@ -221,7 +234,10 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       // กำหนดให้นักเรียนทุกคนเริ่มต้นเป็น "อยู่หอพัก" (PRESENT) ตามปกติ
       const map: Record<string, StudentAttendanceRecord> = {};
       students.forEach((s) => {
-        map[s.studentId] = { studentId: s.studentId, status: "PRESENT" };
+        const sid = formatStudentId(s.studentId);
+        const rec = { studentId: sid, status: "PRESENT" as const };
+        map[sid] = rec;
+        map[s.studentId] = rec;
       });
       setRecordsMap(map);
 
@@ -448,14 +464,19 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     status: StudentAttendanceRecord["status"],
     reason?: string
   ) => {
-    setRecordsMap((prev) => ({
-      ...prev,
-      [studentId]: {
-        studentId,
+    const sSid = formatStudentId(studentId);
+    setRecordsMap((prev) => {
+      const rec = {
+        studentId: sSid,
         status,
-        reason: reason !== undefined ? reason : prev[studentId]?.reason || ""
-      }
-    }));
+        reason: reason !== undefined ? reason : prev[sSid]?.reason || prev[studentId]?.reason || ""
+      };
+      return {
+        ...prev,
+        [sSid]: rec,
+        ...(studentId !== sSid ? { [studentId]: rec } : {})
+      };
+    });
   };
 
   // Orientation notes helpers
@@ -1126,7 +1147,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 </tr>
               ) : (
                 filteredStudents.map((student) => {
-                  const rec = recordsMap[student.studentId] || { studentId: student.studentId, status: "PRESENT" };
+                  const sSid = formatStudentId(student.studentId);
+                  const rec = recordsMap[sSid] || recordsMap[student.studentId] || { studentId: sSid, status: "PRESENT" };
                   const isPresent = rec.status === "PRESENT";
 
                   return (
@@ -1141,7 +1163,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                         <div className="font-bold text-gray-900 text-sm">
                           {student.title}{student.firstName} {student.lastName}
                         </div>
-                        <div className="text-[10px] text-gray-400">รหัส: {student.studentId}</div>
+                        <div className="text-[10px] text-gray-500 font-mono font-bold">รหัส: {sSid}</div>
                       </td>
                       <td className="py-3 px-3">
                         {student.nickname ? (

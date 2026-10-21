@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
 import { DailyReportData, Dormitory, UserProfile } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
+import { formatStudentId } from "./studentUtils";
+import { isPlaceholderTeacherName } from "./dormUtils";
 
 export const GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/17hrwt9Dy_liRz9sSte2PKOpO0QYqwcGg?usp=sharing";
 export const GOOGLE_DRIVE_FOLDER_ID = "17hrwt9Dy_liRz9sSte2PKOpO0QYqwcGg";
@@ -178,7 +180,7 @@ export function exportDailyReportToExcel(
     reportData.absentStudentsList.forEach((s) => {
       sheet2Data.push([
         s.no,
-        s.studentId,
+        formatStudentId(s.studentId),
         s.fullName,
         s.gradeRoom,
         s.dormName,
@@ -190,6 +192,16 @@ export function exportDailyReportToExcel(
   sheet2Data.push(["รวมนักเรียนออกหอพักทั้งหมด:", `${reportData.absentStudentsList.length} คน`]);
 
   const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+  // Ensure studentId column (index 1) has string cell type
+  if (reportData.absentStudentsList.length > 0) {
+    reportData.absentStudentsList.forEach((s, idx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 6 + idx, c: 1 });
+      if (ws2[cellRef]) {
+        ws2[cellRef].t = "s";
+        ws2[cellRef].v = formatStudentId(s.studentId);
+      }
+    });
+  }
   ws2["!cols"] = [
     { wch: 8 },   // ที่
     { wch: 16 },  // รหัสนักเรียน
@@ -228,7 +240,7 @@ export function exportDailyReportToExcel(
   }
 
   sheet3Data.push(["เรื่องที่ครูประจำหอพักอบรมนักเรียน"]);
-  sheet3Data.push(["หอพัก", "ครูผู้บันทึก (ครูประจำหอพัก)", "หัวข้อ / เรื่องที่แจ้งอบรมนักเรียน"]);
+  sheet3Data.push(["หอพัก", "ครูผู้บันทึก", "หัวข้อ / เรื่องที่แจ้งอบรมนักเรียน"]);
 
   const sortedOrientations = [...(reportData.dormTeacherOrientations || [])].sort((a, b) => {
     const numA = parseInt((a.dormName || a.dormId || "").replace(/\D/g, ""), 10);
@@ -241,11 +253,22 @@ export function exportDailyReportToExcel(
 
   if (sortedOrientations.length > 0) {
     sortedOrientations.forEach((orient) => {
-      const notes =
-        orient.orientationNotes && orient.orientationNotes.length > 0
-          ? orient.orientationNotes.join("; ")
-          : "ไม่มีบันทึกเรื่องอบรม";
-      sheet3Data.push([orient.dormName, orient.checkedBy || "-", notes]);
+      const realNotes = (orient.orientationNotes || []).filter(
+        (n) => n && n.trim() !== "" && n.trim() !== "-" && !n.includes("ปิดภาคเรียน") && !n.includes("ระบบอัตโนมัติ")
+      );
+      const isRealCheck = orient.status === "CHECKED" || orient.status === "HOME_BREAK";
+      const hasRealOrientation = realNotes.length > 0;
+
+      const notes = hasRealOrientation
+        ? realNotes.join("; ")
+        : "ไม่มีบันทึกเรื่องอบรมประจำวัน";
+
+      let teacher = "-";
+      if ((isRealCheck || hasRealOrientation) && orient.checkedBy && !isPlaceholderTeacherName(orient.checkedBy)) {
+        teacher = orient.checkedBy.trim();
+      }
+
+      sheet3Data.push([orient.dormName, teacher, notes]);
     });
   } else {
     sheet3Data.push(["-", "-", "ไม่มีข้อมูลเรื่องอบรมจากครูประจำหอพัก"]);

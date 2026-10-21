@@ -1,6 +1,7 @@
 import { SystemSettings } from "../types";
 import { formatThaiFullDate, formatThaiMonthYear, formatGradeRoomShort } from "./dateUtils";
 import { formatDormShort } from "./dormUtils";
+import { formatStudentId } from "./studentUtils";
 
 export interface DashboardReportExportData {
   periodType: "daily" | "weekly" | "monthly";
@@ -203,7 +204,7 @@ export function exportDashboardReportHtml(
       <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
         <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
         <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
-        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${a.studentId}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${formatStudentId(a.studentId)}</td>
         <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
         <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
         <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
@@ -693,7 +694,7 @@ export function exportAbsentListOnlyHtml(
       <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
         <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
         <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
-        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${a.studentId}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${formatStudentId(a.studentId)}</td>
         <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
         <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
         <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>

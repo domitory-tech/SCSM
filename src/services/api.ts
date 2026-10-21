@@ -27,8 +27,9 @@ import {
   SystemSettings,
   UserProfile
 } from "../types";
-import { getTodayDateString, getPreviousDateString, getNextDateString } from "../utils/dateUtils";
-import { cleanBedValue } from "../utils/dormUtils";
+import { getTodayDateString, getPreviousDateString, getNextDateString, isGradeMatch } from "../utils/dateUtils";
+import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
+import { formatStudentId, generateDefault5DigitStudentId } from "../utils/studentUtils";
 
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
 import { DEFAULT_SYSTEM_USERS } from "../data/userProfiles";
@@ -193,6 +194,7 @@ export async function fetchStudents(params?: {
         return {
           id: d.id,
           ...raw,
+          studentId: formatStudentId(raw.studentId),
           dormBed: bedVal,
           bed: bedVal
         } as Student;
@@ -208,7 +210,7 @@ export async function fetchStudents(params?: {
       students = students.filter((s) => s.dormId === params.dormId);
     }
     if (params?.grade) {
-      students = students.filter((s) => s.grade === params.grade);
+      students = students.filter((s) => isGradeMatch(s.grade, params.grade));
     }
     if (params?.room) {
       students = students.filter((s) => Number(s.room) === Number(params.room));
@@ -222,12 +224,13 @@ export async function fetchStudents(params?: {
         : ((s as any).bed !== undefined && (s as any).bed !== null ? String((s as any).bed).trim() : "");
       return {
         ...s,
+        studentId: formatStudentId(s.studentId),
         dormBed: bedVal,
         bed: bedVal
       };
     });
     if (params?.dormId) students = students.filter((s) => s.dormId === params.dormId);
-    if (params?.grade) students = students.filter((s) => s.grade === params.grade);
+    if (params?.grade) students = students.filter((s) => isGradeMatch(s.grade, params.grade));
     if (params?.room) students = students.filter((s) => Number(s.room) === Number(params.room));
     return students.sort((a, b) => (a.no || 0) - (b.no || 0));
   }
@@ -242,9 +245,10 @@ export async function importStudents(dormId: string, students: Partial<Student>[
     const bedVal = (s.dormBed !== undefined && s.dormBed !== null)
       ? String(s.dormBed).trim()
       : ((s.bed !== undefined && s.bed !== null) ? String(s.bed).trim() : "");
+    const formattedSid = formatStudentId(s.studentId) || generateDefault5DigitStudentId(idx + 1);
     const newStudent: Student = {
       id,
-      studentId: s.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
+      studentId: formattedSid,
       no: s.no || idx + 1,
       title: s.title || "นาย",
       firstName: s.firstName || "",
@@ -283,9 +287,10 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
   const bedVal = (studentData.dormBed !== undefined && studentData.dormBed !== null)
     ? String(studentData.dormBed).trim()
     : ((studentData.bed !== undefined && studentData.bed !== null) ? String(studentData.bed).trim() : "");
+  const formattedSid = formatStudentId(studentData.studentId) || generateDefault5DigitStudentId();
   const newStudent: Student = {
     id,
-    studentId: studentData.studentId || `STD${Math.floor(1000 + Math.random() * 9000)}`,
+    studentId: formattedSid,
     no: studentData.no || 1,
     title: studentData.title || "นาย",
     firstName: studentData.firstName || "",
@@ -313,6 +318,9 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
 export async function updateStudent(id: string, studentData: Partial<Student>): Promise<Student> {
   const docRef = doc(db, "students", id);
   let updated: any = { ...studentData, id };
+  if (studentData.studentId !== undefined) {
+    updated.studentId = formatStudentId(studentData.studentId);
+  }
   if (studentData.dormBed !== undefined || (studentData as any).bed !== undefined) {
     const bedVal = (studentData.dormBed !== undefined && studentData.dormBed !== null)
       ? String(studentData.dormBed).trim()
@@ -1469,9 +1477,21 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
     checkedAt: new Date().toLocaleTimeString("th-TH"),
     checkedBy: payload.checkedBy || "เจ้าหน้าที่",
     teacherOrientationNotes: payload.teacherOrientationNotes || [],
-    records: payload.records || [],
+    records: (payload.records || existingData.records || []).map((r) => ({
+      ...r,
+      studentId: formatStudentId(r.studentId)
+    })),
     ...existingData,
-    ...payload
+    ...payload,
+    // Ensure records from payload have formatted studentId
+    ...(payload.records
+      ? {
+          records: payload.records.map((r) => ({
+            ...r,
+            studentId: formatStudentId(r.studentId)
+          }))
+        }
+      : {})
   };
 
   try {
@@ -1541,7 +1561,7 @@ export async function bulkSetHomeBreakAllDorms(
 
     const isHome = mode === "SET_HOME_BREAK";
     const studentRecords: StudentAttendanceRecord[] = dormStudents.map((s) => ({
-      studentId: s.studentId,
+      studentId: formatStudentId(s.studentId),
       studentName: `${s.title}${s.firstName} ${s.lastName}`,
       status: isHome ? "ROUND_HOME" : "PRESENT",
       reason: isHome ? "รอบกลับบ้าน" : ""
@@ -1686,11 +1706,11 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
     let dormOutCount = 0;
     let dormRemCount = 0;
 
-    const dormStudents = students.filter((s) => s.dormId === dorm.id);
+    const dormStudents = students.filter((s) => matchStudentToDorm(s, dorm));
     const attendance = attendanceMap[dorm.id];
 
     gradesList.forEach((g) => {
-      const studentsInGrade = dormStudents.filter((s) => s.grade === g);
+      const studentsInGrade = dormStudents.filter((s) => isGradeMatch(s.grade, g));
       const totalInGrade = studentsInGrade.length;
       let outInGrade = 0;
 
@@ -1699,7 +1719,11 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
           outInGrade = totalInGrade;
         } else if (Array.isArray(attendance.records)) {
           studentsInGrade.forEach((std) => {
-            const stdRec = attendance.records.find((r) => r.studentId === std.studentId);
+            const stdSid = formatStudentId(std.studentId);
+            const stdRec = attendance.records.find((r) => {
+              const rSid = formatStudentId(r.studentId);
+              return rSid === stdSid || r.studentId === std.studentId;
+            });
             if (stdRec && stdRec.status !== "PRESENT") {
               outInGrade++;
               absentCounter++;
@@ -1715,7 +1739,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
 
               absentStudentsList.push({
                 no: absentCounter,
-                studentId: std.studentId,
+                studentId: stdSid,
                 fullName: `${std.title}${std.firstName} ${std.lastName}`,
                 gradeRoom: `${std.grade}/${std.room}`,
                 dormName: dorm.name,
@@ -1755,14 +1779,43 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
 
   const headTeacherNotices = notices.filter((n) => n.date === summaryDate || n.date === reportDate);
   const dormTeacherOrientations = dorms.map((dorm) => {
-    const attendance = attendanceMap[dorm.id];
-    const defaultTeacherName = dorm.teachers?.[0]?.name || dorm.teacherName || "";
-    const ownNotes = (attendance?.teacherOrientationNotes || []).filter((n: string) => n.trim().length > 0);
+    const attendance = attendanceMap[dorm.id] || Object.values(attendanceMap).find((a) => a && isDormMatch(dorm, a.dormId));
+
+    // Check if this dorm actually performed an attendance check (CHECKED or HOME_BREAK)
+    const hasChecked = Boolean(
+      attendance && (
+        attendance.status === "CHECKED" ||
+        attendance.status === "HOME_BREAK"
+      )
+    );
+
+    // Filter orientation notes: remove empty notes and automated/system placeholders (e.g. ปิดภาคเรียน, ระบบอัตโนมัติ)
+    const ownNotes = (attendance?.teacherOrientationNotes || []).filter((n: string) => {
+      if (!n) return false;
+      const trimmed = n.trim();
+      return (
+        trimmed.length > 0 &&
+        trimmed !== "-" &&
+        !trimmed.includes("ปิดภาคเรียน") &&
+        !trimmed.includes("ระบบอัตโนมัติ")
+      );
+    });
+    const hasOrientation = ownNotes.length > 0;
+
+    // หอพักไม่มีการเช็คยอดและอบรม ไม่ต้องระบุชื่อครู ให้ใช้ - แทน และห้ามใช้ชื่อที่มาจากข้อมูลตัวอย่าง
+    let checkedBy = "-";
+    if (hasChecked || hasOrientation) {
+      const rec = attendance?.checkedBy?.trim();
+      if (rec && !isPlaceholderTeacherName(rec)) {
+        checkedBy = rec;
+      }
+    }
+
     return {
       dormId: dorm.id,
       dormName: dorm.name,
-      checkedBy: attendance?.checkedBy || defaultTeacherName,
-      checkedAt: attendance?.checkedAt,
+      checkedBy,
+      checkedAt: hasChecked ? attendance?.checkedAt : undefined,
       status: attendance?.status || "PENDING",
       orientationNotes: ownNotes
     };

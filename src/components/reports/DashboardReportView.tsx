@@ -11,9 +11,12 @@ import {
   getTodayDateString,
   THAI_DAYS_FULL,
   THAI_DAYS_SHORT,
-  THAI_MONTHS
+  THAI_MONTHS,
+  isGradeMatch,
+  normalizeGradeLevel
 } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormType, getDormTypeLabel, getDormTypeBadgeStyle, formatDormShort } from "../../utils/dormUtils";
+import { formatStudentId } from "../../utils/studentUtils";
 import {
   exportDashboardReportHtml,
   exportAbsentListOnlyHtml,
@@ -152,7 +155,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
           return false;
         }
       }
-      if (filterGrade !== "ALL" && s.grade !== filterGrade) return false;
+      if (filterGrade !== "ALL" && !isGradeMatch(s.grade, filterGrade)) return false;
       return true;
     });
   }, [students, filterDormId, filterGrade, dorms]);
@@ -172,7 +175,13 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
     insights
   } = useMemo(() => {
     const studentMap = new Map<string, Student>();
-    students.forEach((s) => studentMap.set(s.studentId, s));
+    students.forEach((s) => {
+      const sid = formatStudentId(s.studentId);
+      studentMap.set(sid, s);
+      if (s.studentId !== sid) {
+        studentMap.set(s.studentId, s);
+      }
+    });
 
     const dormMap = new Map<string, Dormitory>();
     dorms.forEach((d) => dormMap.set(d.id, d));
@@ -265,7 +274,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
     > = {};
 
     gradeList.forEach((g) => {
-      const gStudents = students.filter((s) => s.grade === g);
+      const gStudents = students.filter((s) => isGradeMatch(s.grade, g));
       gradeStatMap[g] = {
         grade: g,
         total: gStudents.length,
@@ -297,13 +306,13 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
         reasonCountMap.ROUND_HOME += totalInDorm;
 
         dormStudents.forEach((s) => {
-          if (
-            (filterDormId === "ALL" || s.dormId === filterDormId) &&
-            (filterGrade === "ALL" || s.grade === filterGrade)
-          ) {
+          const targetDorm = filterDormId === "ALL" ? null : dormMap.get(filterDormId) || dorms.find((d) => d.id === filterDormId);
+          const matchesDorm = filterDormId === "ALL" || s.dormId === filterDormId || (dorm && dorm.id === filterDormId) || (targetDorm ? matchStudentToDorm(s, targetDorm) : false);
+          const matchesGrade = filterGrade === "ALL" || isGradeMatch(s.grade, filterGrade);
+          if (matchesDorm && matchesGrade) {
             fullAbsentList.push({
               date: att.date,
-              studentId: s.studentId,
+              studentId: formatStudentId(s.studentId),
               studentNo: s.no,
               fullName: `${s.title}${s.firstName} ${s.lastName}`,
               gradeRoom: formatGradeRoomFullTitle(s.grade, s.room),
@@ -319,7 +328,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
         });
       } else if (att.records && Array.isArray(att.records)) {
         att.records.forEach((rec) => {
-          const s = studentMap.get(rec.studentId);
+          const s = studentMap.get(formatStudentId(rec.studentId)) || studentMap.get(rec.studentId);
           if (!s) return;
 
           if (rec.status && rec.status !== "PRESENT") {
@@ -335,13 +344,13 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                 ? "ปิดภาคเรียน"
                 : rawReason;
 
-            if (
-              (filterDormId === "ALL" || s.dormId === filterDormId) &&
-              (filterGrade === "ALL" || s.grade === filterGrade)
-            ) {
+            const targetDorm = filterDormId === "ALL" ? null : dormMap.get(filterDormId) || dorms.find((d) => d.id === filterDormId);
+            const matchesDorm = filterDormId === "ALL" || s.dormId === filterDormId || (dorm && dorm.id === filterDormId) || (targetDorm ? matchStudentToDorm(s, targetDorm) : false);
+            const matchesGrade = filterGrade === "ALL" || isGradeMatch(s.grade, filterGrade);
+            if (matchesDorm && matchesGrade) {
               fullAbsentList.push({
                 date: att.date,
-                studentId: s.studentId,
+                studentId: formatStudentId(s.studentId),
                 studentNo: s.no,
                 fullName: `${s.title}${s.firstName} ${s.lastName}`,
                 gradeRoom: formatGradeRoomShort(s.grade, s.room),
@@ -413,7 +422,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
     // Populate Grade Stats present/out estimates
     const totalDays = Math.max(dateList.length, 1);
     gradeList.forEach((g) => {
-      const gAbsents = fullAbsentList.filter((a) => a.grade === g).length;
+      const gAbsents = fullAbsentList.filter((a) => isGradeMatch(a.grade, g)).length;
       const gTotal = gradeStatMap[g].total;
       const avgOut = Math.round(gAbsents / totalDays);
       const avgPresent = Math.max(0, gTotal - avgOut);
@@ -1260,7 +1269,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
                     <tr key={`${a.studentId}_${a.date}_${i}`} className="hover:bg-slate-50">
                       <td className="py-2.5 px-2 text-center text-slate-400 font-medium border-r border-slate-100">{i + 1}</td>
                       <td className="py-2.5 px-2 text-center font-medium text-slate-700 border-r border-slate-100 whitespace-nowrap">{a.date}</td>
-                      <td className="py-2.5 px-2 font-mono font-bold text-slate-800 border-r border-slate-100 whitespace-nowrap text-center">{a.studentId}</td>
+                      <td className="py-2.5 px-2 font-mono font-bold text-slate-800 border-r border-slate-100 whitespace-nowrap text-center">{formatStudentId(a.studentId)}</td>
                       <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{a.fullName}</td>
                       <td className="py-2.5 px-2 text-center font-semibold text-slate-700 border-r border-slate-100 whitespace-nowrap">{a.gradeRoom}</td>
                       <td className="py-2.5 px-2 text-center text-purple-700 font-bold border-r border-slate-100 whitespace-nowrap">{a.dormName}</td>

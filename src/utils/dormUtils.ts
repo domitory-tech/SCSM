@@ -21,8 +21,69 @@ function extractNumber(str?: string | null): string {
 }
 
 /**
+ * Extracts the canonical dormitory number (1-99), e.g.:
+ * "หอพักล้านนา 2 (ชาย)" -> "2"
+ * "หอพัก 2 (ชาย)" -> "2"
+ * "dorm-2" -> "2"
+ * "2" -> "2"
+ * Safely ignores timestamp IDs (e.g. "dorm-1785819050326").
+ */
+export function extractDormNumber(str?: string | null): string {
+  if (!str) return "";
+  const s = String(str).trim();
+  if (!s) return "";
+
+  // If the string is a pure timestamp or starts with dorm-timestamp (>= 6 digits)
+  // e.g. "dorm-1785819050326" or "1785819050326"
+  if (/^dorm-\d{6,}/i.test(s) || /^\d{6,}$/.test(s)) {
+    return "";
+  }
+
+  // Look for explicit dorm patterns: "หอพัก 2", "หอพักล้านนา 2", "หอ 2", "ล้านนา 2", "dorm-2", "dorm 2", "อาคาร 2"
+  const prefixMatch = s.match(/(?:หอพัก|หอ|dorm|ล้านนา|อาคาร)?\s*([0-9]{1,3})\b/i);
+  if (prefixMatch && prefixMatch[1]) {
+    const num = parseInt(prefixMatch[1], 10);
+    if (num > 0 && num < 1000) {
+      return String(num);
+    }
+  }
+
+  // Look for word-bounded 1-2 digit number
+  const wordNum = s.match(/\b([0-9]{1,2})\b/);
+  if (wordNum && wordNum[1]) {
+    return String(parseInt(wordNum[1], 10));
+  }
+
+  const anyNum = s.match(/[0-9]+/);
+  if (anyNum && anyNum[0].length <= 3) {
+    return String(parseInt(anyNum[0], 10));
+  }
+
+  return "";
+}
+
+/**
+ * Normalizes a dormitory name by stripping common prefixes, words, and noise.
+ * e.g. "หอพักล้านนา 2 (ชาย)" -> "2"
+ * "หอพัก 2 (ชาย)" -> "2"
+ * "หอ 2" -> "2"
+ * "dorm-2" -> "2"
+ */
+export function normalizeDormName(str?: string | null): string {
+  if (!str) return "";
+  let s = String(str).trim().toLowerCase();
+  // Strip common words and noise
+  s = s.replace(/^(หอพัก|หอ|dorm|อาคาร|เรือนนอน)\s*/g, "");
+  s = s.replace(/ล้านนา\s*/g, "");
+  s = s.replace(/\((ชาย|หญิง|ช|ญ|male|female|all|รวม)\)/g, "");
+  s = s.replace(/(ชาย|หญิง|male|female|all|รวม)$/g, "");
+  s = s.replace(/[\s\-_()]/g, "");
+  return s;
+}
+
+/**
  * Robustly checks if a student belongs to a given dormitory.
- * Handles cases where dormId is stored as dorm.id, dorm.name, numeric id, or variations.
+ * Handles cases where dormId is stored as dorm.id, dorm.name, numeric id, or variations (such as "หอพักล้านนา 2 (ชาย)" vs "dorm-2" vs "หอพัก 2").
  */
 export function matchStudentToDorm(
   student: Student | Partial<Student> | null | undefined,
@@ -50,20 +111,27 @@ export function matchStudentToDorm(
     return true;
   }
 
-  // 3. Thai prefix variations (e.g. "หอ 1" vs "หอพัก 1" vs "หอพักชาย 1")
-  if (normName.includes(normS) || normS.includes(normName)) {
-    // If one contains the other, check if they refer to the same number
-    const sNum = extractNumber(sDormId);
-    const dNum = extractNumber(dId) || extractNumber(dName);
-    if (sNum && dNum && sNum === dNum) {
-      return true;
-    }
+  // 3. Cleaned dorm name matching (strips "หอพัก", "ล้านนา", "(ชาย)", etc.)
+  const cleanS = normalizeDormName(sDormId);
+  const cleanDId = normalizeDormName(dId);
+  const cleanDName = normalizeDormName(dName);
+
+  if (cleanS && (cleanS === cleanDId || cleanS === cleanDName)) {
+    return true;
   }
 
-  // 4. Numeric ID matching fallback (e.g., "1" matches "dorm-1" or "หอพัก 1")
-  const sNum = extractNumber(sDormId);
-  const dNum = extractNumber(dId) || extractNumber(dName);
-  if (sNum && dNum && sNum === dNum && sNum.length <= 4) {
+  // 4. Canonical dorm number matching (e.g. 2 for "หอพักล้านนา 2 (ชาย)" and "dorm-2")
+  const sNum = extractDormNumber(sDormId);
+  const dNameNum = extractDormNumber(dName);
+  const dIdNum = extractDormNumber(dId);
+  const targetDormNum = dNameNum || dIdNum;
+
+  if (sNum && targetDormNum && sNum === targetDormNum) {
+    return true;
+  }
+
+  // 5. Thai prefix variations containment check
+  if (normName && normS && (normName.includes(normS) || normS.includes(normName))) {
     return true;
   }
 
@@ -87,9 +155,20 @@ export function isDormMatch(dorm: Dormitory | null | undefined, dormIdOrName: st
 
   if (normT && (normT === normId || normT === normName)) return true;
 
-  const tNum = extractNumber(target);
-  const dNum = extractNumber(dId) || extractNumber(dName);
-  if (tNum && dNum && tNum === dNum) return true;
+  const cleanT = normalizeDormName(target);
+  const cleanDId = normalizeDormName(dId);
+  const cleanDName = normalizeDormName(dName);
+
+  if (cleanT && (cleanT === cleanDId || cleanT === cleanDName)) return true;
+
+  const tNum = extractDormNumber(target);
+  const dNameNum = extractDormNumber(dName);
+  const dIdNum = extractDormNumber(dId);
+  const targetDormNum = dNameNum || dIdNum;
+
+  if (tNum && targetDormNum && tNum === targetDormNum) return true;
+
+  if (normName && normT && (normName.includes(normT) || normT.includes(normName))) return true;
 
   return false;
 }
@@ -160,16 +239,56 @@ export function getPositionDotColor(pos?: string): string {
 }
 
 /**
- * Checks if a name is a generic placeholder or system-generated text.
+ * Checks if a name is a generic placeholder, sample/mock data, or system-generated text.
+ * ห้ามใช้ชื่อที่มาจากข้อมูลตัวอย่าง หรือชื่อตำแหน่ง/ระบบแทนชื่อบุคคลจริง
  */
 export function isPlaceholderTeacherName(name?: string | null): boolean {
   if (!name) return true;
   const cleaned = String(name).trim();
-  if (!cleaned || cleaned === "-" || cleaned === "ยังไม่ระบุ" || cleaned === "ยังไม่มี" || cleaned === "default-1") return true;
-  if (cleaned === "ครูประจำหอพัก" || cleaned === "ครูหอพัก" || cleaned === "ผู้ดูแลหอพัก" || cleaned === "เจ้าหน้าที่หอพัก" || cleaned === "ผู้ใช้งานใหม่") return true;
-  if (cleaned.toLowerCase() === "admin" || cleaned.toLowerCase() === "administrator" || cleaned.toLowerCase() === "staff") return true;
-  if (cleaned.includes("ตัวอย่าง") || cleaned.includes("ทดสอบ") || cleaned.toLowerCase().includes("sample") || cleaned.toLowerCase().includes("demo") || cleaned.toLowerCase().includes("mock") || cleaned.toLowerCase().includes("placeholder") || cleaned.toLowerCase().includes("test")) return true;
-  if (cleaned.startsWith("ครูประจำหอ") || cleaned.startsWith("ครูหอพัก") || cleaned.startsWith("ผู้ดูแลหอ")) return true;
+  if (
+    !cleaned ||
+    cleaned === "-" ||
+    cleaned === "ยังไม่ระบุ" ||
+    cleaned === "ยังไม่มี" ||
+    cleaned === "default-1" ||
+    cleaned === "undefined" ||
+    cleaned === "null"
+  ) {
+    return true;
+  }
+
+  const lower = cleaned.toLowerCase();
+  if (
+    lower.includes("admin") ||
+    lower.includes("administrator") ||
+    lower.includes("staff") ||
+    lower.includes("sample") ||
+    lower.includes("demo") ||
+    lower.includes("mock") ||
+    lower.includes("placeholder") ||
+    lower.includes("test")
+  ) {
+    return true;
+  }
+
+  if (
+    cleaned.includes("ตัวอย่าง") ||
+    cleaned.includes("ทดสอบ") ||
+    cleaned.includes("ระบบอัตโนมัติ") ||
+    cleaned.includes("ผู้ดูแลระบบ") ||
+    cleaned.includes("เจ้าหน้าที่") ||
+    cleaned.includes("ผู้ใช้งาน") ||
+    cleaned.includes("ครูประจำหอ") ||
+    cleaned.includes("ครูหอพัก") ||
+    cleaned.includes("ผู้ดูแลหอ") ||
+    cleaned.includes("เจ้าหน้าที่หอ") ||
+    cleaned.includes("Dorm Teacher") ||
+    cleaned.includes("Staff Officer") ||
+    cleaned.includes("System Admin")
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -352,9 +471,9 @@ export function formatDormShort(dormNameOrObj?: string | Dormitory | null): stri
   if (!dormNameOrObj) return "-";
   const name = typeof dormNameOrObj === "string" ? dormNameOrObj : dormNameOrObj.name || dormNameOrObj.id || "";
   const trimmed = name.trim();
-  const match = trimmed.match(/\d+/);
-  if (match) {
-    return `หอ ${match[0]}`;
+  const num = extractDormNumber(trimmed);
+  if (num) {
+    return `หอ ${num}`;
   }
   if (trimmed.startsWith("หอพัก")) {
     return trimmed.replace(/^หอพัก\s*/, "หอ ");

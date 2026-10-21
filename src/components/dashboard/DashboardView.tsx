@@ -4,7 +4,7 @@ import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile, SystemSettings } from "../../types";
 import { useUsersQuery } from "../../services/useDormQueries";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
-import { getDashboardDefaultDate, getTodayDateString, detectStudentGender, isDormAttendancePaused } from "../../utils/dateUtils";
+import { getDashboardDefaultDate, getTodayDateString, detectStudentGender, isDormAttendancePaused, isGradeMatch, normalizeGradeLevel } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
 import { ThaiCalendarPicker } from "./ThaiCalendarPicker";
 import {
@@ -93,6 +93,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isDormStatsModalOpen, setIsDormStatsModalOpen] = React.useState<boolean>(false);
   const [isControlModalOpen, setIsControlModalOpen] = React.useState<boolean>(false);
   const [controlModalInitialTab, setControlModalInitialTab] = React.useState<"PAUSE_RESUME" | "HOME_BREAK">("PAUSE_RESUME");
+
+  // Dorm filter state for the Grade Statistics table (allowing user to view grade breakdown per dorm or all)
+  const [gradeStatsDormFilter, setGradeStatsDormFilter] = React.useState<string>("ALL");
 
   // Date selection state for Dashboard statistics
   const [selectedDashboardDate, setSelectedDashboardDate] = React.useState<string>("");
@@ -640,12 +643,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // 1. Grade Statistics (สรุปสถิติข้อมูลแยกตามระดับชั้น ม.1 - ม.6) สำหรับวันปัจจุบัน/วันที่เลือก
   const dashboardGradeStats = React.useMemo(() => {
-    const gradeList = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+    const baseGrades = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+
+    // Filter students by selected dorm if specified
+    const targetDorm = gradeStatsDormFilter === "ALL" ? null : dorms.find((d) => d.id === gradeStatsDormFilter);
+    const relevantStudents = targetDorm
+      ? getStudentsInDorm(students, targetDorm)
+      : students;
+
+    // Detect if relevantStudents contain extra grade categories
+    const extraGrades = new Set<string>();
+    relevantStudents.forEach((s) => {
+      const norm = normalizeGradeLevel(s.grade);
+      if (norm && !baseGrades.includes(norm)) {
+        extraGrades.add(norm);
+      } else if (!norm && s.grade && String(s.grade).trim()) {
+        const raw = String(s.grade).trim();
+        if (!baseGrades.some((bg) => isGradeMatch(raw, bg))) {
+          extraGrades.add(raw);
+        }
+      }
+    });
+
+    const gradeList = [...baseGrades, ...Array.from(extraGrades)];
 
     // Track absent students by studentId for the active dashboard date
     const absentStudentIds = new Set<string>();
 
     dorms.forEach((d) => {
+      if (targetDorm && d.id !== targetDorm.id && !isDormMatch(targetDorm, d.id)) return;
       const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
       if (!att) return;
       const dormStudents = getStudentsInDorm(students, d);
@@ -662,7 +688,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
 
     const stats = gradeList.map((g) => {
-      const gStudents = students.filter((s) => s.grade === g);
+      const gStudents = relevantStudents.filter((s) => isGradeMatch(s.grade, g));
       const total = gStudents.length;
       const male = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "male").length;
       const female = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "female").length;
@@ -700,7 +726,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         rate: overallRate
       }
     };
-  }, [students, dorms, activeAttendanceMap]);
+  }, [students, dorms, activeAttendanceMap, gradeStatsDormFilter]);
 
   // 2. Dormitory Statistics (สรุปสถิติข้อมูลแยกตามหอพัก หอพัก 1 - 6) สำหรับวันปัจจุบัน/วันที่เลือก
   const dashboardDormStats = React.useMemo(() => {
@@ -1738,13 +1764,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Table 1: สรุปสถิติข้อมูลแยกตามระดับชั้น */}
         <div className="lg:col-span-5 bg-white rounded-3xl p-5 border border-slate-100 shadow-xs space-y-4 flex flex-col justify-between">
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                   <Users className="w-4 h-4 text-purple-600" />
-                  <span>สรุปสถิติข้อมูลแยกตามระดับชั้น</span>
+                  <span>
+                    สรุปสถิติข้อมูลแยกตามระดับชั้น
+                    {gradeStatsDormFilter !== "ALL" && (
+                      <span className="text-purple-700 ml-1">
+                        ({dorms.find((d) => d.id === gradeStatsDormFilter)?.name || gradeStatsDormFilter})
+                      </span>
+                    )}
+                  </span>
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">มัธยมศึกษาปีที่ 1 - 6</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {gradeStatsDormFilter === "ALL"
+                    ? "จำแนกตามระดับชั้น (รวมทุกหอพัก)"
+                    : `จำแนกตามระดับชั้นเฉพาะ ${dorms.find((d) => d.id === gradeStatsDormFilter)?.name || ""}`}
+                </p>
+              </div>
+
+              {/* Dormitory filter selector */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={gradeStatsDormFilter}
+                  onChange={(e) => setGradeStatsDormFilter(e.target.value)}
+                  className="text-xs bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400 cursor-pointer shadow-2xs"
+                  aria-label="เลือกหอพักสำหรับสถิติแยกตามระดับชั้น"
+                >
+                  <option value="ALL">ทุกหอพัก (รวมทั้งโรงเรียน)</option>
+                  {dorms.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

@@ -1,6 +1,7 @@
 import { Dormitory, Student, SystemSettings, UserProfile, AttendanceStatus } from "../types";
 import { formatThaiFullDate, formatThaiMediumDate, getTodayDateString, formatGradeRoomShort, detectStudentGender } from "./dateUtils";
 import { StudentLeaveEvent, SearchConditionMode } from "../components/students/StudentSearchView";
+import { formatStudentId } from "./studentUtils";
 
 export interface StudentSearchReportData {
   title: string;
@@ -137,7 +138,7 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
       return `
         <tr class="${idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}">
           <td class="p-2 text-center border border-slate-300 font-mono">${idx + 1}</td>
-          <td class="p-2 text-center border border-slate-300 font-mono font-bold">${s.studentId}</td>
+          <td class="p-2 text-center border border-slate-300 font-mono font-bold">${formatStudentId(s.studentId)}</td>
           <td class="p-2 border border-slate-300 font-bold text-slate-900">
             ${s.title || ""}${s.firstName} ${s.lastName} ${s.nickname ? `<span class="text-slate-500 font-normal">(${s.nickname})</span>` : ""}
           </td>
@@ -378,7 +379,7 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ประวัติการออกหอพัก_${student.studentId}_${student.firstName}_${student.lastName}</title>
+  <title>ประวัติการออกหอพัก_${formatStudentId(student.studentId)}_${student.firstName}_${student.lastName}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -425,7 +426,7 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
       </div>
       <div>
         <h2 class="text-sm font-bold">เอกสารประวัติการออกหอพัก: ${student.title || ""}${student.firstName} ${student.lastName}</h2>
-        <p class="text-xs text-slate-400">รหัสนักเรียน: ${student.studentId} • หอพัก: ${dormName}</p>
+        <p class="text-xs text-slate-400">รหัสนักเรียน: ${formatStudentId(student.studentId)} • หอพัก: ${dormName}</p>
       </div>
     </div>
     <div class="flex items-center gap-2.5">
@@ -473,7 +474,7 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
         </div>
         <div>
           <span class="text-slate-500 font-medium">รหัสนักเรียน:</span>
-          <div class="font-mono font-bold text-slate-800 text-sm mt-0.5">${student.studentId}</div>
+          <div class="font-mono font-bold text-slate-800 text-sm mt-0.5">${formatStudentId(student.studentId)}</div>
         </div>
         <div>
           <span class="text-slate-500 font-medium">เพศ:</span>
@@ -585,5 +586,5 @@ export function printStudentSearchReport(data: StudentSearchReportData) {
 
 export function printIndividualStudentHistory(data: StudentHistoryReportData) {
   const html = generateStudentHistoryReportHtml(data);
-  triggerPrintWindow(html, `ประวัติการออกหอ_${data.student.studentId}_${data.student.firstName}`);
+  triggerPrintWindow(html, `ประวัติการออกหอ_${formatStudentId(data.student.studentId)}_${data.student.firstName}`);
 }

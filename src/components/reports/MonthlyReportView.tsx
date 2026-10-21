@@ -13,6 +13,7 @@ import {
   exportMonthlyReportHtmlDocument,
   MonthlyRoomData
 } from "../../utils/monthlyReportExporter";
+import { formatStudentId } from "../../utils/studentUtils";
 import {
   Calendar,
   ChevronDown,
@@ -296,8 +297,9 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
               outDaysCount++;
               dayStats[d].out++;
             } else if (Array.isArray(dormAtt.records)) {
+              const stdSid = formatStudentId(std.studentId);
               const record = dormAtt.records.find(
-                (r) => String(r.studentId).trim() === String(std.studentId).trim()
+                (r) => formatStudentId(r.studentId) === stdSid || String(r.studentId).trim() === String(std.studentId).trim()
               );
 
               if (record && (record.status === "SEMESTER_BREAK" || record.reason === "ปิดภาคเรียน")) {

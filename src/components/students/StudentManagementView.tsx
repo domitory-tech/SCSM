@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
 import { matchStudentToDorm, findDormForStudent, countStudentsInDorm, cleanBedValue, formatBedDisplay } from "../../utils/dormUtils";
+import { formatStudentId, isValid5DigitStudentId } from "../../utils/studentUtils";
 import { deleteSampleData } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
@@ -186,13 +187,22 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   const handleDownloadExcelTemplate = () => {
     const headers = ["เลขที่", "รหัสนักเรียน", "คำนำหน้า", "ชื่อ", "นามสกุล", "ชื่อเล่น", "ระดับชั้น", "ห้อง", "ห้องพักหอ", "เตียง"];
     const sampleRows = [
-      [1, "66001", "นาย", "กิตติพงษ์", "สุขเจริญ", "กิต", "ม.1", 1, "101", "1"],
-      [2, "66002", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "101", "2"],
-      [3, "66003", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201", "เตียง 1"],
-      [4, "66004", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103", "1A"]
+      [1, "06120", "นาย", "กิตติพงษ์", "สุขเจริญ", "กิต", "ม.1", 1, "101", "1"],
+      [2, "06121", "นาย", "ชินวัตร", "งามศิลป์", "บาส", "ม.1", 1, "101", "2"],
+      [3, "06122", "นางสาว", "ศิริพร", "ใจดี", "พลอย", "ม.4", 2, "201", "เตียง 1"],
+      [4, "06123", "ด.ช.", "ภานุวัฒน์", "ยอดแก้ว", "นุ", "ม.2", 1, "103", "1A"]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
+    // Ensure studentId column (index 1) is formatted as text string
+    sampleRows.forEach((_, rIdx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: rIdx + 1, c: 1 });
+      if (ws[cellRef]) {
+        ws[cellRef].t = "s";
+        ws[cellRef].v = formatStudentId(ws[cellRef].v);
+      }
+    });
+
     ws["!cols"] = [
       { wch: 8 },
       { wch: 15 },
@@ -225,7 +235,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         : ((s.bed !== undefined && s.bed !== null && String(s.bed).trim() !== "") ? String(s.bed).trim() : "-");
       return {
         "เลขที่": s.no,
-        "รหัสนักเรียน": s.studentId,
+        "รหัสนักเรียน": formatStudentId(s.studentId),
         "คำนำหน้า": s.title,
         "ชื่อ": s.firstName,
         "นามสกุล": s.lastName,
@@ -239,6 +249,14 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
+    // Explicitly enforce string type for studentId column
+    exportData.forEach((_, rIdx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: rIdx + 1, c: 1 });
+      if (ws[cellRef]) {
+        ws[cellRef].t = "s";
+        ws[cellRef].v = formatStudentId(ws[cellRef].v);
+      }
+    });
     ws["!cols"] = [
       { wch: 8 },
       { wch: 15 },
@@ -317,7 +335,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           if (colStr[0].includes("เลขที่") || colStr[1]?.includes("รหัส")) return;
 
           let no = (colIdxNo >= 0 && colStr[colIdxNo] ? parseInt(colStr[colIdxNo]) : 0) || parseInt(colStr[0]) || idx + 1;
-          let studentId = (colIdxId >= 0 && colStr[colIdxId]) ? colStr[colIdxId] : (colStr[1] || `${Date.now() + idx}`);
+          let rawStudentId = (colIdxId >= 0 && colStr[colIdxId]) ? colStr[colIdxId] : (colStr[1] || `${Date.now() + idx}`);
+          let studentId = formatStudentId(rawStudentId);
           let title = (colIdxTitle >= 0 && colStr[colIdxTitle]) ? colStr[colIdxTitle] : (colStr[2] || "นาย");
           let firstName = (colIdxFirst >= 0 && colStr[colIdxFirst]) ? colStr[colIdxFirst] : (colStr[3] || "");
           let lastName = (colIdxLast >= 0 && colStr[colIdxLast]) ? colStr[colIdxLast] : (colStr[4] || "");
@@ -408,7 +427,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         if (parts[0].includes("เลขที่") || parts[1]?.includes("รหัส")) return;
 
         let no = parseInt(parts[0]) || idx + 1;
-        let studentId = parts[1] || `${Date.now() + idx}`;
+        let rawStudentId = parts[1] || `${Date.now() + idx}`;
+        let studentId = formatStudentId(rawStudentId);
         let title = parts[2] || "นาย";
         let firstName = parts[3] || "";
         let lastName = parts[4] || "";
@@ -859,8 +879,13 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   // Add / Edit Single Student Handler
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudent.firstName || !newStudent.lastName || !newStudent.studentId) {
+    const formattedSid = formatStudentId(newStudent.studentId);
+    if (!newStudent.firstName || !newStudent.lastName || !formattedSid) {
       alert("กรุณากรอกรหัสนักเรียน ชื่อ และนามสกุลให้ครบถ้วน");
+      return;
+    }
+    if (formattedSid.length !== 5) {
+      alert("รหัสนักเรียนต้องเป็นตัวเลข 5 หลัก (เช่น 06120)");
       return;
     }
 
@@ -868,6 +893,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       const bedValue = newStudent.dormBed !== undefined && newStudent.dormBed !== null ? String(newStudent.dormBed).trim() : "";
       const studentToSave = {
         ...newStudent,
+        studentId: formattedSid,
         dormBed: bedValue,
         bed: bedValue
       };
@@ -1428,7 +1454,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         />
                       </td>
                       <td className="py-3 px-3 text-center font-bold text-gray-800">{s.no}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-gray-700">{s.studentId}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-purple-950">{formatStudentId(s.studentId)}</td>
                       <td className="py-3 px-4 font-bold text-gray-900">
                         {s.title}{s.firstName} {s.lastName}
                       </td>
@@ -1458,6 +1484,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                               setEditingStudent(s);
                               setNewStudent({
                                 ...s,
+                                studentId: formatStudentId(s.studentId),
                                 dormBed: s.dormBed !== undefined && s.dormBed !== null ? String(s.dormBed) : (s.bed !== undefined && s.bed !== null ? String(s.bed) : "")
                               });
                               setIsAddModalOpen(true);
@@ -1898,14 +1925,26 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">รหัสนักเรียน</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    รหัสนักเรียน (5 หลัก) <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
+                    maxLength={5}
                     value={newStudent.studentId || ""}
-                    onChange={(e) => setNewStudent({ ...newStudent, studentId: e.target.value })}
-                    placeholder="66xxx"
-                    className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none"
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "").slice(0, 5);
+                      setNewStudent({ ...newStudent, studentId: val });
+                    }}
+                    onBlur={() => {
+                      if (newStudent.studentId) {
+                        setNewStudent((prev) => ({ ...prev, studentId: formatStudentId(prev.studentId) }));
+                      }
+                    }}
+                    placeholder="เช่น 06120"
+                    className="w-full bg-gray-50 border border-gray-300 text-xs rounded-xl p-2 outline-none font-mono font-bold tracking-wider"
                   />
+                  <p className="text-[10px] text-gray-400 mt-0.5">ระบบจะเติมเลข 0 นำหน้าให้อัตโนมัติให้ครบ 5 หลัก</p>
                 </div>
               </div>
 

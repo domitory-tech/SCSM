@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef } from "react";
 import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import { formatGradeRoomShort, getDaysInMonth, THAI_MONTHS, THAI_DAYS_SHORT } from "../../utils/dateUtils";
 import { matchStudentToDorm, getDormTeachers } from "../../utils/dormUtils";
+import { formatStudentId } from "../../utils/studentUtils";
 import {
   ATTENDANCE_CODE_MAPPING,
   ATTENDANCE_LEGEND_ITEMS,
@@ -199,11 +200,15 @@ export const DormAttendanceBookView: React.FC<DormAttendanceBookViewProps> = ({
 
       if (att.records && Array.isArray(att.records)) {
         att.records.forEach((rec) => {
-          if (!map[rec.studentId]) {
-            map[rec.studentId] = {};
+          const sid = formatStudentId(rec.studentId);
+          if (!map[sid]) {
+            map[sid] = {};
           }
           const mappedCode = ATTENDANCE_CODE_MAPPING[rec.status] || (rec.status ? "✓" : "");
-          map[rec.studentId][dayNum] = mappedCode;
+          map[sid][dayNum] = mappedCode;
+          if (rec.studentId !== sid) {
+            map[rec.studentId] = map[sid];
+          }
         });
       }
     });
@@ -746,7 +751,8 @@ export const DormAttendanceBookView: React.FC<DormAttendanceBookViewProps> = ({
                               let cellText = "";
                               let textStyle = "";
                               if (dataMode === "filled") {
-                                const code = studentDailyCodes[std.studentId]?.[day] || "";
+                                const sid = formatStudentId(std.studentId);
+                                const code = studentDailyCodes[sid]?.[day] || studentDailyCodes[std.studentId]?.[day] || "";
                                 if (code === "✓") {
                                   cellText = "✓";
                                   textStyle = "text-emerald-700 font-extrabold text-[11px]";

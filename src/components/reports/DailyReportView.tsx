@@ -1,6 +1,8 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { DailyAttendance, DailyReportData, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString } from "../../utils/dateUtils";
+import { formatStudentId } from "../../utils/studentUtils";
+import { isDormMatch, isPlaceholderTeacherName } from "../../utils/dormUtils";
 import {
   exportDailyReportToExcel,
   GOOGLE_DRIVE_FOLDER_URL
@@ -192,15 +194,91 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
       ? "ผู้ดูแลระบบ"
       : "เจ้าหน้าที่สำนักงาน");
 
-  // Sort dorm orientations from low to high (หอพัก 1 -> 6)
-  const sortedDormOrientations = [...dormTeacherOrientations].sort((a, b) => {
-    const numA = parseInt((a.dormName || a.dormId || "").replace(/\D/g, ""), 10);
-    const numB = parseInt((b.dormName || b.dormId || "").replace(/\D/g, ""), 10);
-    if (!isNaN(numA) && !isNaN(numB)) {
-      return numA - numB;
+  // Process dorm orientations ensuring dorms without check-in/orientation show "-" and no mock data
+  const sortedDormOrientations = useMemo(() => {
+    let list: Array<{
+      dormId: string;
+      dormName: string;
+      checkedBy: string;
+      checkedAt?: string;
+      status: string;
+      orientationNotes: string[];
+    }> = [];
+
+    if (dormTeacherOrientations && dormTeacherOrientations.length > 0) {
+      list = dormTeacherOrientations.map((orient) => {
+        const realNotes = (orient.orientationNotes || []).filter(
+          (n: string) =>
+            n &&
+            n.trim() !== "" &&
+            n.trim() !== "-" &&
+            !n.includes("ปิดภาคเรียน") &&
+            !n.includes("ระบบอัตโนมัติ")
+        );
+        const isRealCheck = orient.status === "CHECKED" || orient.status === "HOME_BREAK";
+        const hasRealOrientation = realNotes.length > 0;
+
+        // หอพักไม่มีการเช็คยอดและอบรม ไม่ต้องระบุชื่อครู ให้ใช้ - แทน และห้ามใช้ชื่อที่มาจากข้อมูลตัวอย่าง
+        let checkedBy = "-";
+        if (isRealCheck || hasRealOrientation) {
+          if (orient.checkedBy && !isPlaceholderTeacherName(orient.checkedBy)) {
+            checkedBy = orient.checkedBy.trim();
+          }
+        }
+
+        return {
+          ...orient,
+          status: orient.status || "PENDING",
+          checkedBy,
+          orientationNotes: realNotes
+        };
+      });
+    } else {
+      list = (dorms || []).map((dorm) => {
+        const att = attendanceRecords.find(
+          (a) =>
+            (a.date === summaryDate || a.id?.startsWith(`${summaryDate}_`)) &&
+            (a.dormId === dorm.id || isDormMatch(dorm, a.dormId))
+        );
+        const realNotes = (att?.teacherOrientationNotes || []).filter(
+          (n: string) =>
+            n &&
+            n.trim() !== "" &&
+            n.trim() !== "-" &&
+            !n.includes("ปิดภาคเรียน") &&
+            !n.includes("ระบบอัตโนมัติ")
+        );
+        const isRealCheck = Boolean(att && (att.status === "CHECKED" || att.status === "HOME_BREAK"));
+        const hasRealOrientation = realNotes.length > 0;
+
+        // หอพักไม่มีการเช็คยอดและอบรม ไม่ต้องระบุชื่อครู ให้ใช้ - แทน และห้ามใช้ชื่อที่มาจากข้อมูลตัวอย่าง
+        let checkedBy = "-";
+        if (isRealCheck || hasRealOrientation) {
+          if (att?.checkedBy && !isPlaceholderTeacherName(att.checkedBy)) {
+            checkedBy = att.checkedBy.trim();
+          }
+        }
+
+        return {
+          dormId: dorm.id,
+          dormName: dorm.name,
+          checkedBy,
+          checkedAt: isRealCheck ? att?.checkedAt : undefined,
+          status: att?.status || "PENDING",
+          orientationNotes: realNotes
+        };
+      });
     }
-    return (a.dormName || "").localeCompare(b.dormName || "", "th", { numeric: true });
-  });
+
+    return [...list].sort((a, b) => {
+      const numA = parseInt((a.dormName || a.dormId || "").replace(/\D/g, ""), 10);
+      const numB = parseInt((b.dormName || b.dormId || "").replace(/\D/g, ""), 10);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return (a.dormName || "").localeCompare(b.dormName || "", "th", { numeric: true });
+    });
+  }, [dormTeacherOrientations, dorms, attendanceRecords, summaryDate]);
 
   const handleExportSheets = async () => {
     setIsExporting(true);
@@ -978,7 +1056,9 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                         </div>
                         <div className="text-[11px] sm:text-xs text-slate-600 font-medium">
                           <span>ครูผู้บันทึก: </span>
-                          <span className="text-slate-900 font-bold">{orient.checkedBy || "ครูประจำหอพัก"}</span>
+                          <span className={orient.checkedBy && orient.checkedBy !== "-" ? "text-slate-900 font-bold" : "text-slate-400 font-bold"}>
+                            {orient.checkedBy && orient.checkedBy.trim() !== "" ? orient.checkedBy : "-"}
+                          </span>
                         </div>
                       </div>
 
@@ -1073,7 +1153,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                   absentStudentsList.map((s) => (
                     <tr key={s.studentId} className="hover:bg-gray-50">
                       <td className="py-2 px-3 text-center font-bold text-gray-700 border-r border-gray-300">{s.no}</td>
-                      <td className="py-2 px-3 font-mono font-bold text-gray-800 border-r border-gray-300">{s.studentId}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-gray-800 border-r border-gray-300">{formatStudentId(s.studentId)}</td>
                       <td className="py-2 px-3 font-bold text-gray-900 border-r border-gray-300">{s.fullName}</td>
                       <td className="py-2 px-3 font-semibold text-gray-700 border-r border-gray-300">{s.gradeRoom}</td>
                       <td className="py-2 px-3 font-medium text-pink-700 border-r border-gray-300">{s.dormName}</td>

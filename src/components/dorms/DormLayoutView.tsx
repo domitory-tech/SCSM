@@ -11,6 +11,8 @@ import {
   cleanBedValue,
   formatBedDisplay
 } from "../../utils/dormUtils";
+import { formatStudentId } from "../../utils/studentUtils";
+import { isGradeMatch } from "../../utils/dateUtils";
 import { printOrSaveElementAsPdf } from "../../utils/htmlReportExporter";
 import { DormLayoutOverviewModal } from "./DormLayoutOverviewModal";
 import { DormLayoutPrintModal } from "./DormLayoutPrintModal";
@@ -261,6 +263,8 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
             (st) =>
               `${st.title || ""}${st.firstName || ""} ${st.lastName || ""}`.toLowerCase().includes(q) ||
               (st.studentId || "").toLowerCase().includes(q) ||
+              formatStudentId(st.studentId).toLowerCase().includes(q) ||
+              formatStudentId(st.studentId).replace(/^0+/, "").includes(q) ||
               (st.grade || "").toLowerCase().includes(q) ||
               String(st.room || "").includes(q) ||
               (st.dormRoom || "").toLowerCase().includes(q) ||
@@ -271,7 +275,7 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
 
         // Grade filtering
         if (selectedGradeFilter !== "ALL") {
-          roomSts = roomSts.filter((st) => st.grade === selectedGradeFilter);
+          roomSts = roomSts.filter((st) => isGradeMatch(st.grade, selectedGradeFilter));
         }
 
         if (roomSts.length > 0) {
@@ -283,8 +287,8 @@ export const DormLayoutView: React.FC<DormLayoutViewProps> = ({
             const bedB = parseBedNumber(b.dormBed ?? (b as any).bed);
             if (bedA !== bedB) return bedA - bedB;
 
-            const gradeA = parseInt(a.grade.replace(/\D/g, "") || "0", 10);
-            const gradeB = parseInt(b.grade.replace(/\D/g, "") || "0", 10);
+            const gradeA = parseInt(String(a.grade || "").replace(/\D/g, "") || "0", 10);
+            const gradeB = parseInt(String(b.grade || "").replace(/\D/g, "") || "0", 10);
             if (gradeA !== gradeB) return gradeA - gradeB;
 
             const roomA = typeof a.room === "number" ? a.room : parseInt(String(a.room || "0"), 10);

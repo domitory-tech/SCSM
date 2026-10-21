@@ -1,6 +1,7 @@
 import { DormTeacher, SystemSettings, UserProfile } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
 import { isTeacherCheckedBy } from "./dormUtils";
+import { formatStudentId } from "./studentUtils";
 
 export interface DormitorySummaryExportData {
   dormId: string;
@@ -217,7 +218,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
   const absentListRows = absentList.map((st) => `
     <tr class="hover:bg-slate-50 text-xs">
       <td class="py-1.5 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-200">${st.index}</td>
-      <td class="py-1.5 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${st.studentId}</td>
+      <td class="py-1.5 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${formatStudentId(st.studentId)}</td>
       <td class="py-1.5 px-3 font-bold text-slate-900 border-r border-slate-200">${st.fullName}</td>
       <td class="py-1.5 px-2.5 text-center font-bold text-slate-800 border-r border-slate-200">${st.gradeRoom}</td>
       <td class="py-1.5 px-3 font-medium text-slate-800">${st.reason}</td>

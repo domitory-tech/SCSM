@@ -1,5 +1,6 @@
 import { DailyAttendance, Dormitory, Student, SystemSettings } from "../types";
 import { formatGradeRoomShort, getDaysInMonth, THAI_DAYS_SHORT, THAI_MONTHS } from "./dateUtils";
+import { formatStudentId } from "./studentUtils";
 
 // Thai National Fixed Holidays (Month is 1-indexed)
 export const THAI_NATIONAL_HOLIDAYS: Record<string, string> = {
@@ -238,11 +239,12 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
 
       if (att.records && Array.isArray(att.records)) {
         att.records.forEach((rec) => {
-          if (!studentDailyCodes[rec.studentId]) {
-            studentDailyCodes[rec.studentId] = {};
+          const sid = formatStudentId(rec.studentId);
+          if (!studentDailyCodes[sid]) {
+            studentDailyCodes[sid] = {};
           }
           const mappedCode = ATTENDANCE_CODE_MAPPING[rec.status] || (rec.status ? "✓" : "");
-          studentDailyCodes[rec.studentId][dayNum] = mappedCode;
+          studentDailyCodes[sid][dayNum] = mappedCode;
         });
       }
     });
@@ -286,7 +288,8 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
             let cellStyle = "";
 
             if (mode === "filled") {
-              const code = studentDailyCodes[std.studentId]?.[day] || "";
+              const sid = formatStudentId(std.studentId);
+              const code = studentDailyCodes[sid]?.[day] || studentDailyCodes[std.studentId]?.[day] || "";
               if (code === "✓") {
                 cellContent = "✓";
                 cellStyle = "color: #059669; font-weight: bold; font-size: 11px;";
