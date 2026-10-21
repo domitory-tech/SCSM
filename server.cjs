@@ -29,6 +29,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // server.ts
 var server_exports = {};
 __export(server_exports, {
+  formatStudentId: () => formatStudentId,
   loadDbFromDisk: () => loadDbFromDisk,
   saveDbToDisk: () => saveDbToDisk
 });
@@ -300,6 +301,14 @@ function saveDbToDisk() {
     console.error("Failed to save primary database to disk:", err);
   }
 }
+function formatStudentId(id) {
+  if (id === void 0 || id === null) return "";
+  const s = String(id).trim();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return s.padStart(5, "0");
+  if (s.length < 5) return s.padStart(5, "0");
+  return s;
+}
 function loadDbFromDisk() {
   try {
     if (import_fs.default.existsSync(DB_FILE_PATH)) {
@@ -307,11 +316,26 @@ function loadDbFromDisk() {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.dormitories) && parsed.dormitories.length > 0) dormitories = parsed.dormitories;
       const st = parsed.students || parsed.studentsStore;
-      if (Array.isArray(st)) studentsStore = st;
+      if (Array.isArray(st)) {
+        studentsStore = st.map((s) => ({
+          ...s,
+          studentId: formatStudentId(s.studentId)
+        }));
+      }
       const nt = parsed.notices || parsed.noticesStore;
       if (Array.isArray(nt)) noticesStore = nt;
       const att = parsed.attendance || parsed.attendanceStore;
-      if (att && typeof att === "object") attendanceStore = att;
+      if (att && typeof att === "object") {
+        for (const k of Object.keys(att)) {
+          if (Array.isArray(att[k]?.records)) {
+            att[k].records = att[k].records.map((r) => ({
+              ...r,
+              studentId: formatStudentId(r.studentId)
+            }));
+          }
+        }
+        attendanceStore = att;
+      }
       const us = parsed.users || parsed.usersStore;
       if (Array.isArray(us) && us.length > 0) usersStore = us;
       if (parsed.systemSettings && typeof parsed.systemSettings === "object") systemSettings = parsed.systemSettings;
@@ -440,7 +464,8 @@ app.put("/api/students/:id", (req, res) => {
   if (index === -1) return res.status(404).json({ success: false, message: "Student not found" });
   studentsStore[index] = {
     ...studentsStore[index],
-    ...req.body
+    ...req.body,
+    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId)
   };
   saveDbToDisk();
   res.json({ success: true, data: studentsStore[index], message: "\u0E41\u0E01\u0E49\u0E44\u0E02\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E19\u0E31\u0E01\u0E40\u0E23\u0E35\u0E22\u0E19\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22" });
@@ -721,7 +746,7 @@ app.post("/api/students/import", (req, res) => {
   const dorm = dormitories.find((d) => d.id === dormId);
   const newStudentsList = students.map((s, idx) => ({
     id: `std-${Date.now()}-${idx}`,
-    studentId: String(s.studentId || `${66e3 + idx}`),
+    studentId: formatStudentId(s.studentId) || String(66e3 + idx).padStart(5, "0"),
     no: Number(s.no) || idx + 1,
     title: s.title || (dorm?.type === "male" ? "\u0E19\u0E32\u0E22" : "\u0E19\u0E32\u0E07\u0E2A\u0E32\u0E27"),
     firstName: s.firstName,
@@ -743,7 +768,7 @@ app.post("/api/students/import", (req, res) => {
 app.post("/api/students", (req, res) => {
   const newStudent = {
     id: `std-${Date.now()}`,
-    studentId: req.body.studentId,
+    studentId: formatStudentId(req.body.studentId) || `0${Math.floor(1e3 + Math.random() * 8999)}`,
     no: Number(req.body.no) || 1,
     title: req.body.title || "\u0E19\u0E32\u0E22",
     firstName: req.body.firstName,
@@ -1142,6 +1167,7 @@ async function startServer() {
 startServer();
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  formatStudentId,
   loadDbFromDisk,
   saveDbToDisk
 });
