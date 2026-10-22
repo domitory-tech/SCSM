@@ -45,3 +45,56 @@ export function generateDefault5DigitStudentId(seed?: number): string {
   const rand = Math.floor(1000 + Math.random() * 8999);
   return `0${rand}`;
 }
+
+/**
+ * Normalizes a grade level string/number to always have "ม." prefix for secondary school levels.
+ * e.g., "1" -> "ม.1", "2" -> "ม.2", 1 -> "ม.1", "ม1" -> "ม.1", "ม. 1" -> "ม.1", "ชั้น 1" -> "ม.1"
+ * If already formatted (e.g. "ม.1" or "ป.1"), preserves it cleanly.
+ */
+export function formatGrade(grade?: string | number | null): string {
+  if (grade === undefined || grade === null) return "ม.1";
+  const str = String(grade).trim();
+  if (!str) return "ม.1";
+
+  // Check if standard "ม.1" - "ม.6"
+  if (/^ม\.[1-6]$/.test(str)) {
+    return str;
+  }
+
+  // If has "ม." or "ม" followed by digits, e.g. "ม.1", "ม. 1", "ม1", "มัธยมศึกษาปีที่ 1", "ชั้น ม.1"
+  const mMatch = str.match(/(?:มัธยมศึกษาปีที่|ชั้น\s*ม\.?|ม\.?)\s*([1-6])(?:\b|$)/);
+  if (mMatch && mMatch[1]) {
+    return `ม.${mMatch[1]}`;
+  }
+
+  // Primary school e.g. "ป.1"
+  const pMatch = str.match(/(?:ประถมศึกษาปีที่|ชั้น\s*ป\.?|ป\.?)\s*([1-6])(?:\b|$)/);
+  if (pMatch && pMatch[1]) {
+    return `ป.${pMatch[1]}`;
+  }
+
+  // Purely digits e.g. "1" -> "ม.1", "2" -> "ม.2", 1 -> "ม.1"
+  const numMatch = str.match(/^([1-6])(?:\/.*|\b|$)/);
+  if (numMatch && numMatch[1]) {
+    return `ม.${numMatch[1]}`;
+  }
+
+  // Fallback if number > 6 or custom
+  const anyNum = str.match(/\d+/);
+  if (anyNum) {
+    return `ม.${anyNum[0]}`;
+  }
+
+  return str.startsWith("ม.") ? str : `ม.${str}`;
+}
+
+/**
+ * Checks whether a student's grade string is missing the "ม." (or "ป.") prefix
+ * (e.g. "1", "2", "3", "ม1", etc.)
+ */
+export function isGradeMissingPrefix(grade?: string | number | null): boolean {
+  if (grade === undefined || grade === null) return false;
+  const str = String(grade).trim();
+  if (!str) return false;
+  return !/^[มป]\.[1-6]$/.test(str);
+}

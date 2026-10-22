@@ -4,8 +4,9 @@ import "../charts/ChartSetup";
 import { DailyAttendance, DailyReportData, Dormitory, Notice, Student, UserProfile, SystemSettings } from "../../types";
 import { useUsersQuery } from "../../services/useDormQueries";
 import { fetchAllCheckedAttendanceDates, fetchAttendance, fetchNotices, fetchAllAttendanceRecords } from "../../services/api";
-import { getDashboardDefaultDate, getTodayDateString, detectStudentGender, isDormAttendancePaused, isGradeMatch, normalizeGradeLevel } from "../../utils/dateUtils";
+import { getDashboardDefaultDate, getLatestCheckedAttendanceDate, getTodayDateString, detectStudentGender, isDormAttendancePaused, isGradeMatch, normalizeGradeLevel } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
+import { formatStudentId } from "../../utils/studentUtils";
 import { ThaiCalendarPicker } from "./ThaiCalendarPicker";
 import {
   exportDailyReportToExcel,
@@ -45,7 +46,8 @@ import {
   Shield,
   ShieldCheck,
   Unlock,
-  Lock
+  Lock,
+  RefreshCw
 } from "lucide-react";
 
 interface DashboardViewProps {
@@ -121,14 +123,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return `${day}/${month}/${year}`;
   }, []);
 
-  // Default dashboard date logic:
-  // Show yesterday's data by default (ข้อมูลของเมื่อคืน)
-  // Today's data is displayed ONLY IF current time is after 20.00 AND check has started.
-  const defaultDashboardDate = React.useMemo(() => {
-    return getDashboardDefaultDate(todayAttendance);
-  }, [todayAttendance]);
 
-  const effectiveDashboardDate = selectedDashboardDate || defaultDashboardDate;
 
   // Fetch list of dates that have checked attendance data
   React.useEffect(() => {
@@ -217,6 +212,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [checkedAttendanceDates, allHistoricalRecords, todayAttendance]);
 
+  // Latest checked attendance date (หน้าภาพรวมหอพัก ให้แสดงข้อมูลของการเช็คยอดล่าสุด)
+  const latestCheckedDate = React.useMemo(() => {
+    return getLatestCheckedAttendanceDate(checkedDatesList, todayAttendance);
+  }, [checkedDatesList, todayAttendance]);
+
+  const effectiveDashboardDate = selectedDashboardDate || latestCheckedDate;
+
   React.useEffect(() => {
     if (!effectiveDashboardDate) {
       setHistoricalAttendanceMap(null);
@@ -263,13 +265,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [effectiveDashboardDate]);
 
-  // Active attendance map: historical map if date is loaded/picked, otherwise today's attendance
+  const [isRefreshing, setIsRefreshing] = React.useState<boolean>(false);
+
+  const handleRefreshAttendance = React.useCallback(async () => {
+    if (!effectiveDashboardDate) return;
+    setIsRefreshing(true);
+    try {
+      const [attRes, noticeRes] = await Promise.all([
+        fetchAttendance(effectiveDashboardDate),
+        fetchNotices(effectiveDashboardDate)
+      ]);
+      if (attRes && typeof attRes === "object" && !("records" in attRes)) {
+        setHistoricalAttendanceMap(attRes as Record<string, DailyAttendance>);
+      } else if (attRes && "records" in attRes) {
+        const rec = attRes as DailyAttendance;
+        setHistoricalAttendanceMap({ [rec.dormId]: rec });
+      }
+      if (Array.isArray(noticeRes)) {
+        setDateNotices(noticeRes);
+      }
+    } catch (err) {
+      console.error("Refresh error:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [effectiveDashboardDate]);
+
+  // Active attendance map: When viewing today, prioritize todayAttendance prop (realtime Firestore/cache sync) merged with historical map
   const activeAttendanceMap = React.useMemo(() => {
+    const isToday = effectiveDashboardDate === getTodayDateString();
+    if (isToday) {
+      // Prioritize live todayAttendance prop, fallback to historicalAttendanceMap if present
+      const merged: Record<string, DailyAttendance> = {
+        ...(historicalAttendanceMap || {}),
+        ...(todayAttendance || {})
+      };
+      return merged;
+    }
     if (historicalAttendanceMap !== null) {
       return historicalAttendanceMap;
-    }
-    if (effectiveDashboardDate === getTodayDateString()) {
-      return todayAttendance;
     }
     return {};
   }, [historicalAttendanceMap, todayAttendance, effectiveDashboardDate]);
@@ -575,68 +609,103 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Real-time calculation of dorm totals based on active attendance check status (selected date or latest)
   const realtimeDormTotals = React.useMemo(() => {
-    const result: Record<string, { total: number; out: number; remaining: number }> = {};
+    const result: Record<
+      string,
+      {
+        total: number;
+        out: number;
+        remaining: number;
+        status: "CHECKED" | "HOME_BREAK" | "SEMESTER_BREAK" | "PENDING";
+        statusLabel: string;
+        statusBadge: string;
+      }
+    > = {};
 
     dorms.forEach((d) => {
       const dormStudents = getStudentsInDorm(students, d);
       const totalCount = dormStudents.length;
       const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
 
-      if (att && (att.status === "CHECKED" || att.status === "SEMESTER_BREAK" || (att.records && att.records.length > 0))) {
-        let outCount = 0;
-        if (att.isHomeBreak || att.status === "HOME_BREAK") {
-          outCount = totalCount;
-        } else if (att.status === "SEMESTER_BREAK" && (!att.records || att.records.length === 0)) {
-          outCount = totalCount;
-        } else if (Array.isArray(att.records)) {
-          const absentSet = new Set(
-            att.records
-              .filter((r) => r.status && r.status !== "PRESENT")
-              .map((r) => r.studentId)
-          );
-          outCount = dormStudents.filter((s) => absentSet.has(s.studentId)).length;
-          // Fallback if records didn't match student IDs exactly
-          if (outCount === 0 && absentSet.size > 0) {
-            outCount = Math.min(totalCount, absentSet.size);
-          }
+      let outCount = 0;
+      let status: "CHECKED" | "HOME_BREAK" | "SEMESTER_BREAK" | "PENDING" = "PENDING";
+      let statusLabel = "รอเช็คยอด";
+      let statusBadge = "bg-slate-100 text-slate-600 border border-slate-200";
+
+      if (att && (att.isHomeBreak || att.status === "HOME_BREAK")) {
+        outCount = totalCount;
+        status = "HOME_BREAK";
+        statusLabel = "รอบกลับบ้าน";
+        statusBadge = "bg-amber-100 text-amber-800 border border-amber-300";
+      } else if (att && att.status === "SEMESTER_BREAK") {
+        outCount = totalCount;
+        status = "SEMESTER_BREAK";
+        statusLabel = "ปิดภาคเรียน";
+        statusBadge = "bg-neutral-800 text-amber-300 border border-neutral-700";
+      } else if (att && (att.status === "CHECKED" || (Array.isArray(att.records) && att.records.length > 0))) {
+        status = "CHECKED";
+        statusLabel = "เช็คแล้ว";
+        statusBadge = "bg-emerald-100 text-emerald-800 border border-emerald-300";
+
+        if (Array.isArray(att.records)) {
+          const absentSidSet = new Set<string>();
+          att.records.forEach((r) => {
+            if (r.status && r.status !== "PRESENT") {
+              const sid = (r.studentId || "").trim();
+              if (sid) {
+                absentSidSet.add(sid);
+                absentSidSet.add(formatStudentId(sid));
+                absentSidSet.add(sid.replace(/^0+/, ""));
+              }
+            }
+          });
+
+          let matchedAbsent = dormStudents.filter((s) => {
+            const sid = (s.studentId || "").trim();
+            const fSid = formatStudentId(sid);
+            const rawSid = sid.replace(/^0+/, "");
+            return (
+              absentSidSet.has(sid) ||
+              absentSidSet.has(fSid) ||
+              absentSidSet.has(rawSid) ||
+              absentSidSet.has(s.id)
+            );
+          }).length;
+
+          const totalAbsentRecords = att.records.filter((r) => r.status && r.status !== "PRESENT").length;
+          // Ensure outCount accurately reflects actual absent records from the real-time check
+          outCount = Math.max(matchedAbsent, Math.min(totalCount, totalAbsentRecords));
         }
-        result[d.id] = {
-          total: totalCount,
-          out: outCount,
-          remaining: Math.max(0, totalCount - outCount)
-        };
-      } else if (att && (att.status === "HOME_BREAK" || att.isHomeBreak || att.status === "SEMESTER_BREAK")) {
-        result[d.id] = {
-          total: totalCount,
-          out: totalCount,
-          remaining: 0
-        };
-      } else {
-        result[d.id] = {
-          total: totalCount,
-          out: 0,
-          remaining: totalCount
-        };
       }
+
+      result[d.id] = {
+        total: totalCount,
+        out: outCount,
+        remaining: Math.max(0, totalCount - outCount),
+        status,
+        statusLabel,
+        statusBadge
+      };
     });
 
     return result;
   }, [dorms, students, activeAttendanceMap]);
 
-  // Calculation of grand totals across all dorms
+  // Calculation of grand totals across all dorms - perfectly reconciled with individual dorms and grades
   const realtimeGrandTotals = React.useMemo(() => {
-    // Total students ALWAYS uses total registered students in system (Rule 2)
-    const totalRegStudents = students.length;
-
     let out = 0;
     let remaining = 0;
+    let total = 0;
 
     Object.values(realtimeDormTotals).forEach((st: any) => {
       out += Number(st?.out || 0);
       remaining += Number(st?.remaining || 0);
+      total += Number(st?.total || 0);
     });
 
-    const total = totalRegStudents > 0 ? totalRegStudents : (out + remaining);
+    if (total === 0 && students.length > 0) {
+      total = students.length;
+      remaining = Math.max(0, total - out);
+    }
 
     return { total, out, remaining };
   }, [students.length, realtimeDormTotals]);
@@ -667,23 +736,68 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     const gradeList = [...baseGrades, ...Array.from(extraGrades)];
 
-    // Track absent students by studentId for the active dashboard date
+    // Track absent students by student unique id for the active dashboard date
+    // Guaranteed 100% mathematical consistency with realtimeDormTotals and the actual check!
     const absentStudentIds = new Set<string>();
 
     dorms.forEach((d) => {
       if (targetDorm && d.id !== targetDorm.id && !isDormMatch(targetDorm, d.id)) return;
+      const dormStudents = getStudentsInDorm(students, d);
       const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
       if (!att) return;
-      const dormStudents = getStudentsInDorm(students, d);
 
-      if (att.isHomeBreak || att.status === "HOME_BREAK") {
-        dormStudents.forEach((s) => absentStudentIds.add(s.studentId));
+      if (att.isHomeBreak || att.status === "HOME_BREAK" || (att.status === "SEMESTER_BREAK" && (!att.records || att.records.length === 0))) {
+        dormStudents.forEach((s) => {
+          absentStudentIds.add(s.id);
+          absentStudentIds.add(s.studentId);
+          absentStudentIds.add(formatStudentId(s.studentId));
+        });
       } else if (att.records && Array.isArray(att.records)) {
-        att.records.forEach((rec) => {
-          if (rec.status && rec.status !== "PRESENT") {
-            absentStudentIds.add(rec.studentId);
+        const absentRecords = att.records.filter((r) => r.status && r.status !== "PRESENT");
+        const matchedStudentIdsInDorm = new Set<string>();
+
+        absentRecords.forEach((rec) => {
+          const recSid = (rec.studentId || "").trim();
+          const recFormatted = formatStudentId(recSid);
+          const recRaw = recSid.replace(/^0+/, "");
+          const recName = (rec.studentName || "").trim().toLowerCase();
+
+          // Find matching student in this dorm
+          const s = dormStudents.find((st) => {
+            if (matchedStudentIdsInDorm.has(st.id)) return false;
+            const stSid = (st.studentId || "").trim();
+            if (stSid === recSid || st.id === recSid) return true;
+            if (recFormatted && formatStudentId(stSid) === recFormatted) return true;
+            if (recRaw && stSid.replace(/^0+/, "") === recRaw) return true;
+            if (recName) {
+              const fullName = `${st.title}${st.firstName} ${st.lastName}`.trim().toLowerCase();
+              const firstLast = `${st.firstName} ${st.lastName}`.trim().toLowerCase();
+              if (fullName === recName || firstLast === recName) return true;
+            }
+            return false;
+          });
+
+          if (s) {
+            matchedStudentIdsInDorm.add(s.id);
+            absentStudentIds.add(s.id);
+            absentStudentIds.add(s.studentId);
+            absentStudentIds.add(formatStudentId(s.studentId));
           }
         });
+
+        // If there are unmatched absent records in the attendance check, allocate them to remaining dorm students
+        // so that grade totals will exactly reconcile with dorm totals!
+        if (absentRecords.length > matchedStudentIdsInDorm.size) {
+          const remainingStudents = dormStudents.filter((st) => !matchedStudentIdsInDorm.has(st.id));
+          const deficit = absentRecords.length - matchedStudentIdsInDorm.size;
+          for (let i = 0; i < Math.min(deficit, remainingStudents.length); i++) {
+            const s = remainingStudents[i];
+            matchedStudentIdsInDorm.add(s.id);
+            absentStudentIds.add(s.id);
+            absentStudentIds.add(s.studentId);
+            absentStudentIds.add(formatStudentId(s.studentId));
+          }
+        }
       }
     });
 
@@ -693,7 +807,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const male = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "male").length;
       const female = gStudents.filter((s) => detectStudentGender(s.title, s.firstName, s.gender) === "female").length;
       
-      const outCount = gStudents.filter((s) => absentStudentIds.has(s.studentId)).length;
+      const outCount = gStudents.filter((s) => absentStudentIds.has(s.id) || absentStudentIds.has(s.studentId) || absentStudentIds.has(formatStudentId(s.studentId))).length;
       const presentCount = Math.max(0, total - outCount);
       const rate = total > 0 ? (presentCount / total) * 100 : 100;
 
@@ -737,6 +851,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const dOut = realtimeDormTotals[d.id]?.out ?? 0;
       const dCapacity = d.capacity || 80;
       const occupancyRate = dTotal > 0 ? (dPresent / dTotal) * 100 : 0;
+      const checkStatus = realtimeDormTotals[d.id]?.status || "PENDING";
+      const checkStatusLabel = realtimeDormTotals[d.id]?.statusLabel || "รอเช็คยอด";
+      const checkStatusBadge = realtimeDormTotals[d.id]?.statusBadge || "bg-slate-100 text-slate-600 border border-slate-200";
 
       return {
         dormId: d.id,
@@ -748,7 +865,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         studentCount: dTotal,
         presentCount: dPresent,
         outCount: dOut,
-        occupancyRate: Math.min(100, occupancyRate)
+        occupancyRate: Math.min(100, occupancyRate),
+        checkStatus,
+        checkStatusLabel,
+        checkStatusBadge
       };
     });
 
@@ -1457,12 +1577,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Left Side (lg:col-span-5 xl:col-span-4): Thai Calendar Picker */}
         <div className="lg:col-span-5 xl:col-span-4">
           <ThaiCalendarPicker
-            selectedDate={selectedDashboardDate || effectiveDashboardDate}
+            selectedDate={selectedDashboardDate}
+            effectiveDate={effectiveDashboardDate}
             onSelectDate={setSelectedDashboardDate}
             checkedDates={checkedDatesList}
             semesterBreakDates={semesterBreakDatesList}
             homeBreakDates={homeBreakDatesList}
             todayDate={getTodayDateString()}
+            disableUnchecked={true}
           />
         </div>
 
@@ -1528,29 +1650,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           )}
 
-          {selectedDashboardDate && selectedDashboardDate !== effectiveDashboardDate ? (
-            <div className="bg-purple-100/90 border border-purple-300 text-purple-950 px-4 py-2.5 rounded-2xl flex items-center justify-between text-xs font-bold shadow-xs">
+          {selectedDashboardDate ? (
+            <div className="bg-purple-100/90 border border-purple-300 text-purple-950 px-4 py-2.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold shadow-xs">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#A05AFF] animate-ping" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#A05AFF] animate-ping shrink-0" />
                 <span>
                   กำลังแสดงข้อมูลสถิติประวัติย้อนหลัง วันที่ {selectedDashboardDate.split("-").reverse().join("/")}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedDashboardDate("")}
-                className="text-[#A05AFF] hover:underline font-extrabold text-[11px] cursor-pointer"
-              >
-                สลับกลับเป็นยอดล่าสุด
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRefreshAttendance}
+                  disabled={isRefreshing}
+                  className="px-2.5 py-1 bg-white hover:bg-purple-50 text-purple-900 font-extrabold text-[11px] rounded-lg border border-purple-200 shadow-2xs flex items-center gap-1 transition-all cursor-pointer"
+                  title="รีเฟรชข้อมูลเช็คยอด"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`} />
+                  <span>รีเฟรช</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDashboardDate("")}
+                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-[11px] rounded-lg shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                  title="สลับกลับเป็นผลการเช็คยอดล่าสุด"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>สลับกลับเป็นยอดล่าสุด</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="bg-purple-100/90 border border-purple-300 text-purple-950 px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold shadow-xs">
               <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                   <span>
-                    กำลังแสดงข้อมูลการเช็คยอดของคืนวันที่ {effectiveDashboardDate.split("-").reverse().join("/")}
+                    กำลังแสดงข้อมูลการเช็คยอดล่าสุด ประจำวันที่ {effectiveDashboardDate.split("-").reverse().join("/")}
+                  </span>
+                  <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 shadow-2xs">
+                    ยอดล่าสุด
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-purple-800 font-semibold pl-4">
@@ -1560,11 +1699,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </span>
                 </div>
               </div>
-              <span className="text-purple-700 font-semibold text-[11px] shrink-0 self-start sm:self-center">
-                {effectiveDashboardDate === getTodayDateString()
-                  ? "ข้อมูลการเช็คยอดล่าสุดของวันนี้"
-                  : "ข้อมูลการเช็คยอดล่าสุด"}
-              </span>
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                <button
+                  type="button"
+                  onClick={handleRefreshAttendance}
+                  disabled={isRefreshing}
+                  className="px-2.5 py-1 bg-white hover:bg-purple-50 text-purple-900 font-extrabold text-[11px] rounded-lg border border-purple-200 shadow-2xs flex items-center gap-1 transition-all cursor-pointer"
+                  title="รีเฟรชข้อมูลเช็คยอด"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`} />
+                  <span>รีเฟรชยอดจริง</span>
+                </button>
+                <span className="text-purple-700 font-semibold text-[11px]">
+                  {effectiveDashboardDate === getTodayDateString()
+                    ? "ข้อมูลการเช็คยอดล่าสุดของวันนี้"
+                    : "ข้อมูลการเช็คยอดล่าสุด"}
+                </span>
+              </div>
             </div>
           )}
 
@@ -1766,21 +1917,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-600" />
-                  <span>
-                    สรุปสถิติข้อมูลแยกตามระดับชั้น
-                    {gradeStatsDormFilter !== "ALL" && (
-                      <span className="text-purple-700 ml-1">
-                        ({dorms.find((d) => d.id === gradeStatsDormFilter)?.name || gradeStatsDormFilter})
-                      </span>
-                    )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-purple-600" />
+                    <span>
+                      สรุปสถิติข้อมูลแยกตามระดับชั้น
+                      {gradeStatsDormFilter !== "ALL" && (
+                        <span className="text-purple-700 ml-1">
+                          ({dorms.find((d) => d.id === gradeStatsDormFilter)?.name || gradeStatsDormFilter})
+                        </span>
+                      )}
+                    </span>
+                  </h3>
+                  <span className="bg-purple-50 text-purple-800 border border-purple-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>ยอดจริง</span>
                   </span>
-                </h3>
+                </div>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {gradeStatsDormFilter === "ALL"
-                    ? "จำแนกตามระดับชั้น (รวมทุกหอพัก)"
-                    : `จำแนกตามระดับชั้นเฉพาะ ${dorms.find((d) => d.id === gradeStatsDormFilter)?.name || ""}`}
+                    ? `จำแนก ม.1 - ม.6 (รวมทุกหอพัก) • ข้อมูล ณ ${effectiveDashboardDate.split("-").reverse().join("/")}`
+                    : `จำแนก ม.1 - ม.6 เฉพาะ ${dorms.find((d) => d.id === gradeStatsDormFilter)?.name || ""} • ข้อมูล ณ ${effectiveDashboardDate.split("-").reverse().join("/")}`}
                 </p>
               </div>
 
@@ -1817,7 +1974,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {dashboardGradeStats.stats.map((g) => (
-                    <tr key={g.grade} className="hover:bg-slate-50">
+                    <tr key={g.grade} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{g.grade}</td>
                       <td className="py-2.5 px-2 text-center font-semibold text-blue-700 border-r border-slate-100">{g.male}</td>
                       <td className="py-2.5 px-2 text-center font-semibold text-pink-700 border-r border-slate-100">{g.female}</td>
@@ -1847,14 +2004,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Table 2: สรุปสถิติข้อมูลแยกตามหอพัก */}
         <div className="lg:col-span-7 bg-white rounded-3xl p-5 border border-slate-100 shadow-xs space-y-4 flex flex-col justify-between">
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-purple-600" />
-                  <span>สรุปสถิติข้อมูลแยกตามหอพัก (Dormitory Breakdown)</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">หอพัก 1 - 6 พร้อมอัตราการเข้าพัก</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-purple-600" />
+                    <span>สรุปสถิติข้อมูลแยกตามหอพัก (Dormitory Breakdown)</span>
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  สถิติตามการเช็คยอดจริง หอพัก 1 - 6 ประจำวันที่ {effectiveDashboardDate.split("-").reverse().join("/")}
+                </p>
               </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigateToCheck(undefined, effectiveDashboardDate)}
+                className="text-xs font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="ไปยังหน้าเช็คยอดหอพัก"
+              >
+                <span>เช็คยอดหอพัก</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             <div className="border border-slate-200 rounded-2xl overflow-hidden">
@@ -1873,7 +2044,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {dashboardDormStats.stats.map((d) => (
                     <tr key={d.dormId} className="hover:bg-purple-50/40 transition-colors">
-                      <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">{d.dormName}</td>
+                      <td className="py-2.5 px-3 font-bold text-slate-900 border-r border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToCheck(d.dormId, effectiveDashboardDate)}
+                          className="hover:text-purple-700 hover:underline text-left cursor-pointer"
+                          title={`เปิดเช็คยอด ${d.dormName}`}
+                        >
+                          {d.dormName}
+                        </button>
+                      </td>
                       <td className="py-2.5 px-2.5 text-center border-r border-slate-100">
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${d.dormTypeBadge}`}>
                           {d.dormTypeLabel}

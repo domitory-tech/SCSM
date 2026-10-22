@@ -203,9 +203,11 @@ export const DormStatsModal: React.FC<DormStatsModalProps> = ({
             <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {dorms.map((dorm) => {
                 const stats = realtimeDormTotals[dorm.id] || { remaining: 0, out: 0, total: 0 };
-                const att = activeAttendanceMap[dorm.id];
-                const isChecked = att?.status === "CHECKED";
-                const isHomeBreak = att?.status === "HOME_BREAK";
+                const att = activeAttendanceMap[dorm.id] || Object.values(activeAttendanceMap).find((a) => a && (a.dormId === dorm.id || a.id?.endsWith(`_${dorm.id}`)));
+                const checkStatus = (stats as any).status || att?.status || "PENDING";
+                const isChecked = checkStatus === "CHECKED" || (att?.records && att.records.length > 0 && checkStatus !== "HOME_BREAK" && checkStatus !== "SEMESTER_BREAK");
+                const isHomeBreak = checkStatus === "HOME_BREAK" || att?.isHomeBreak;
+                const isSemesterBreak = checkStatus === "SEMESTER_BREAK";
                 const isMale =
                   dorm.gender === "male" ||
                   dorm.id.includes("1") ||
@@ -220,12 +222,14 @@ export const DormStatsModal: React.FC<DormStatsModalProps> = ({
                         ? "bg-emerald-50/40 border-emerald-200"
                         : isHomeBreak
                         ? "bg-amber-50/40 border-amber-200"
+                        : isSemesterBreak
+                        ? "bg-neutral-900 border-neutral-700 text-white"
                         : "bg-slate-50/80 border-slate-200/80"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-xs font-extrabold text-slate-900 truncate">
+                        <span className={`text-xs font-extrabold truncate ${isSemesterBreak ? "text-white" : "text-slate-900"}`}>
                           {dorm.name}
                         </span>
                         <span
@@ -244,6 +248,10 @@ export const DormStatsModal: React.FC<DormStatsModalProps> = ({
                       ) : isHomeBreak ? (
                         <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
                           รอบกลับบ้าน
+                        </span>
+                      ) : isSemesterBreak ? (
+                        <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                          ปิดภาคเรียน
                         </span>
                       ) : (
                         <span className="bg-slate-200/80 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">

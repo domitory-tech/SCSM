@@ -87,14 +87,16 @@ export function getDashboardDefaultDate(todayAttendanceMap?: Record<string, any>
   const isAfter20 = currentHour >= 20;
 
   let hasTodayCheckStarted = false;
-  if (todayAttendanceMap && Object.keys(todayAttendanceMap).length > 0) {
+  if (todayAttendanceMap && typeof todayAttendanceMap === "object" && Object.keys(todayAttendanceMap).length > 0) {
     const attList = Object.values(todayAttendanceMap);
     hasTodayCheckStarted = attList.some((att) => {
       if (!att) return false;
       return (
         att.status === "CHECKED" ||
         att.status === "HOME_BREAK" ||
-        (att.records && Array.isArray(att.records) && att.records.length > 0)
+        att.status === "SEMESTER_BREAK" ||
+        att.isHomeBreak ||
+        (Array.isArray(att.records) && att.records.length > 0)
       );
     });
   }
@@ -105,6 +107,50 @@ export function getDashboardDefaultDate(todayAttendanceMap?: Record<string, any>
   }
 
   // Otherwise, default to yesterday's date (ข้อมูลของเมื่อคืน)
+  return yesterdayStr;
+}
+
+/**
+ * Returns the most recent date that has checked attendance data.
+ * Checks today first; if not checked today, finds the latest date in checkedDates list <= today.
+ */
+export function getLatestCheckedAttendanceDate(
+  checkedDates: string[] = [],
+  todayAttendanceMap?: Record<string, any> | null
+): string {
+  const todayStr = getTodayDateString();
+  const yesterdayStr = getYesterdayDateString();
+
+  // 1. Check if today has checked attendance or active check
+  let hasTodayChecked = false;
+  if (todayAttendanceMap && typeof todayAttendanceMap === "object" && Object.keys(todayAttendanceMap).length > 0) {
+    const attList = Object.values(todayAttendanceMap);
+    hasTodayChecked = attList.some((att) => {
+      if (!att) return false;
+      return (
+        att.status === "CHECKED" ||
+        att.status === "HOME_BREAK" ||
+        att.status === "SEMESTER_BREAK" ||
+        att.isHomeBreak ||
+        (Array.isArray(att.records) && att.records.length > 0)
+      );
+    });
+  }
+
+  if (hasTodayChecked || checkedDates.includes(todayStr)) {
+    return todayStr;
+  }
+
+  // 2. Look for the most recent checked date in history (<= today)
+  const validDates = checkedDates
+    .filter((d) => d && typeof d === "string" && d <= todayStr)
+    .sort((a, b) => b.localeCompare(a));
+
+  if (validDates.length > 0) {
+    return validDates[0];
+  }
+
+  // 3. Fallback to yesterday or today if no records exist
   return yesterdayStr;
 }
 

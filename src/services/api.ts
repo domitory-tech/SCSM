@@ -29,7 +29,7 @@ import {
 } from "../types";
 import { getTodayDateString, getPreviousDateString, getNextDateString, isGradeMatch } from "../utils/dateUtils";
 import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
-import { formatStudentId, generateDefault5DigitStudentId } from "../utils/studentUtils";
+import { formatStudentId, generateDefault5DigitStudentId, formatGrade } from "../utils/studentUtils";
 
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
 import { DEFAULT_SYSTEM_USERS } from "../data/userProfiles";
@@ -195,6 +195,7 @@ export async function fetchStudents(params?: {
           id: d.id,
           ...raw,
           studentId: formatStudentId(raw.studentId),
+          grade: formatGrade(raw.grade),
           dormBed: bedVal,
           bed: bedVal
         } as Student;
@@ -225,6 +226,7 @@ export async function fetchStudents(params?: {
       return {
         ...s,
         studentId: formatStudentId(s.studentId),
+        grade: formatGrade(s.grade),
         dormBed: bedVal,
         bed: bedVal
       };
@@ -254,7 +256,7 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       firstName: s.firstName || "",
       lastName: s.lastName || "",
       nickname: s.nickname || "",
-      grade: s.grade || "ม.1",
+      grade: formatGrade(s.grade),
       room: Number(s.room) || 1,
       dormId: targetDormId,
       dormRoom: s.dormRoom || "101",
@@ -296,7 +298,7 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
     firstName: studentData.firstName || "",
     lastName: studentData.lastName || "",
     nickname: studentData.nickname || "",
-    grade: studentData.grade || "ม.1",
+    grade: formatGrade(studentData.grade),
     room: Number(studentData.room) || 1,
     dormId: studentData.dormId || "dorm-1",
     dormRoom: studentData.dormRoom || "101",
@@ -320,6 +322,9 @@ export async function updateStudent(id: string, studentData: Partial<Student>): 
   let updated: any = { ...studentData, id };
   if (studentData.studentId !== undefined) {
     updated.studentId = formatStudentId(studentData.studentId);
+  }
+  if (studentData.grade !== undefined) {
+    updated.grade = formatGrade(studentData.grade);
   }
   if (studentData.dormBed !== undefined || (studentData as any).bed !== undefined) {
     const bedVal = (studentData.dormBed !== undefined && studentData.dormBed !== null)

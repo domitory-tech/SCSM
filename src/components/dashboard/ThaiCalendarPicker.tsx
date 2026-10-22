@@ -12,6 +12,8 @@ export interface ThaiCalendarPickerProps {
   title?: string;
   subtitle?: string;
   onNavigateToCheck?: () => void;
+  disableUnchecked?: boolean;
+  effectiveDate?: string;
 }
 
 const THAI_MONTHS = [
@@ -40,7 +42,9 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
   todayDate,
   title = "ปฏิทินรายงานเช็คยอดนักเรียน",
   subtitle = "เลือกวันที่เพื่อดูสถิติและรายงานย้อนหลัง",
-  onNavigateToCheck
+  onNavigateToCheck,
+  disableUnchecked = true,
+  effectiveDate = ""
 }) => {
   // Safe helper to parse "YYYY-MM-DD"
   const parseDateParts = (dateStr: string) => {
@@ -55,25 +59,28 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
   const initialParsed = useMemo(() => {
     const fromSelected = parseDateParts(selectedDate);
     if (fromSelected) return fromSelected;
+    const fromEffective = parseDateParts(effectiveDate);
+    if (fromEffective) return fromEffective;
     const fromToday = parseDateParts(todayDate);
     if (fromToday) return fromToday;
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate() };
-  }, [selectedDate, todayDate]);
+  }, [selectedDate, effectiveDate, todayDate]);
 
   const [viewYear, setViewYear] = useState<number>(initialParsed.year);
   const [viewMonth, setViewMonth] = useState<number>(initialParsed.month);
 
-  // Sync view when selectedDate changes externally
+  // Sync view when selectedDate or effectiveDate changes externally
   useEffect(() => {
-    if (selectedDate) {
-      const parsed = parseDateParts(selectedDate);
+    const target = selectedDate || effectiveDate;
+    if (target) {
+      const parsed = parseDateParts(target);
       if (parsed) {
         setViewYear(parsed.year);
         setViewMonth(parsed.month);
       }
     }
-  }, [selectedDate]);
+  }, [selectedDate, effectiveDate]);
 
   const checkedSet = useMemo(() => new Set(checkedDates), [checkedDates]);
   const semesterBreakSet = useMemo(() => new Set(semesterBreakDates), [semesterBreakDates]);
@@ -149,7 +156,7 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
       const hasAttendance = checkedSet.has(dateStr);
       const isSemesterBreak = semesterBreakSet.has(dateStr);
       const isHomeBreak = homeBreakSet.has(dateStr) && !isSemesterBreak;
-      const isSelected = selectedDate === dateStr;
+      const isSelected = selectedDate ? selectedDate === dateStr : (effectiveDate ? effectiveDate === dateStr : false);
       const isToday = dateStr === todayDate;
 
       days.push({
@@ -165,7 +172,11 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
     }
 
     return days;
-  }, [viewYear, viewMonth, todayDate, checkedSet, semesterBreakSet, homeBreakSet, selectedDate]);
+  }, [viewYear, viewMonth, todayDate, checkedSet, semesterBreakSet, homeBreakSet, selectedDate, effectiveDate]);
+
+  const yesterdayStr = getYesterdayDateString();
+  const isYesterdayChecked = checkedSet.has(yesterdayStr) || semesterBreakSet.has(yesterdayStr) || homeBreakSet.has(yesterdayStr);
+  const isTodayChecked = checkedSet.has(todayDate) || semesterBreakSet.has(todayDate) || homeBreakSet.has(todayDate);
 
   return (
     <div className="bg-white rounded-3xl p-4 lg:p-5 border border-purple-100 shadow-md flex flex-col justify-between h-full">
@@ -187,11 +198,11 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectDate("")}
-                className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-900 text-[10px] font-extrabold rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-extrabold rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-xs"
                 title="สลับเป็นผลการเช็คยอดล่าสุด"
               >
-                <RefreshCw className="w-2.5 h-2.5 text-[#A05AFF]" />
-                <span>ยอดล่าสุด</span>
+                <RefreshCw className="w-2.5 h-2.5" />
+                <span>กลับสู่ยอดล่าสุด</span>
               </button>
             )}
           </div>
@@ -201,23 +212,39 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
         <div className="grid grid-cols-2 gap-1.5 mb-2.5">
           <button
             type="button"
+            disabled={disableUnchecked && !isYesterdayChecked}
             onClick={handleJumpToYesterday}
-            className={`py-1 px-2 text-[10px] font-bold rounded-xl border transition-all cursor-pointer text-center ${
-              selectedDate === getYesterdayDateString()
-                ? "bg-purple-600 text-white border-purple-600 shadow-xs"
-                : "bg-slate-50 hover:bg-purple-50 text-slate-700 border-slate-200"
+            className={`py-1 px-2 text-[10px] font-bold rounded-xl border transition-all text-center ${
+              selectedDate === yesterdayStr
+                ? "bg-purple-600 text-white border-purple-600 shadow-xs cursor-pointer"
+                : disableUnchecked && !isYesterdayChecked
+                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50 select-none"
+                : "bg-slate-50 hover:bg-purple-50 text-slate-700 border-slate-200 cursor-pointer"
             }`}
+            title={
+              disableUnchecked && !isYesterdayChecked
+                ? "เมื่อวานนี้ยังไม่มีการเช็คยอด (ปิดการเลือก)"
+                : "ดูข้อมูลการเช็คยอดเมื่อวานนี้"
+            }
           >
             เมื่อวานนี้
           </button>
           <button
             type="button"
+            disabled={disableUnchecked && !isTodayChecked}
             onClick={handleJumpToToday}
-            className={`py-1 px-2 text-[10px] font-bold rounded-xl border transition-all cursor-pointer text-center ${
+            className={`py-1 px-2 text-[10px] font-bold rounded-xl border transition-all text-center ${
               selectedDate === todayDate
-                ? "bg-purple-600 text-white border-purple-600 shadow-xs"
-                : "bg-slate-50 hover:bg-purple-50 text-slate-700 border-slate-200"
+                ? "bg-purple-600 text-white border-purple-600 shadow-xs cursor-pointer"
+                : disableUnchecked && !isTodayChecked
+                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50 select-none"
+                : "bg-slate-50 hover:bg-purple-50 text-slate-700 border-slate-200 cursor-pointer"
             }`}
+            title={
+              disableUnchecked && !isTodayChecked
+                ? "วันนี้ยังไม่มีการเช็คยอด (ปิดการเลือก)"
+                : "ดูข้อมูลการเช็คยอดวันนี้"
+            }
           >
             วันนี้ (ปัจจุบัน)
           </button>
@@ -279,6 +306,9 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
               isToday
             } = item;
 
+            const hasCheck = hasAttendance || isSemesterBreak || isHomeBreak;
+            const isUnchecked = !hasCheck;
+
             // Future Day (cannot select future dates)
             if (isFuture) {
               return (
@@ -292,7 +322,23 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
               );
             }
 
-            // CRITICAL FIX: ALL past and today dates are now fully interactive and selectable!
+            // Unchecked Day: if disableUnchecked is active, disable it completely!
+            if (disableUnchecked && isUnchecked) {
+              return (
+                <button
+                  key={dateStr}
+                  type="button"
+                  disabled
+                  className={`h-9 rounded-xl text-[11px] relative flex items-center justify-center bg-slate-50/90 text-slate-300 border border-slate-200/50 cursor-not-allowed select-none opacity-45 ${
+                    isToday ? "ring-1 ring-slate-300 font-bold" : ""
+                  }`}
+                  title={`ไม่มีการเช็คยอด (${dateStr}) - ปิดการเลือก`}
+                >
+                  <span>{dayNum}</span>
+                </button>
+              );
+            }
+
             // Calculate visual style based on status:
             let dayBgStyle = "bg-slate-50 hover:bg-purple-50 text-slate-700 border border-slate-200/70";
             let badgeEl: React.ReactNode = null;
@@ -334,7 +380,6 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
                 </span>
               );
             } else {
-              // Unchecked day (past or today) - Still clickable!
               dayBgStyle = "bg-white hover:bg-purple-50 text-slate-600 border border-dashed border-slate-300 font-medium";
               tooltipText = `ยังไม่ได้เช็คยอด (${dateStr}) - คลิกเพื่อเลือกดู`;
               badgeEl = (
@@ -388,8 +433,10 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full border border-dashed border-slate-400 bg-white shrink-0" />
-            <span className="text-slate-500 font-medium truncate">ยังไม่เช็ค (เลือกได้)</span>
+            <span className="w-3.5 h-3.5 rounded-md bg-slate-100 border border-slate-300 text-slate-400 flex items-center justify-center text-[9px] shrink-0 font-bold select-none">
+              -
+            </span>
+            <span className="text-slate-400 font-medium truncate">ไม่เช็คยอด (ปิดเลือก)</span>
           </div>
         </div>
       </div>

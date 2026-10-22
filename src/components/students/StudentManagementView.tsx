@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
 import { matchStudentToDorm, findDormForStudent, countStudentsInDorm, cleanBedValue, formatBedDisplay } from "../../utils/dormUtils";
-import { formatStudentId, isValid5DigitStudentId } from "../../utils/studentUtils";
+import { formatStudentId, isValid5DigitStudentId, formatGrade, isGradeMissingPrefix } from "../../utils/studentUtils";
 import { deleteSampleData } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
@@ -240,7 +240,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
         "ชื่อ": s.firstName,
         "นามสกุล": s.lastName,
         "ชื่อเล่น": s.nickname || "-",
-        "ระดับชั้น": s.grade,
+        "ระดับชั้น": formatGrade(s.grade),
         "ห้อง": s.room,
         "หอพัก": dormObj?.name || s.dormId,
         "ห้องพักหอ": s.dormRoom,
@@ -346,6 +346,12 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           let dormRoom = (colIdxDormRoom >= 0 && colStr[colIdxDormRoom]) ? colStr[colIdxDormRoom] : "101";
           let dormBed = (colIdxBed >= 0 && colStr[colIdxBed] !== undefined && colStr[colIdxBed] !== null) ? String(colStr[colIdxBed]).trim() : "";
 
+          // If room wasn't set from separate column and grade contains e.g. "1/2" or "ม.1/2"
+          if (colIdxRoom < 0 && grade.includes("/")) {
+            const p = grade.split("/");
+            if (p[1]) room = parseInt(p[1]) || room;
+          }
+
           // Auto-detect dormitory from column if present
           let matchedDormId = importDormId;
           if (colIdxDorm >= 0 && colStr[colIdxDorm]) {
@@ -372,7 +378,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               dormBed = String(colStr[9] || colStr[8] || "").trim();
             }
           }
-          if (!grade) grade = "ม.1";
+          // Ensure grade always has "ม." prefix (e.g. "1" -> "ม.1")
+          grade = formatGrade(grade);
 
           if (!lastName && firstName.includes(" ")) {
             const parts = firstName.split(/\s+/);
@@ -441,7 +448,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
 
         if (parts.length >= 10) {
           nickname = parts[5] || "";
-          grade = parts[6] || "ม.1";
+          grade = formatGrade(parts[6] || "ม.1");
           room = parseInt(parts[7]) || 1;
           const dormPart = parts[8] || "";
           const matched = dorms.find((d) => d.id === dormPart || d.name.includes(dormPart) || (dormPart.match(/\d+/) && d.name.includes(dormPart.match(/\d+/)![0])));
@@ -450,17 +457,18 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
           dormBed = parts[10] ? String(parts[10]).trim() : "";
         } else if (parts.length >= 9) {
           nickname = parts[5] || "";
-          grade = parts[6] || "ม.1";
+          grade = formatGrade(parts[6] || "ม.1");
           room = parseInt(parts[7]) || 1;
           dormRoom = parts[8] || "101";
           dormBed = parts[9] ? String(parts[9]).trim() : "";
         } else {
           nickname = "";
-          grade = parts[5] || "ม.1";
+          grade = formatGrade(parts[5] || "ม.1");
           room = parseInt(parts[6]) || 1;
           dormRoom = parts[7] || "101";
           dormBed = parts[8] ? String(parts[8]).trim() : "";
         }
+        grade = formatGrade(grade);
 
         if (!lastName && firstName.includes(" ")) {
           const p = firstName.split(/\s+/);
@@ -849,6 +857,42 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
   };
 
+  // State & handler to normalize all student grades in database to have "ม." prefix (e.g. "1" -> "ม.1")
+  const [isNormalizingGrades, setIsNormalizingGrades] = useState<boolean>(false);
+
+  const studentsNeedingGradeFix = useMemo(() => {
+    return students.filter((s) => isGradeMissingPrefix(s.grade));
+  }, [students]);
+
+  const handleNormalizeGradeData = async () => {
+    if (!students || students.length === 0) {
+      alert("ไม่มีข้อมูลนักเรียนในระบบ");
+      return;
+    }
+
+    if (studentsNeedingGradeFix.length === 0) {
+      alert("ข้อมูลระดับชั้นของนักเรียนทุกคนถูกต้องและมี 'ม.' นำหน้าเรียบร้อยแล้ว (เช่น ม.1 - ม.6)");
+      return;
+    }
+
+    setIsNormalizingGrades(true);
+    try {
+      let count = 0;
+      for (const st of studentsNeedingGradeFix) {
+        const cleanedGrade = formatGrade(st.grade);
+        if (onUpdateStudent) {
+          await onUpdateStudent(st.id, { grade: cleanedGrade });
+          count++;
+        }
+      }
+      alert(`ปรับปรุงข้อมูลระดับชั้นให้นักเรียนเรียบร้อยแล้ว (${count} รายการ มี 'ม.' นำหน้า เช่น "1" ปรับเป็น "ม.1")`);
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการปรับปรุงระดับชั้น: " + (err?.message || err));
+    } finally {
+      setIsNormalizingGrades(false);
+    }
+  };
+
   // Handler: Execute Batch Transfer Students to Another Dorm
   const handleConfirmTransferStudents = async () => {
     if (selectedStudentIds.length === 0) return;
@@ -894,6 +938,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       const studentToSave = {
         ...newStudent,
         studentId: formattedSid,
+        grade: formatGrade(newStudent.grade),
         dormBed: bedValue,
         bed: bedValue
       };
@@ -927,7 +972,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   // Helper to format class key uniformly (e.g. "ม.1/1", "ม.2/3")
   const formatClassKey = (grade?: string, room?: string | number): string => {
     if (!grade) return "";
-    const cleanGrade = grade.trim();
+    const cleanGrade = formatGrade(grade);
     if (cleanGrade.includes("/")) {
       return cleanGrade;
     }
@@ -1189,6 +1234,24 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               </button>
             )}
 
+            {canManagePause && onUpdateStudent && (
+              <button
+                type="button"
+                onClick={handleNormalizeGradeData}
+                disabled={isNormalizingGrades}
+                className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+                title="ปรับปรุงข้อมูลระดับชั้น ให้มี ม. นำหน้าตัวเลข เช่น '1' เป็น 'ม.1'"
+              >
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                <span>{isNormalizingGrades ? "กำลังปรับปรุง..." : "ปรับปรุงระดับชั้น (ม.1 - ม.6)"}</span>
+                {studentsNeedingGradeFix.length > 0 && (
+                  <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold animate-pulse">
+                    {studentsNeedingGradeFix.length}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setEditingStudent(null);
@@ -1264,6 +1327,34 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
               <span>ล้างข้อมูลตัวอย่าง</span>
             </button>
           </div>
+
+          {/* Notification Banner: Students needing grade prefix normalization */}
+          {studentsNeedingGradeFix.length > 0 && onUpdateStudent && (
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-3 px-4 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-950 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-amber-700" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-amber-900">
+                    พบข้อมูลนักเรียน {studentsNeedingGradeFix.length} คน ที่ระดับชั้นยังไม่มี "ม." นำหน้า (เช่น "1", "2")
+                  </p>
+                  <p className="text-[11px] text-amber-700">
+                    ระบบแสดงผลเป็น "ม.1 - ม.6" ในตารางให้แล้ว และท่านสามารถกดปรับปรุงบันทึกฐานข้อมูลจริงได้ทันที
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleNormalizeGradeData}
+                disabled={isNormalizingGrades}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-xl text-xs transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-xs disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isNormalizingGrades ? "กำลังปรับปรุง..." : "ปรับปรุงระดับชั้นเป็น ม.1 - ม.6 ทันที"}</span>
+              </button>
+            </div>
+          )}
 
           {/* Row 2: Filters & Search */}
           <div className="flex flex-wrap items-center gap-3.5 pb-3 border-b border-gray-100">
@@ -2096,7 +2187,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                         • {st.title}{st.firstName} {st.lastName}
                       </span>
                       <span className="text-rose-500">
-                        ({st.grade}/{st.room})
+                        ({formatGrade(st.grade)}/{st.room})
                       </span>
                     </div>
                   ))}
@@ -2474,7 +2565,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   .map((st) => (
                     <div key={st.id} className="flex justify-between font-medium">
                       <span>• {st.title}{st.firstName} {st.lastName}</span>
-                      <span className="text-indigo-600 font-bold">{st.grade}/{st.room}</span>
+                      <span className="text-indigo-600 font-bold">{formatGrade(st.grade)}/{st.room}</span>
                     </div>
                   ))}
                 {selectedStudentIds.length > 10 && (

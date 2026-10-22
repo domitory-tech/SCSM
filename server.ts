@@ -383,6 +383,23 @@ export function formatStudentId(id: any): string {
   return s;
 }
 
+// Helper to strictly format grade to have "ม." prefix
+export function formatGrade(grade: any): string {
+  if (grade === undefined || grade === null) return "ม.1";
+  const str = String(grade).trim();
+  if (!str) return "ม.1";
+  if (/^ม\.[1-6]$/.test(str)) return str;
+  const mMatch = str.match(/(?:มัธยมศึกษาปีที่|ชั้น\s*ม\.?|ม\.?)\s*([1-6])(?:\b|$)/);
+  if (mMatch && mMatch[1]) return `ม.${mMatch[1]}`;
+  const pMatch = str.match(/(?:ประถมศึกษาปีที่|ชั้น\s*ป\.?|ป\.?)\s*([1-6])(?:\b|$)/);
+  if (pMatch && pMatch[1]) return `ป.${pMatch[1]}`;
+  const numMatch = str.match(/^([1-6])(?:\/.*|\b|$)/);
+  if (numMatch && numMatch[1]) return `ม.${numMatch[1]}`;
+  const anyNum = str.match(/\d+/);
+  if (anyNum) return `ม.${anyNum[0]}`;
+  return str.startsWith("ม.") ? str : `ม.${str}`;
+}
+
 export function loadDbFromDisk() {
   try {
     if (fs.existsSync(DB_FILE_PATH)) {
@@ -394,7 +411,8 @@ export function loadDbFromDisk() {
       if (Array.isArray(st)) {
         studentsStore = st.map((s: Student) => ({
           ...s,
-          studentId: formatStudentId(s.studentId)
+          studentId: formatStudentId(s.studentId),
+          grade: formatGrade(s.grade)
         }));
       }
 
@@ -570,7 +588,8 @@ app.put("/api/students/:id", (req, res) => {
   studentsStore[index] = {
     ...studentsStore[index],
     ...req.body,
-    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId)
+    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId),
+    ...(req.body.grade !== undefined ? { grade: formatGrade(req.body.grade) } : {})
   };
   saveDbToDisk();
   res.json({ success: true, data: studentsStore[index], message: "แก้ไขข้อมูลนักเรียนเรียบร้อย" });
@@ -911,7 +930,7 @@ app.post("/api/students/import", (req, res) => {
     title: s.title || (dorm?.type === "male" ? "นาย" : "นางสาว"),
     firstName: s.firstName,
     lastName: s.lastName,
-    grade: s.grade || "ม.1",
+    grade: formatGrade(s.grade),
     room: Number(s.room) || 1,
     dormId: dormId,
     dormRoom: s.dormRoom || "101",
@@ -937,7 +956,7 @@ app.post("/api/students", (req, res) => {
     title: req.body.title || "นาย",
     firstName: req.body.firstName,
     lastName: req.body.lastName,
-    grade: req.body.grade || "ม.1",
+    grade: formatGrade(req.body.grade),
     room: Number(req.body.room) || 1,
     dormId: req.body.dormId,
     dormRoom: req.body.dormRoom || "101",
