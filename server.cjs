@@ -29,6 +29,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // server.ts
 var server_exports = {};
 __export(server_exports, {
+  formatGrade: () => formatGrade,
   formatStudentId: () => formatStudentId,
   loadDbFromDisk: () => loadDbFromDisk,
   saveDbToDisk: () => saveDbToDisk
@@ -309,6 +310,21 @@ function formatStudentId(id) {
   if (s.length < 5) return s.padStart(5, "0");
   return s;
 }
+function formatGrade(grade) {
+  if (grade === void 0 || grade === null) return "\u0E21.1";
+  const str = String(grade).trim();
+  if (!str) return "\u0E21.1";
+  if (/^ม\.[1-6]$/.test(str)) return str;
+  const mMatch = str.match(/(?:มัธยมศึกษาปีที่|ชั้น\s*ม\.?|ม\.?)\s*([1-6])(?:\b|$)/);
+  if (mMatch && mMatch[1]) return `\u0E21.${mMatch[1]}`;
+  const pMatch = str.match(/(?:ประถมศึกษาปีที่|ชั้น\s*ป\.?|ป\.?)\s*([1-6])(?:\b|$)/);
+  if (pMatch && pMatch[1]) return `\u0E1B.${pMatch[1]}`;
+  const numMatch = str.match(/^([1-6])(?:\/.*|\b|$)/);
+  if (numMatch && numMatch[1]) return `\u0E21.${numMatch[1]}`;
+  const anyNum = str.match(/\d+/);
+  if (anyNum) return `\u0E21.${anyNum[0]}`;
+  return str.startsWith("\u0E21.") ? str : `\u0E21.${str}`;
+}
 function loadDbFromDisk() {
   try {
     if (import_fs.default.existsSync(DB_FILE_PATH)) {
@@ -319,7 +335,8 @@ function loadDbFromDisk() {
       if (Array.isArray(st)) {
         studentsStore = st.map((s) => ({
           ...s,
-          studentId: formatStudentId(s.studentId)
+          studentId: formatStudentId(s.studentId),
+          grade: formatGrade(s.grade)
         }));
       }
       const nt = parsed.notices || parsed.noticesStore;
@@ -465,7 +482,8 @@ app.put("/api/students/:id", (req, res) => {
   studentsStore[index] = {
     ...studentsStore[index],
     ...req.body,
-    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId)
+    studentId: formatStudentId(req.body.studentId || studentsStore[index].studentId),
+    ...req.body.grade !== void 0 ? { grade: formatGrade(req.body.grade) } : {}
   };
   saveDbToDisk();
   res.json({ success: true, data: studentsStore[index], message: "\u0E41\u0E01\u0E49\u0E44\u0E02\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E19\u0E31\u0E01\u0E40\u0E23\u0E35\u0E22\u0E19\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22" });
@@ -751,7 +769,7 @@ app.post("/api/students/import", (req, res) => {
     title: s.title || (dorm?.type === "male" ? "\u0E19\u0E32\u0E22" : "\u0E19\u0E32\u0E07\u0E2A\u0E32\u0E27"),
     firstName: s.firstName,
     lastName: s.lastName,
-    grade: s.grade || "\u0E21.1",
+    grade: formatGrade(s.grade),
     room: Number(s.room) || 1,
     dormId,
     dormRoom: s.dormRoom || "101",
@@ -773,7 +791,7 @@ app.post("/api/students", (req, res) => {
     title: req.body.title || "\u0E19\u0E32\u0E22",
     firstName: req.body.firstName,
     lastName: req.body.lastName,
-    grade: req.body.grade || "\u0E21.1",
+    grade: formatGrade(req.body.grade),
     room: Number(req.body.room) || 1,
     dormId: req.body.dormId,
     dormRoom: req.body.dormRoom || "101",
@@ -1167,6 +1185,7 @@ async function startServer() {
 startServer();
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  formatGrade,
   formatStudentId,
   loadDbFromDisk,
   saveDbToDisk
