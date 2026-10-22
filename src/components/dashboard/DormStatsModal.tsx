@@ -260,22 +260,22 @@ export const DormStatsModal: React.FC<DormStatsModalProps> = ({
                       )}
                     </div>
 
-                    <div className="mt-2.5 space-y-1 text-xs border-t border-slate-200/60 pt-2">
+                    <div className={`mt-2.5 space-y-1 text-xs border-t pt-2 ${isSemesterBreak ? "border-neutral-700" : "border-slate-200/60"}`}>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">ความจุที่รองรับ:</span>
-                        <span className="text-blue-700 font-black">{dorm.capacity || 80} คน</span>
+                        <span className={`font-medium ${isSemesterBreak ? "text-slate-300" : "text-slate-500"}`}>ความจุที่รองรับ:</span>
+                        <span className={`font-black ${isSemesterBreak ? "text-sky-300" : "text-blue-700"}`}>{dorm.capacity || 80} คน</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">นักเรียนทั้งหมด:</span>
-                        <span className="text-purple-700 font-black">{stats.total} คน</span>
+                        <span className={`font-medium ${isSemesterBreak ? "text-slate-300" : "text-slate-500"}`}>นักเรียนทั้งหมด:</span>
+                        <span className={`font-black ${isSemesterBreak ? "text-purple-300" : "text-purple-700"}`}>{stats.total} คน</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">มาเรียนปกติ / อยู่หอ:</span>
-                        <span className="text-teal-700 font-black">{stats.remaining} คน</span>
+                        <span className={`font-medium ${isSemesterBreak ? "text-slate-300" : "text-slate-500"}`}>มาเรียนปกติ / อยู่หอ:</span>
+                        <span className={`font-black ${isSemesterBreak ? "text-emerald-300" : "text-teal-700"}`}>{stats.remaining} คน</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">ออกหอพัก / ลา:</span>
-                        <span className="text-rose-600 font-black">{stats.out} คน</span>
+                        <span className={`font-medium ${isSemesterBreak ? "text-slate-300" : "text-slate-500"}`}>ออกหอพัก / ลา:</span>
+                        <span className={`font-black ${isSemesterBreak ? "text-rose-300" : "text-rose-600"}`}>{stats.out} คน</span>
                       </div>
                     </div>
                   </div>

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useMemo } from "react";
 import { DailyAttendance, DailyReportData, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
-import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString } from "../../utils/dateUtils";
+import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString, getPreviousDateString, isGradeMatch } from "../../utils/dateUtils";
 import { formatStudentId } from "../../utils/studentUtils";
-import { isDormMatch, isPlaceholderTeacherName } from "../../utils/dormUtils";
+import { isDormMatch, isPlaceholderTeacherName, matchStudentToDorm } from "../../utils/dormUtils";
 import {
   exportDailyReportToExcel,
   GOOGLE_DRIVE_FOLDER_URL
@@ -142,27 +142,212 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
     }
   };
 
-  const safeReportData: DailyReportData = reportData || {
-    success: true,
-    reportDate: selectedReportDate || getTodayDateString(),
-    summaryDate: selectedReportDate || getTodayDateString(),
-    dormitories: dorms || [],
-    grades: ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"],
-    totalMatrix: {},
-    outMatrix: {},
-    remainingMatrix: {},
-    dormTotals: {},
-    gradeTotals: {},
-    grandTotals: { total: 0, out: 0, remaining: 0 },
-    absentStudentsList: [],
-    signatories: {
-      creator: "เจ้าหน้าที่งานหอพัก",
-      headTeacher: "หัวหน้างานหอพัก",
-      deputyDirector: "รองผู้อำนวยการฝ่ายบริหารกิจการนักเรียน"
-    },
-    headTeacherNotices: [],
-    dormTeacherOrientations: []
-  };
+  const safeReportData: DailyReportData = useMemo(() => {
+    if (reportData && reportData.grandTotals && reportData.grandTotals.total > 0) {
+      return reportData;
+    }
+
+    const repDate = selectedReportDate || getTodayDateString();
+    const sumDate = getPreviousDateString(repDate);
+    const gradesList = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+    const totalMatrix: Record<string, Record<string, number>> = {};
+    const outMatrix: Record<string, Record<string, number>> = {};
+    const remainingMatrix: Record<string, Record<string, number>> = {};
+    const dormTotals: Record<string, { total: number; out: number; remaining: number }> = {};
+    const gradeTotals: Record<string, { total: number; out: number; remaining: number }> = {};
+
+    gradesList.forEach((g) => {
+      gradeTotals[g] = { total: 0, out: 0, remaining: 0 };
+    });
+
+    const absentStudentsList: Array<{
+      no: number;
+      studentId: string;
+      fullName: string;
+      gradeRoom: string;
+      dormName: string;
+      dormId: string;
+      reason: string;
+      status: any;
+    }> = [];
+
+    // Map attendance records by dormId
+    const attendanceMap: Record<string, DailyAttendance> = {};
+    (attendanceRecords || []).forEach((r) => {
+      if (r && (r.date === sumDate || r.id?.startsWith(`${sumDate}_`))) {
+        attendanceMap[r.dormId] = r;
+      }
+    });
+
+    if (Object.keys(attendanceMap).length === 0) {
+      (attendanceRecords || []).forEach((r) => {
+        if (r && (r.date === repDate || r.id?.startsWith(`${repDate}_`))) {
+          attendanceMap[r.dormId] = r;
+        }
+      });
+    }
+
+    let overallTotal = 0;
+    let overallOut = 0;
+    let overallRemaining = 0;
+    let absentCounter = 0;
+
+    dorms.forEach((dorm) => {
+      totalMatrix[dorm.id] = {};
+      outMatrix[dorm.id] = {};
+      remainingMatrix[dorm.id] = {};
+
+      let dormTotalCount = 0;
+      let dormOutCount = 0;
+      let dormRemCount = 0;
+
+      const dormStudents = students.filter((s) => matchStudentToDorm(s, dorm));
+      const attendance = attendanceMap[dorm.id] || Object.values(attendanceMap).find((a) => a && isDormMatch(dorm, a.dormId));
+
+      const isSemBreak = Boolean(
+        attendance && (
+          attendance.status === "SEMESTER_BREAK" ||
+          (Array.isArray(attendance.records) && attendance.records.length > 0 && attendance.records.every((r) => r.status === "SEMESTER_BREAK"))
+        )
+      );
+      const isHmBreak = Boolean(attendance && (attendance.isHomeBreak || attendance.status === "HOME_BREAK"));
+
+      gradesList.forEach((g) => {
+        const studentsInGrade = dormStudents.filter((s) => isGradeMatch(s.grade, g));
+        const totalInGrade = studentsInGrade.length;
+        let outInGrade = 0;
+
+        if (attendance) {
+          if (isSemBreak) {
+            // ปิดภาคเรียน: ถือว่านักเรียนไม่อยู่ในหอพัก (ออกหอพักทั้งหมด)
+            outInGrade = totalInGrade;
+            studentsInGrade.forEach((std) => {
+              absentCounter++;
+              const stdSid = formatStudentId(std.studentId);
+              const stdRec = Array.isArray(attendance.records)
+                ? attendance.records.find((r) => {
+                    const rSid = formatStudentId(r.studentId);
+                    return rSid === stdSid || r.studentId === std.studentId;
+                  })
+                : undefined;
+              const noteOrReason = stdRec?.reason && stdRec.reason !== "ปิดภาคเรียน"
+                ? `ปิดภาคเรียน (${stdRec.reason})`
+                : "ปิดภาคเรียน";
+
+              absentStudentsList.push({
+                no: absentCounter,
+                studentId: stdSid,
+                fullName: `${std.title}${std.firstName} ${std.lastName}`,
+                gradeRoom: `${std.grade}/${std.room}`,
+                dormName: dorm.name,
+                dormId: dorm.id,
+                reason: noteOrReason,
+                status: "SEMESTER_BREAK"
+              });
+            });
+          } else if (isHmBreak) {
+            // รอบกลับบ้าน: ออกหอพักทั้งหมด
+            outInGrade = totalInGrade;
+            studentsInGrade.forEach((std) => {
+              absentCounter++;
+              const stdSid = formatStudentId(std.studentId);
+              absentStudentsList.push({
+                no: absentCounter,
+                studentId: stdSid,
+                fullName: `${std.title}${std.firstName} ${std.lastName}`,
+                gradeRoom: `${std.grade}/${std.room}`,
+                dormName: dorm.name,
+                dormId: dorm.id,
+                reason: "รอบกลับบ้าน",
+                status: "ROUND_HOME"
+              });
+            });
+          } else if (Array.isArray(attendance.records)) {
+            studentsInGrade.forEach((std) => {
+              const stdSid = formatStudentId(std.studentId);
+              const stdRec = attendance.records.find((r) => {
+                const rSid = formatStudentId(r.studentId);
+                return rSid === stdSid || r.studentId === std.studentId;
+              });
+              if (stdRec && stdRec.status !== "PRESENT") {
+                outInGrade++;
+                absentCounter++;
+                let statusLabel = stdRec.status === "ROUND_HOME" ? "รอบกลับบ้าน" : "กลับบ้าน";
+                if (stdRec.status === "CAMP") statusLabel = "เข้าค่าย";
+                if (stdRec.status === "SICK") statusLabel = "ป่วย";
+                if (stdRec.status === "SKILL_COMP") statusLabel = "แข่งทักษะ";
+                if (stdRec.status === "EXCHANGE") statusLabel = "นักเรียนแลกเปลี่ยน";
+                if (stdRec.status === "WALK_STUDY") statusLabel = "เดินเรียน";
+                if (stdRec.status === "SEMESTER_BREAK") statusLabel = "ปิดภาคเรียน";
+                if (stdRec.status === "NOT_ARRIVED") statusLabel = "ยังไม่เข้าหอพัก";
+                if (stdRec.status === "OTHER") statusLabel = "อื่น";
+
+                absentStudentsList.push({
+                  no: absentCounter,
+                  studentId: stdSid,
+                  fullName: `${std.title}${std.firstName} ${std.lastName}`,
+                  gradeRoom: `${std.grade}/${std.room}`,
+                  dormName: dorm.name,
+                  dormId: dorm.id,
+                  reason: stdRec.reason ? `${statusLabel} (${stdRec.reason})` : statusLabel,
+                  status: stdRec.status
+                });
+              }
+            });
+          }
+        }
+
+        const remInGrade = Math.max(0, totalInGrade - outInGrade);
+        totalMatrix[dorm.id][g] = totalInGrade;
+        outMatrix[dorm.id][g] = outInGrade;
+        remainingMatrix[dorm.id][g] = remInGrade;
+
+        dormTotalCount += totalInGrade;
+        dormOutCount += outInGrade;
+        dormRemCount += remInGrade;
+
+        gradeTotals[g].total += totalInGrade;
+        gradeTotals[g].out += outInGrade;
+        gradeTotals[g].remaining += remInGrade;
+      });
+
+      dormTotals[dorm.id] = {
+        total: dormTotalCount,
+        out: dormOutCount,
+        remaining: dormRemCount
+      };
+
+      overallTotal += dormTotalCount;
+      overallOut += dormOutCount;
+      overallRemaining += dormRemCount;
+    });
+
+    return {
+      success: true,
+      reportDate: repDate,
+      summaryDate: sumDate,
+      dormitories: dorms,
+      grades: gradesList,
+      totalMatrix,
+      outMatrix,
+      remainingMatrix,
+      dormTotals,
+      gradeTotals,
+      grandTotals: {
+        total: overallTotal,
+        out: overallOut,
+        remaining: overallRemaining
+      },
+      absentStudentsList,
+      signatories: {
+        creator: "เจ้าหน้าที่งานหอพัก",
+        headTeacher: "หัวหน้างานหอพัก",
+        deputyDirector: "รองผู้อำนวยการฝ่ายบริหารกิจการนักเรียน"
+      },
+      headTeacherNotices: reportData?.headTeacherNotices || [],
+      dormTeacherOrientations: reportData?.dormTeacherOrientations || []
+    };
+  }, [reportData, selectedReportDate, dorms, students, attendanceRecords]);
 
   const {
     reportDate,

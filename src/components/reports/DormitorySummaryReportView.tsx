@@ -313,6 +313,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     attendanceForDate &&
       (attendanceForDate.status === "CHECKED" ||
         attendanceForDate.status === "HOME_BREAK" ||
+        attendanceForDate.status === "SEMESTER_BREAK" ||
         (attendanceForDate.records && attendanceForDate.records.length > 0))
   );
 
@@ -352,7 +353,37 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
 
     const reasonCounts: Record<string, { label: string; count: number; color: string }> = {};
 
-    if (isHomeBreak) {
+    const isSemesterBreak = Boolean(
+      attendanceForDate && (
+        attendanceForDate.status === "SEMESTER_BREAK" ||
+        (Array.isArray(attendanceForDate.records) &&
+          attendanceForDate.records.length > 0 &&
+          attendanceForDate.records.every((r) => r.status === "SEMESTER_BREAK"))
+      )
+    );
+
+    if (isSemesterBreak) {
+      dormStudents.forEach((s, idx) => {
+        absents.push({
+          index: idx + 1,
+          studentNo: s.no,
+          studentId: formatStudentId(s.studentId),
+          fullName: `${s.title}${s.firstName} ${s.lastName}`,
+          gradeRoom: formatGradeRoomShort(s.grade, s.room),
+          grade: s.grade,
+          room: s.room,
+          reason: "ปิดภาคเรียน",
+          status: "SEMESTER_BREAK",
+          statusLabel: "ปิดภาคเรียน"
+        });
+      });
+
+      reasonCounts["SEMESTER_BREAK"] = {
+        label: "ปิดภาคเรียน",
+        count: dormStudents.length,
+        color: "#27272a"
+      };
+    } else if (isHomeBreak) {
       dormStudents.forEach((s, idx) => {
         absents.push({
           index: idx + 1,

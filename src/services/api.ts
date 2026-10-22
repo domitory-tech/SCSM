@@ -1665,11 +1665,26 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
 
   let attendanceMap: Record<string, DailyAttendance> = {};
   try {
-    const attRes = await fetchAttendance(summaryDate);
+    let attRes = await fetchAttendance(summaryDate);
+    let hasRecords = false;
     if (attRes && typeof attRes === "object" && !("records" in attRes)) {
-      attendanceMap = attRes as Record<string, DailyAttendance>;
+      hasRecords = Object.values(attRes).some((a) => a && (a.status === "CHECKED" || a.status === "HOME_BREAK" || a.status === "SEMESTER_BREAK" || (a.records && a.records.length > 0)));
+      if (hasRecords) {
+        attendanceMap = attRes as Record<string, DailyAttendance>;
+      }
     } else if (attRes && "records" in attRes) {
       attendanceMap[(attRes as DailyAttendance).dormId] = attRes as DailyAttendance;
+      hasRecords = true;
+    }
+
+    // Fallback: If summaryDate (previous night check) has no checked records, check reportDate directly
+    if (!hasRecords) {
+      const todayAttRes = await fetchAttendance(reportDate);
+      if (todayAttRes && typeof todayAttRes === "object" && !("records" in todayAttRes)) {
+        attendanceMap = todayAttRes as Record<string, DailyAttendance>;
+      } else if (todayAttRes && "records" in todayAttRes) {
+        attendanceMap[(todayAttRes as DailyAttendance).dormId] = todayAttRes as DailyAttendance;
+      }
     }
   } catch (e) {
     console.error("Error fetching attendance for report:", e);
@@ -1712,7 +1727,15 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
     let dormRemCount = 0;
 
     const dormStudents = students.filter((s) => matchStudentToDorm(s, dorm));
-    const attendance = attendanceMap[dorm.id];
+    const attendance = attendanceMap[dorm.id] || Object.values(attendanceMap).find((a) => a && isDormMatch(dorm, a.dormId));
+
+    const isSemBreak = Boolean(
+      attendance && (
+        attendance.status === "SEMESTER_BREAK" ||
+        (Array.isArray(attendance.records) && attendance.records.length > 0 && attendance.records.every((r) => r.status === "SEMESTER_BREAK"))
+      )
+    );
+    const isHmBreak = Boolean(attendance && (attendance.isHomeBreak || attendance.status === "HOME_BREAK"));
 
     gradesList.forEach((g) => {
       const studentsInGrade = dormStudents.filter((s) => isGradeMatch(s.grade, g));
@@ -1720,8 +1743,50 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
       let outInGrade = 0;
 
       if (attendance) {
-        if (attendance.isHomeBreak || attendance.status === "HOME_BREAK") {
+        if (isSemBreak) {
+          // ปิดภาคเรียน: ถือว่านักเรียนทุกคนในหอพักไม่อยู่ในหอพัก (ออกหอพักทั้งหมด)
           outInGrade = totalInGrade;
+          studentsInGrade.forEach((std) => {
+            absentCounter++;
+            const stdSid = formatStudentId(std.studentId);
+            const stdRec = Array.isArray(attendance.records)
+              ? attendance.records.find((r) => {
+                  const rSid = formatStudentId(r.studentId);
+                  return rSid === stdSid || r.studentId === std.studentId;
+                })
+              : undefined;
+            const noteOrReason = stdRec?.reason && stdRec.reason !== "ปิดภาคเรียน"
+              ? `ปิดภาคเรียน (${stdRec.reason})`
+              : "ปิดภาคเรียน";
+
+            absentStudentsList.push({
+              no: absentCounter,
+              studentId: stdSid,
+              fullName: `${std.title}${std.firstName} ${std.lastName}`,
+              gradeRoom: `${std.grade}/${std.room}`,
+              dormName: dorm.name,
+              dormId: dorm.id,
+              reason: noteOrReason,
+              status: "SEMESTER_BREAK"
+            });
+          });
+        } else if (isHmBreak) {
+          // รอบกลับบ้าน: ถือว่านักเรียนทุกคนในหอพักออกหอพัก
+          outInGrade = totalInGrade;
+          studentsInGrade.forEach((std) => {
+            absentCounter++;
+            const stdSid = formatStudentId(std.studentId);
+            absentStudentsList.push({
+              no: absentCounter,
+              studentId: stdSid,
+              fullName: `${std.title}${std.firstName} ${std.lastName}`,
+              gradeRoom: `${std.grade}/${std.room}`,
+              dormName: dorm.name,
+              dormId: dorm.id,
+              reason: "รอบกลับบ้าน",
+              status: "ROUND_HOME"
+            });
+          });
         } else if (Array.isArray(attendance.records)) {
           studentsInGrade.forEach((std) => {
             const stdSid = formatStudentId(std.studentId);
@@ -1729,6 +1794,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
               const rSid = formatStudentId(r.studentId);
               return rSid === stdSid || r.studentId === std.studentId;
             });
+            // ตรวจสอบตามความเป็นจริงของการเช็คยอด: หากสถานะไม่ใช่ PRESENT (รวมถึง SEMESTER_BREAK) ถือว่าออกหอพัก
             if (stdRec && stdRec.status !== "PRESENT") {
               outInGrade++;
               absentCounter++;

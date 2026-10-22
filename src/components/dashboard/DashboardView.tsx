@@ -631,12 +631,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       let statusLabel = "รอเช็คยอด";
       let statusBadge = "bg-slate-100 text-slate-600 border border-slate-200";
 
-      if (att && (att.isHomeBreak || att.status === "HOME_BREAK")) {
+      const isSemBreak = Boolean(
+        att && (
+          att.status === "SEMESTER_BREAK" ||
+          (Array.isArray(att.records) && att.records.length > 0 && att.records.every((r) => r.status === "SEMESTER_BREAK"))
+        )
+      );
+      const isHmBreak = Boolean(att && (att.isHomeBreak || att.status === "HOME_BREAK"));
+
+      if (isHmBreak) {
         outCount = totalCount;
         status = "HOME_BREAK";
         statusLabel = "รอบกลับบ้าน";
         statusBadge = "bg-amber-100 text-amber-800 border border-amber-300";
-      } else if (att && att.status === "SEMESTER_BREAK") {
+      } else if (isSemBreak) {
         outCount = totalCount;
         status = "SEMESTER_BREAK";
         statusLabel = "ปิดภาคเรียน";
@@ -746,7 +754,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const att = activeAttendanceMap[d.id] || Object.values(activeAttendanceMap).find((a) => a && isDormMatch(d, a.dormId));
       if (!att) return;
 
-      if (att.isHomeBreak || att.status === "HOME_BREAK" || (att.status === "SEMESTER_BREAK" && (!att.records || att.records.length === 0))) {
+      const isDormSemBreak = Boolean(
+        att && (
+          att.status === "SEMESTER_BREAK" ||
+          (Array.isArray(att.records) &&
+            att.records.length > 0 &&
+            att.records.every((r) => r.status === "SEMESTER_BREAK"))
+        )
+      );
+      const isDormHmBreak = Boolean(att && (att.isHomeBreak || att.status === "HOME_BREAK"));
+
+      if (isDormSemBreak || isDormHmBreak) {
+        // สถานะปิดภาคเรียน หรือ รอบกลับบ้าน: ถือว่านักเรียนไม่อยู่ในหอพัก (ออกหอพักทั้งหมด)
         dormStudents.forEach((s) => {
           absentStudentIds.add(s.id);
           absentStudentIds.add(s.studentId);

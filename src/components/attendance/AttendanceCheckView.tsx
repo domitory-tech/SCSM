@@ -199,7 +199,11 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       });
 
       // Check if all existing records are SEMESTER_BREAK or HOME_BREAK
-      const isAllBreak = attendanceData.records.every((r) => r.status === "SEMESTER_BREAK");
+      const isAllBreak =
+        attendanceData.status === "SEMESTER_BREAK" ||
+        (Array.isArray(attendanceData.records) &&
+          attendanceData.records.length > 0 &&
+          attendanceData.records.every((r) => r.status === "SEMESTER_BREAK"));
       const isAllHomeBreak =
         attendanceData.isHomeBreak ||
         attendanceData.status === "HOME_BREAK" ||
@@ -225,6 +229,22 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
           existingRec.studentId = sid;
           map[sid] = existingRec;
         }
+      });
+      setRecordsMap(map);
+    } else if (attendanceData && attendanceData.status === "SEMESTER_BREAK") {
+      setIsHomeBreak(false);
+      setOrientationNotes(["ปิดภาคเรียน"]);
+      const map: Record<string, StudentAttendanceRecord> = {};
+      students.forEach((s) => {
+        const sid = formatStudentId(s.studentId);
+        const rec: StudentAttendanceRecord = {
+          studentId: sid,
+          status: "SEMESTER_BREAK",
+          reason: "ปิดภาคเรียน",
+          note: "ปิดภาคเรียน"
+        };
+        map[sid] = rec;
+        map[s.studentId] = rec;
       });
       setRecordsMap(map);
     } else {

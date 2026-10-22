@@ -289,7 +289,13 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
     // Process each relevant attendance entry
     relevantAttendance.forEach((att) => {
       const dorm = dormMap.get(att.dormId) || dorms.find((d) => isDormMatch(d, att.dormId));
-      const isHomeBreak = att.isHomeBreak || att.status === "HOME_BREAK";
+      const isSemBreak = Boolean(
+        att && (
+          att.status === "SEMESTER_BREAK" ||
+          (Array.isArray(att.records) && att.records.length > 0 && att.records.every((r) => r.status === "SEMESTER_BREAK"))
+        )
+      );
+      const isHomeBreak = Boolean(att && (att.isHomeBreak || att.status === "HOME_BREAK"));
       const dormStudents = dorm ? getStudentsInDorm(students, dorm) : students.filter((s) => s.dormId === att.dormId);
       const totalInDorm = dormStudents.length;
 
@@ -300,7 +306,33 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
 
       let absentInDorm = 0;
 
-      if (isHomeBreak) {
+      if (isSemBreak) {
+        // ปิดภาคเรียน: ถือว่านักเรียนไม่อยู่ในหอพัก (ออกหอพักทั้งหมด)
+        absentInDorm = totalInDorm;
+        reasonCountMap.SEMESTER_BREAK = (reasonCountMap.SEMESTER_BREAK || 0) + totalInDorm;
+
+        dormStudents.forEach((s) => {
+          const targetDorm = filterDormId === "ALL" ? null : dormMap.get(filterDormId) || dorms.find((d) => d.id === filterDormId);
+          const matchesDorm = filterDormId === "ALL" || s.dormId === filterDormId || (dorm && dorm.id === filterDormId) || (targetDorm ? matchStudentToDorm(s, targetDorm) : false);
+          const matchesGrade = filterGrade === "ALL" || isGradeMatch(s.grade, filterGrade);
+          if (matchesDorm && matchesGrade) {
+            fullAbsentList.push({
+              date: att.date,
+              studentId: formatStudentId(s.studentId),
+              studentNo: s.no,
+              fullName: `${s.title}${s.firstName} ${s.lastName}`,
+              gradeRoom: formatGradeRoomFullTitle(s.grade, s.room),
+              dormName: dorm?.name || s.dormId,
+              dormId: s.dormId,
+              grade: s.grade,
+              room: s.room,
+              reason: "ปิดภาคเรียน",
+              status: "SEMESTER_BREAK",
+              statusLabel: "ปิดภาคเรียน"
+            });
+          }
+        });
+      } else if (isHomeBreak) {
         // All students in this dorm are ROUND_HOME
         absentInDorm = totalInDorm;
         reasonCountMap.ROUND_HOME += totalInDorm;
