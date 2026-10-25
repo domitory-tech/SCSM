@@ -281,10 +281,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3 mx-3 mt-3 mb-2 bg-gradient-to-br from-[#A05AFF]/10 via-[#4BCBEB]/10 to-[#1BCFB4]/10 rounded-2xl border border-[#A05AFF]/20 shadow-2xs shrink-0">
           <div className="flex items-center gap-2 font-bold text-[#A05AFF] text-xs mb-1">
             <ShieldAlert className="w-4 h-4 text-[#A05AFF] shrink-0" />
-            <span>เช็คยอดเวลา 20.00 น.</span>
+            <span>เช็คยอดเวลา 18.00 น. เป็นต้นไป</span>
           </div>
           <p className="text-[11px] text-slate-600 leading-relaxed">
-            ครูประจำหอพักเช็คชื่อนักเรียนทุกคืนและบันทึกรายงานเรื่องที่อบรม
+            ครูประจำหอพักเช็คชื่อนักเรียนตั้งแต่เวลา 18.00 น. ของทุกวัน และบันทึกรายงานเรื่องที่อบรม
           </p>
         </div>
 
@@ -494,10 +494,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3 mx-3 mt-1 mb-2 bg-gradient-to-br from-[#A05AFF]/10 via-[#4BCBEB]/10 to-[#1BCFB4]/10 rounded-2xl border border-[#A05AFF]/20 shadow-2xs shrink-0">
           <div className="flex items-center gap-2 font-bold text-[#A05AFF] text-xs mb-1">
             <ShieldAlert className="w-4 h-4 text-[#A05AFF] shrink-0" />
-            <span>เช็คยอดเวลา 20.00 น.</span>
+            <span>เช็คยอดเวลา 18.00 น. เป็นต้นไป</span>
           </div>
           <p className="text-[11px] text-slate-600 leading-relaxed">
-            ครูประจำหอพักเช็คชื่อนักเรียนทุกคืนและบันทึกรายงานเรื่องที่อบรม
+            ครูประจำหอพักเช็คชื่อนักเรียนตั้งแต่เวลา 18.00 น. ของทุกวัน และบันทึกรายงานเรื่องที่อบรม
           </p>
         </div>
 

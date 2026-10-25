@@ -27,7 +27,7 @@ import {
   SystemSettings,
   UserProfile
 } from "../types";
-import { getTodayDateString, getPreviousDateString, getNextDateString, isGradeMatch } from "../utils/dateUtils";
+import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck } from "../utils/dateUtils";
 import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
 import { formatStudentId, generateDefault5DigitStudentId, formatGrade } from "../utils/studentUtils";
 
@@ -1201,8 +1201,14 @@ export async function syncAutoAttendanceCarryOver(
 
   const syncPromise = (async () => {
     const todayStr = getTodayDateString();
-    // Safety: Auto-attendance carry over must never write future dates ahead of today to Firestore
-    const maxTargetDate = todayStr;
+    const yesterdayStr = getYesterdayDateString();
+    // Safety: Auto-attendance carry over must never write today or future dates to Firestore!
+    // Today's attendance must be checked into the system manually by teachers.
+    const maxTargetDate = yesterdayStr;
+
+    // Filter out any stray auto-attendance records for date >= todayStr
+    allRecords = allRecords.filter((r) => !(r && r.date >= todayStr && r.checkedBy?.includes("ระบบอัตโนมัติ")));
+
     const recordsMapById = new Map<string, DailyAttendance>();
     allRecords.forEach((r) => {
       if (r && r.id) {
@@ -1365,15 +1371,24 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
   records = await syncSemesterBreakAutoAttendance(records);
   setLocalCache(CACHE_KEYS.ATTENDANCE, records);
 
+  const todayStr = getTodayDateString();
   const datesSet = new Set<string>();
   records.forEach((data) => {
+    if (!data || !data.date) return;
+
+    // For today and future dates: only count if it's a REAL check entered into the system (not auto-generated)
+    if (data.date >= todayStr) {
+      if (isRealAttendanceCheck(data)) {
+        datesSet.add(data.date);
+      }
+      return;
+    }
+
     if (
-      data &&
-      data.date &&
-      (data.status === "CHECKED" ||
-        data.status === "HOME_BREAK" ||
-        data.status === "SEMESTER_BREAK" ||
-        (data.records && data.records.length > 0))
+      data.status === "CHECKED" ||
+      data.status === "HOME_BREAK" ||
+      data.status === "SEMESTER_BREAK" ||
+      (data.records && data.records.length > 0)
     ) {
       datesSet.add(data.date);
     }

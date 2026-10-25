@@ -35,21 +35,56 @@ export function isDormAttendancePaused(dormId: string, settings?: SystemSettings
 }
 
 export function getTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    return formatter.format(new Date()); // YYYY-MM-DD
+  } catch {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export function getYesterdayDateString(): string {
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const year = yesterday.getFullYear();
-  const month = String(yesterday.getMonth() + 1).padStart(2, "0");
-  const day = String(yesterday.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const todayStr = getTodayDateString();
+  return getPreviousDateString(todayStr);
+}
+
+/**
+ * Checks whether an attendance record status or reason must be EXCLUDED from "ยอดนักเรียนออกบ้าน"
+ * (ยอดนักเรียนออกหอพัก / ออกบ้าน)
+ * 
+ * Excluded categories:
+ * 1. ปิดภาคเรียน (SEMESTER_BREAK)
+ * 2. รอบกลับบ้าน (ROUND_HOME / HOME_BREAK)
+ * 3. ยังไม่เข้าหอพัก (NOT_ARRIVED)
+ */
+export function isExcludedFromHomeOut(status?: string, reason?: string, note?: string): boolean {
+  if (!status && !reason && !note) return false;
+  const s = (status || "").toUpperCase();
+  const r = (reason || "").trim();
+  const n = (note || "").trim();
+
+  // 1. ปิดภาคเรียน
+  if (s === "SEMESTER_BREAK") return true;
+  if (r.includes("ปิดภาคเรียน") || n.includes("ปิดภาคเรียน")) return true;
+
+  // 2. รอบกลับบ้าน
+  if (s === "ROUND_HOME" || s === "HOME_BREAK") return true;
+  if (r.includes("รอบกลับ") || r === "รบ" || n.includes("รอบกลับ") || n === "รบ") return true;
+
+  // 3. ยังไม่เข้าหอพัก
+  if (s === "NOT_ARRIVED") return true;
+  if (r.includes("ยังไม่เข้า") || n.includes("ยังไม่เข้า")) return true;
+
+  return false;
 }
 
 export function getPreviousDateString(dateStr: string): string {
@@ -79,40 +114,43 @@ export function getNextDateString(dateStr: string): string {
 }
 
 export function getDashboardDefaultDate(todayAttendanceMap?: Record<string, any> | null): string {
-  const now = new Date();
-  const currentHour = now.getHours(); // 0 - 23
-  const todayStr = getTodayDateString();
-  const yesterdayStr = getYesterdayDateString();
-
-  const isAfter20 = currentHour >= 20;
-
-  let hasTodayCheckStarted = false;
-  if (todayAttendanceMap && typeof todayAttendanceMap === "object" && Object.keys(todayAttendanceMap).length > 0) {
-    const attList = Object.values(todayAttendanceMap);
-    hasTodayCheckStarted = attList.some((att) => {
-      if (!att) return false;
-      return (
-        att.status === "CHECKED" ||
-        att.status === "HOME_BREAK" ||
-        att.status === "SEMESTER_BREAK" ||
-        att.isHomeBreak ||
-        (Array.isArray(att.records) && att.records.length > 0)
-      );
-    });
-  }
-
-  // Today's data is displayed IF today's check has started OR if current time is after 20.00
-  if (hasTodayCheckStarted || isAfter20) {
-    return todayStr;
-  }
-
-  // Otherwise, default to yesterday's date (ข้อมูลของเมื่อคืน)
-  return yesterdayStr;
+  // Default to yesterday's date (ข้อมูลของการเช็คยอดล่าสุดเมื่อคืนที่ผ่านมา)
+  return getYesterdayDateString();
 }
 
 /**
- * Returns the most recent date that has checked attendance data.
- * Checks today first; if not checked today, finds the latest date in checkedDates list <= today.
+ * Determines whether an attendance record is a genuine, completed check entered into the system
+ * (excludes pending drafts or auto-generated carry-over records).
+ */
+export function isRealAttendanceCheck(att: any): boolean {
+  if (!att) return false;
+  if (att.checkedBy && typeof att.checkedBy === "string" && att.checkedBy.includes("ระบบอัตโนมัติ")) {
+    return false;
+  }
+  if (att.status === "PENDING") {
+    return false;
+  }
+  if (att.status === "CHECKED" || att.status === "HOME_BREAK" || att.isHomeBreak) {
+    return true;
+  }
+  if (att.status === "SEMESTER_BREAK" && !att.checkedBy?.includes("ระบบอัตโนมัติ")) {
+    return true;
+  }
+  if (Array.isArray(att.records) && att.records.length > 0) {
+    const hasManualRecord = att.records.some(
+      (r: any) => !r.note?.includes("เช็คยอดอัตโนมัติ") && !r.note?.includes("อัตโนมัติ")
+    );
+    return hasManualRecord;
+  }
+  return false;
+}
+
+/**
+ * Returns the latest checked attendance date.
+ * If today has a real checked attendance entered into the system, automatically returns today.
+ * Otherwise, returns the latest checked attendance date from last night (<= yesterday).
+ * เช่น วันนี้วันที่ 25 ตุลาคม 2569 ถ้ายังไม่มีการเช็คยอด จะนำผลการเช็คยอดของคืนวันที่ 24 ตุลาคม 2569 มาแสดง
+ * จนกว่าจะมีการเช็คยอดของวันที่ 25 ตุลาคม 2569 เข้าสู่ระบบ จึงให้ระบบแสดงเป็นวันที่ 25 ตุลาคม 2569 อัตโนมัติ
  */
 export function getLatestCheckedAttendanceDate(
   checkedDates: string[] = [],
@@ -121,36 +159,31 @@ export function getLatestCheckedAttendanceDate(
   const todayStr = getTodayDateString();
   const yesterdayStr = getYesterdayDateString();
 
-  // 1. Check if today has checked attendance or active check
-  let hasTodayChecked = false;
+  // 1. Check if today has a real check entered into the system
+  let hasTodayRealCheck = false;
   if (todayAttendanceMap && typeof todayAttendanceMap === "object" && Object.keys(todayAttendanceMap).length > 0) {
     const attList = Object.values(todayAttendanceMap);
-    hasTodayChecked = attList.some((att) => {
-      if (!att) return false;
-      return (
-        att.status === "CHECKED" ||
-        att.status === "HOME_BREAK" ||
-        att.status === "SEMESTER_BREAK" ||
-        att.isHomeBreak ||
-        (Array.isArray(att.records) && att.records.length > 0)
-      );
+    hasTodayRealCheck = attList.some((att) => {
+      if (!att || att.date !== todayStr) return false;
+      return isRealAttendanceCheck(att);
     });
   }
 
-  if (hasTodayChecked || checkedDates.includes(todayStr)) {
+  // If today has checked attendance in the system
+  if (hasTodayRealCheck) {
     return todayStr;
   }
 
-  // 2. Look for the most recent checked date in history (<= today)
+  // 2. Otherwise, find the latest checked date strictly <= yesterdayStr (ผลการเช็คยอดล่าสุดเมื่อคืนที่ผ่านมา)
   const validDates = checkedDates
-    .filter((d) => d && typeof d === "string" && d <= todayStr)
+    .filter((d) => d && typeof d === "string" && d <= yesterdayStr)
     .sort((a, b) => b.localeCompare(a));
 
   if (validDates.length > 0) {
     return validDates[0];
   }
 
-  // 3. Fallback to yesterday or today if no records exist
+  // Fallback to yesterday date string (เมื่อคืนที่ผ่านมา)
   return yesterdayStr;
 }
 

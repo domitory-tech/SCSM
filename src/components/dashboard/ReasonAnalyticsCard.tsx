@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { DailyAttendance, Dormitory, Student } from "../../types";
 import { countStudentsInDorm } from "../../utils/dormUtils";
+import { isExcludedFromHomeOut } from "../../utils/dateUtils";
 
 interface ReasonAnalyticsCardProps {
   liveReasonCounts: Record<string, number>;
@@ -141,19 +142,20 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       if (!dateDormOutMap[dStr]) dateDormOutMap[dStr] = {};
 
       let dormOut = 0;
-      if (att.isHomeBreak || att.status === "HOME_BREAK") {
-        // Exclude round-trip home break
+      if (att.isHomeBreak || att.status === "HOME_BREAK" || att.status === "SEMESTER_BREAK") {
+        // Exclude round-trip home break and semester break
       } else if (att.records && Array.isArray(att.records)) {
         att.records.forEach((r) => {
-          if (r.status === "HOME") { dateReasonMap[dStr]["กลับบ้าน"]++; dormOut++; }
-          else if (r.status === "CAMP") { dateReasonMap[dStr]["เข้าค่าย"]++; dormOut++; }
-          else if (r.status === "SICK") { dateReasonMap[dStr]["ป่วย"]++; dormOut++; }
-          else if (r.status === "SKILL_COMP") { dateReasonMap[dStr]["แข่งทักษะ"]++; dormOut++; }
-          else if (r.status === "EXCHANGE") { dateReasonMap[dStr]["แลกเปลี่ยน"]++; dormOut++; }
-          else if (r.status === "WALK_STUDY") { dateReasonMap[dStr]["เดินเรียน"]++; dormOut++; }
-          else if (r.status === "SEMESTER_BREAK") { dateReasonMap[dStr]["ปิดภาคเรียน"]++; dormOut++; }
-          else if (r.status === "NOT_ARRIVED") { dateReasonMap[dStr]["ยังไม่เข้าหอพัก"]++; dormOut++; }
-          else if (r.status === "OTHER") { dateReasonMap[dStr]["อื่นๆ"]++; dormOut++; }
+          const isExcluded = isExcludedFromHomeOut(r.status, r.reason, r.note);
+          if (r.status === "HOME") { dateReasonMap[dStr]["กลับบ้าน"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "CAMP") { dateReasonMap[dStr]["เข้าค่าย"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "SICK") { dateReasonMap[dStr]["ป่วย"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "SKILL_COMP") { dateReasonMap[dStr]["แข่งทักษะ"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "EXCHANGE") { dateReasonMap[dStr]["แลกเปลี่ยน"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "WALK_STUDY") { dateReasonMap[dStr]["เดินเรียน"]++; if (!isExcluded) dormOut++; }
+          else if (r.status === "SEMESTER_BREAK") { dateReasonMap[dStr]["ปิดภาคเรียน"]++; }
+          else if (r.status === "NOT_ARRIVED") { dateReasonMap[dStr]["ยังไม่เข้าหอพัก"]++; }
+          else if (r.status === "OTHER") { dateReasonMap[dStr]["อื่นๆ"]++; if (!isExcluded) dormOut++; }
         });
       }
       dateDormOutMap[dStr][dormId] = (dateDormOutMap[dStr][dormId] || 0) + dormOut;
@@ -172,19 +174,20 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         if (!att) return;
         let dOut = 0;
         const dReasons = { "กลับบ้าน": 0, "เข้าค่าย": 0, "ป่วย": 0, "แข่งทักษะ": 0, "แลกเปลี่ยน": 0, "เดินเรียน": 0, "ปิดภาคเรียน": 0, "ยังไม่เข้าหอพัก": 0, "อื่นๆ": 0 };
-        if (att.isHomeBreak || att.status === "HOME_BREAK") {
-          // Exclude round-trip home break
+        if (att.isHomeBreak || att.status === "HOME_BREAK" || att.status === "SEMESTER_BREAK") {
+          // Exclude round-trip home break and semester break
         } else if (att.records && Array.isArray(att.records)) {
           att.records.forEach((r) => {
-            if (r.status === "HOME") { dReasons["กลับบ้าน"]++; dOut++; }
-            else if (r.status === "CAMP") { dReasons["เข้าค่าย"]++; dOut++; }
-            else if (r.status === "SICK") { dReasons["ป่วย"]++; dOut++; }
-            else if (r.status === "SKILL_COMP") { dReasons["แข่งทักษะ"]++; dOut++; }
-            else if (r.status === "EXCHANGE") { dReasons["แลกเปลี่ยน"]++; dOut++; }
-            else if (r.status === "WALK_STUDY") { dReasons["เดินเรียน"]++; dOut++; }
-            else if (r.status === "SEMESTER_BREAK") { dReasons["ปิดภาคเรียน"]++; dOut++; }
-            else if (r.status === "NOT_ARRIVED") { dReasons["ยังไม่เข้าหอพัก"]++; dOut++; }
-            else if (r.status === "OTHER") { dReasons["อื่นๆ"]++; dOut++; }
+            const isExcluded = isExcludedFromHomeOut(r.status, r.reason, r.note);
+            if (r.status === "HOME") { dReasons["กลับบ้าน"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "CAMP") { dReasons["เข้าค่าย"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "SICK") { dReasons["ป่วย"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "SKILL_COMP") { dReasons["แข่งทักษะ"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "EXCHANGE") { dReasons["แลกเปลี่ยน"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "WALK_STUDY") { dReasons["เดินเรียน"]++; if (!isExcluded) dOut++; }
+            else if (r.status === "SEMESTER_BREAK") { dReasons["ปิดภาคเรียน"]++; }
+            else if (r.status === "NOT_ARRIVED") { dReasons["ยังไม่เข้าหอพัก"]++; }
+            else if (r.status === "OTHER") { dReasons["อื่นๆ"]++; if (!isExcluded) dOut++; }
           });
         }
         dateDormOutMap[effDate][d.id] = dOut;
@@ -283,7 +286,12 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
       const actualDormOut = dorms.map((d) => {
         const att = todayAttendance?.[d.id];
         if (att && att.status === "CHECKED" && att.records) {
-          return att.records.filter((r) => r.status !== "PRESENT" && r.status !== "ROUND_HOME").length;
+          if (att.isHomeBreak) return 0;
+          return att.records.filter((r) => {
+            if (!r.status || r.status === "PRESENT") return false;
+            if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
+            return true;
+          }).length;
         }
         return 0;
       });

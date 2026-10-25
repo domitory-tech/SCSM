@@ -330,11 +330,20 @@ export const ThaiCalendarPicker: React.FC<ThaiCalendarPickerProps> = ({
                   type="button"
                   disabled
                   className={`h-9 rounded-xl text-[11px] relative flex items-center justify-center bg-slate-50/90 text-slate-300 border border-slate-200/50 cursor-not-allowed select-none opacity-45 ${
-                    isToday ? "ring-1 ring-slate-300 font-bold" : ""
+                    isToday ? "ring-2 ring-purple-300/80 bg-purple-50/20 font-bold" : ""
                   }`}
-                  title={`ไม่มีการเช็คยอด (${dateStr}) - ปิดการเลือก`}
+                  title={
+                    isToday
+                      ? `วันนี้ (${dateStr}) ยังไม่มีการเช็คยอดเข้าสู่ระบบ - ปิดการเลือก (จะเปิดอัตโนมัติเมื่อเช็คยอดเสร็จสิ้น)`
+                      : `ไม่มีการเช็คยอด (${dateStr}) - ปิดการเลือก`
+                  }
                 >
                   <span>{dayNum}</span>
+                  {isToday && (
+                    <span className="absolute -top-1 -right-1 text-[7px] font-bold bg-slate-200 text-slate-600 px-1 py-0.2 rounded-md">
+                      ยังไม่เช็ค
+                    </span>
+                  )}
                 </button>
               );
             }
