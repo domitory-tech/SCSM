@@ -254,7 +254,7 @@ export function exportDailyReportToExcel(
   if (sortedOrientations.length > 0) {
     sortedOrientations.forEach((orient) => {
       const realNotes = (orient.orientationNotes || []).filter(
-        (n) => n && n.trim() !== "" && n.trim() !== "-" && !n.includes("ปิดภาคเรียน") && !n.includes("ระบบอัตโนมัติ")
+        (n) => n && n.trim() !== "" && n.trim() !== "-" && !n.includes("ปิดภาคเรียน") && !n.includes("รอบกลับบ้าน") && !n.includes("ระบบอัตโนมัติ")
       );
       const isRealCheck = orient.status === "CHECKED" || orient.status === "HOME_BREAK";
       const hasRealOrientation = realNotes.length > 0;

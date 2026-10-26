@@ -182,23 +182,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   useEffect(() => {
     if (attendanceData && attendanceData.records && attendanceData.records.length > 0) {
       setIsHomeBreak(attendanceData.isHomeBreak || false);
-      if (attendanceData.teacherOrientationNotes && attendanceData.teacherOrientationNotes.length > 0) {
-        setOrientationNotes(attendanceData.teacherOrientationNotes);
-      } else {
-        setOrientationNotes([""]);
-      }
 
-      const map: Record<string, StudentAttendanceRecord> = {};
-      attendanceData.records?.forEach((rec) => {
-        const sid = formatStudentId(rec.studentId);
-        const record = { ...rec, studentId: sid };
-        map[sid] = record;
-        if (rec.studentId !== sid) {
-          map[rec.studentId] = record;
-        }
-      });
-
-      // Check if all existing records are SEMESTER_BREAK or HOME_BREAK
       const isAllBreak =
         attendanceData.status === "SEMESTER_BREAK" ||
         (Array.isArray(attendanceData.records) &&
@@ -212,6 +196,28 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       if (isAllHomeBreak) {
         setIsHomeBreak(true);
       }
+
+      if (attendanceData.teacherOrientationNotes && attendanceData.teacherOrientationNotes.length > 0) {
+        // เมื่อเลือก ปิดภาคเรียน และ รอบกลับบ้าน ในช่องบันทึกเรื่องที่ครูประจำหอพักอบรมนักเรียนในวันนี้ ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+        const cleaned = (isAllBreak || isAllHomeBreak)
+          ? attendanceData.teacherOrientationNotes.filter(
+              (n) => n && n.trim().length > 0 && n.trim() !== "ปิดภาคเรียน" && n.trim() !== "รอบกลับบ้าน"
+            )
+          : attendanceData.teacherOrientationNotes;
+        setOrientationNotes(cleaned.length > 0 ? cleaned : [""]);
+      } else {
+        setOrientationNotes([""]);
+      }
+
+      const map: Record<string, StudentAttendanceRecord> = {};
+      attendanceData.records?.forEach((rec) => {
+        const sid = formatStudentId(rec.studentId);
+        const record = { ...rec, studentId: sid };
+        map[sid] = record;
+        if (rec.studentId !== sid) {
+          map[rec.studentId] = record;
+        }
+      });
 
       // Default missing students
       students.forEach((s) => {
@@ -233,7 +239,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       setRecordsMap(map);
     } else if (attendanceData && attendanceData.status === "SEMESTER_BREAK") {
       setIsHomeBreak(false);
-      setOrientationNotes(["ปิดภาคเรียน"]);
+      // ปล่อยว่าง ไม่ต้องกรอกข้อมูลใดๆ
+      setOrientationNotes([""]);
       const map: Record<string, StudentAttendanceRecord> = {};
       students.forEach((s) => {
         const sid = formatStudentId(s.studentId);
@@ -294,7 +301,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               });
               return updated;
             });
-            setOrientationNotes(["ปิดภาคเรียน"]);
+            // ปิดภาคเรียน: ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+            setOrientationNotes([""]);
           }
         }
       }).catch(() => {});
@@ -318,6 +326,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       students.forEach((s) => {
         updated[s.studentId] = { studentId: s.studentId, status: "ROUND_HOME", reason: "รอบกลับบ้าน" };
       });
+      // เมื่อเลือก รอบกลับบ้าน ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+      setOrientationNotes([""]);
     } else {
       // โหมด ปิด (วันปกติ) -> สถานะการเช็คยอดนักเรียนทุกคนเป็น "อยู่หอพัก" (PRESENT)
       students.forEach((s) => {
@@ -353,7 +363,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
     });
     setRecordsMap(updated);
     setIsHomeBreak(false);
-    setOrientationNotes(["ปิดภาคเรียน"]);
+    // เมื่อเลือก ปิดภาคเรียน ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+    setOrientationNotes([""]);
   };
 
   // Mark all students not arrived ("ยังไม่เข้าหอพัก")
@@ -543,13 +554,20 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
         Object.values(recordsMap).length > 0 &&
         Object.values(recordsMap).every((r) => r.status === "SEMESTER_BREAK");
 
+      // เมื่อเลือก ปิดภาคเรียน และ รอบกลับบ้าน ในช่องบันทึกเรื่องที่ครูประจำหอพักอบรมนักเรียนในวันนี้ ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+      const notesToSave = (isHomeBreak || allSemesterBreak)
+        ? orientationNotes.filter(
+            (n) => n.trim().length > 0 && n.trim() !== "ปิดภาคเรียน" && n.trim() !== "รอบกลับบ้าน"
+          )
+        : orientationNotes.filter((n) => n.trim().length > 0);
+
       const payload: Partial<DailyAttendance> = {
         date: selectedDate,
         dormId: selectedDormId,
         isHomeBreak,
         status: allSemesterBreak ? "SEMESTER_BREAK" : isHomeBreak ? "HOME_BREAK" : "CHECKED",
         checkedBy: currentUserName,
-        teacherOrientationNotes: orientationNotes.filter((n) => n.trim().length > 0),
+        teacherOrientationNotes: notesToSave,
         records: Object.values(recordsMap)
       };
 
@@ -631,6 +649,22 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       Object.values(recordsMap).some((r) => r.status === "ROUND_HOME");
     return hasAutoCheckNote && hasHomeBreakRecord && !isAutoCheckedSemesterBreak;
   }, [attendanceData, recordsMap, isHomeBreak, isAutoCheckedSemesterBreak]);
+
+  // ตรวจสอบว่ามีการเลือก ปิดภาคเรียน หรือ รอบกลับบ้าน หรือไม่
+  const isSemesterBreakSelected = useMemo(() => {
+    if (attendanceData?.status === "SEMESTER_BREAK") return true;
+    const records = Object.values(recordsMap);
+    return records.length > 0 && records.every((r) => r.status === "SEMESTER_BREAK");
+  }, [attendanceData?.status, recordsMap]);
+
+  const isHomeBreakSelected = useMemo(() => {
+    if (isHomeBreak) return true;
+    if (attendanceData?.isHomeBreak || attendanceData?.status === "HOME_BREAK") return true;
+    const records = Object.values(recordsMap);
+    return records.length > 0 && records.every((r) => r.status === "ROUND_HOME");
+  }, [isHomeBreak, attendanceData?.isHomeBreak, attendanceData?.status, recordsMap]);
+
+  const isBreakSelected = isSemesterBreakSelected || isHomeBreakSelected;
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
@@ -819,6 +853,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                         updated[s.studentId] = { studentId: s.studentId, status: "ROUND_HOME", reason: "รอบกลับบ้าน" };
                       });
                       setRecordsMap(updated);
+                      // เมื่อเลือก รอบกลับบ้าน ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง
+                      setOrientationNotes([""]);
                       alert(`เปลี่ยนสถานะทุกหอพักเป็น "รอบกลับบ้าน" เรียบร้อยแล้ว`);
                     }
                   }}
@@ -902,7 +938,12 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 <h3 className="font-bold text-gray-800 text-sm">
                   บันทึกเรื่องที่ครูประจำหอพักอบรมนักเรียนในวันนี้
                 </h3>
-                {orientationNotes.filter((n) => n.trim().length > 0).length > 0 ? (
+                {isBreakSelected ? (
+                  <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[11px] font-bold rounded-md flex items-center gap-1 border border-sky-200">
+                    <Check className="w-3.5 h-3.5 text-sky-600" />
+                    {isSemesterBreakSelected ? "ปิดภาคเรียน" : "รอบกลับบ้าน"}: ไม่ต้องกรอกข้อมูล ปล่อยว่าง
+                  </span>
+                ) : orientationNotes.filter((n) => n.trim().length > 0).length > 0 ? (
                   <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-md">
                     ✓ ระบุแล้ว {orientationNotes.filter((n) => n.trim().length > 0).length} เรื่อง
                   </span>
@@ -913,7 +954,11 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-gray-400">ระบุหัวข้อหรือเรื่องที่ได้อบรมสั่งสอนนักเรียน (บันทึกได้มากกว่า 1 เรื่อง)</p>
+              <p className="text-xs text-gray-400">
+                {isBreakSelected
+                  ? `อยู่ในช่วง${isSemesterBreakSelected ? "ปิดภาคเรียน" : "รอบกลับบ้าน"} ไม่ต้องกรอกข้อมูลใดๆ ในช่องนี้ สามารถปล่อยว่างได้`
+                  : "ระบุหัวข้อหรือเรื่องที่ได้อบรมสั่งสอนนักเรียน (บันทึกได้มากกว่า 1 เรื่อง)"}
+              </p>
             </div>
           </div>
           {canEditAttendance && (
@@ -937,7 +982,11 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 value={note}
                 disabled={!canEditAttendance}
                 onChange={(e) => handleUpdateNote(index, e.target.value)}
-                placeholder={`ระบุเรื่องที่อบรมนักเรียน เรื่องที่ ${index + 1}...`}
+                placeholder={
+                  isBreakSelected
+                    ? "ไม่ต้องกรอกข้อมูลใดๆ ปล่อยว่าง..."
+                    : `ระบุเรื่องที่อบรมนักเรียน เรื่องที่ ${index + 1}...`
+                }
                 className="flex-1 bg-gray-50 border border-gray-200 focus:bg-white text-xs text-gray-800 rounded-xl px-3 py-2 focus:ring-2 focus:ring-purple-500 outline-none disabled:bg-gray-100 disabled:text-gray-500"
               />
               {orientationNotes.length > 1 && canEditAttendance && (
@@ -1361,7 +1410,25 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
 
             {/* Check Orientation Notes Validation */}
             {(() => {
-              const validNotes = orientationNotes.filter((n) => n.trim().length > 0);
+              const validNotes = orientationNotes.filter(
+                (n) => n.trim().length > 0 && n.trim() !== "ปิดภาคเรียน" && n.trim() !== "รอบกลับบ้าน"
+              );
+              if (isBreakSelected) {
+                return (
+                  <div className="p-3.5 bg-sky-50 border border-sky-200 rounded-xl text-sky-950 text-xs flex items-start gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-extrabold text-sky-950 block text-sm">
+                        {isSemesterBreakSelected ? "สถานะปิดภาคเรียน" : "สถานะรอบกลับบ้าน"}
+                      </strong>
+                      <span className="text-sky-800 leading-relaxed block mt-0.5">
+                        ช่องบันทึกเรื่องที่ครูประจำหอพักอบรมนักเรียนในวันนี้: ปล่อยว่างตามเงื่อนไข (ไม่ต้องกรอกข้อมูลใดๆ)
+                        {validNotes.length > 0 ? ` (ระบุเพิ่มเติม: ${validNotes.join(", ")})` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
               if (validNotes.length === 0) {
                 return (
                   <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">

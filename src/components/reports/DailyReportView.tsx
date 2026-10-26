@@ -431,6 +431,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
             n.trim() !== "" &&
             n.trim() !== "-" &&
             !n.includes("ปิดภาคเรียน") &&
+            !n.includes("รอบกลับบ้าน") &&
             !n.includes("ระบบอัตโนมัติ")
         );
         const isRealCheck = Boolean(att && (att.status === "CHECKED" || att.status === "HOME_BREAK"));

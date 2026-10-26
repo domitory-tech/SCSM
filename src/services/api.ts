@@ -1292,7 +1292,7 @@ export async function syncAutoAttendanceCarryOver(
               status: "SEMESTER_BREAK",
               checkedAt: "08:00",
               checkedBy: "ระบบอัตโนมัติ (ปิดภาคเรียน)",
-              teacherOrientationNotes: [targetReason],
+              teacherOrientationNotes: [],
               records: autoRecords
             };
 
@@ -1595,7 +1595,7 @@ export async function bulkSetHomeBreakAllDorms(
       status: isHome ? "HOME_BREAK" : "CHECKED",
       checkedAt: timeNow,
       checkedBy: isHome ? `${operatorName} (รอบกลับบ้านทุกหอพัก)` : operatorName,
-      teacherOrientationNotes: isHome ? ["รอบกลับบ้าน"] : [],
+      teacherOrientationNotes: [],
       records: studentRecords
     };
 
@@ -1883,6 +1883,7 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
         trimmed.length > 0 &&
         trimmed !== "-" &&
         !trimmed.includes("ปิดภาคเรียน") &&
+        !trimmed.includes("รอบกลับบ้าน") &&
         !trimmed.includes("ระบบอัตโนมัติ")
       );
     });

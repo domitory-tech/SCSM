@@ -321,10 +321,18 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
   const orientationNotesList: string[] = useMemo(() => {
     const notes = attendanceForDate?.teacherOrientationNotes || (attendanceForDate as any)?.orientationNotes || [];
     if (Array.isArray(notes)) {
-      return notes.filter((n: string) => typeof n === "string" && n.trim().length > 0);
+      return notes.filter(
+        (n: string) =>
+          typeof n === "string" &&
+          n.trim().length > 0 &&
+          n.trim() !== "-" &&
+          !n.includes("ปิดภาคเรียน") &&
+          !n.includes("รอบกลับบ้าน")
+      );
     }
     if (typeof notes === "string" && (notes as string).trim().length > 0) {
-      return [(notes as string).trim()];
+      const s = (notes as string).trim();
+      return s !== "-" && !s.includes("ปิดภาคเรียน") && !s.includes("รอบกลับบ้าน") ? [s] : [];
     }
     return [];
   }, [attendanceForDate]);

@@ -417,7 +417,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (dorms || []).forEach((dorm) => {
       const att = activeAttendanceMap[dorm.id];
       if (att && att.teacherOrientationNotes && Array.isArray(att.teacherOrientationNotes)) {
-        const validNotes = att.teacherOrientationNotes.filter((n) => n && n.trim().length > 0);
+        const validNotes = att.teacherOrientationNotes.filter(
+          (n) =>
+            n &&
+            n.trim().length > 0 &&
+            n.trim() !== "-" &&
+            !n.includes("ปิดภาคเรียน") &&
+            !n.includes("รอบกลับบ้าน") &&
+            !n.includes("ระบบอัตโนมัติ")
+        );
         if (validNotes.length > 0) {
           groupMap[dorm.id] = {
             dormId: dorm.id,
@@ -432,7 +440,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     Object.values(activeAttendanceMap).forEach((att: any) => {
       if (att && att.dormId && !groupMap[att.dormId]) {
         if (att.teacherOrientationNotes && Array.isArray(att.teacherOrientationNotes)) {
-          const validNotes = att.teacherOrientationNotes.filter((n) => n && n.trim().length > 0);
+          const validNotes = att.teacherOrientationNotes.filter(
+            (n) =>
+              n &&
+              n.trim().length > 0 &&
+              n.trim() !== "-" &&
+              !n.includes("ปิดภาคเรียน") &&
+              !n.includes("รอบกลับบ้าน") &&
+              !n.includes("ระบบอัตโนมัติ")
+          );
           if (validNotes.length > 0) {
             const dorm = (dorms || []).find((d) => d.id === att.dormId);
             const dormName = dorm ? dorm.name : `หอพัก ${att.dormId}`;
