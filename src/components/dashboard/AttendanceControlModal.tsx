@@ -3,11 +3,13 @@ import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from
 import {
   formatThaiFullDate,
   getNextDateString,
+  getPreviousDateString,
   getTodayDateString,
   isDormAttendancePaused
 } from "../../utils/dateUtils";
 import { getDormTypeBadgeStyle, getDormTypeLabel } from "../../utils/dormUtils";
 import { useBatchSetAttendanceDateRangeMutation } from "../../services/useDormQueries";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   AlertCircle,
   AlertTriangle,
@@ -424,16 +426,22 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                 </div>
               )}
 
-              {/* Step 1: Select Date Range */}
+              {/* Step 1: Select Date */}
               <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-200 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-indigo-600" />
                     <h4 className="text-sm font-black text-slate-900">
-                      ขั้นตอนที่ 1: เลือกช่วงวันที่ (วันที่เริ่มต้น - วันที่สิ้นสุด)
+                      {targetStatus === "PRESENT"
+                        ? "ขั้นตอนที่ 1: เลือกวันที่ดำเนินการ (เช็คยอดตามปกติ 1 วัน - ไม่ต้องเลือกช่วงวัน)"
+                        : "ขั้นตอนที่ 1: เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - วันที่สิ้นสุด)"}
                     </h4>
                   </div>
-                  {daysCount > 0 ? (
+                  {targetStatus === "PRESENT" ? (
+                    <span className="text-xs font-black bg-emerald-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                      เช็คยอดตามปกติวันที่ {formatThaiFullDate(rangeStartDate)} (1 วัน)
+                    </span>
+                  ) : daysCount > 0 ? (
                     <span className="text-xs font-black bg-indigo-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
                       รวม {daysCount} วัน ({formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(rangeEndDate)})
                     </span>
@@ -444,92 +452,169 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Start Date */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      📅 วันที่เริ่มต้น:
-                    </label>
-                    <input
-                      type="date"
-                      value={rangeStartDate}
-                      onChange={(e) => setRangeStartDate(e.target.value)}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none shadow-2xs"
-                    />
-                    <p className="text-[11px] text-slate-500">
-                      ไทย: {formatThaiFullDate(rangeStartDate)}
-                    </p>
-                  </div>
+                {targetStatus === "PRESENT" ? (
+                  /* Single date for PRESENT */
+                  <div className="space-y-3">
+                    <div className="max-w-md">
+                      <ThaiDatePicker
+                        label="📅 เลือกวันที่ต้องการเช็คยอดตามปกติ:"
+                        value={rangeStartDate}
+                        onChange={(val) => {
+                          setRangeStartDate(val);
+                          setRangeEndDate(val);
+                        }}
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        ไทย: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
+                      </p>
+                    </div>
 
-                  {/* End Date */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      📅 วันที่สิ้นสุด:
-                    </label>
-                    <input
-                      type="date"
-                      value={rangeEndDate}
-                      onChange={(e) => setRangeEndDate(e.target.value)}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none shadow-2xs"
-                    />
-                    <p className="text-[11px] text-slate-500">
-                      ไทย: {formatThaiFullDate(rangeEndDate)}
-                    </p>
-                  </div>
-                </div>
+                    <div className="pt-1 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                        ปุ่มเลือกด่วน:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const today = getTodayDateString();
+                          setRangeStartDate(today);
+                          setRangeEndDate(today);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                          rangeStartDate === getTodayDateString()
+                            ? "bg-emerald-600 text-white"
+                            : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                        }`}
+                      >
+                        วันนี้ ({formatThaiFullDate(getTodayDateString(), false)})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const yest = getPreviousDateString(getTodayDateString());
+                          setRangeStartDate(yest);
+                          setRangeEndDate(yest);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                          rangeStartDate === getPreviousDateString(getTodayDateString())
+                            ? "bg-emerald-600 text-white"
+                            : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                        }`}
+                      >
+                        เมื่อวานนี้
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = getNextDateString(getTodayDateString());
+                          setRangeStartDate(next);
+                          setRangeEndDate(next);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                          rangeStartDate === getNextDateString(getTodayDateString())
+                            ? "bg-emerald-600 text-white"
+                            : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                        }`}
+                      >
+                        พรุ่งนี้
+                      </button>
+                    </div>
 
-                {/* Quick Presets */}
-                <div className="pt-2 flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-500" />
-                    ปุ่มเลือกด่วน:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRangeStartDate(selectedDate || getTodayDateString());
-                      setRangeEndDate(selectedDate || getTodayDateString());
-                    }}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition-all cursor-pointer shadow-2xs"
-                  >
-                    1 วัน (เฉพาะวันนี้)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPreset(3)}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                  >
-                    3 วัน (รวมสุดสัปดาห์)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPreset(5)}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                  >
-                    5 วัน (วันธรรมดา)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPreset(7)}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                  >
-                    7 วัน (1 สัปดาห์)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPreset(14)}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                  >
-                    14 วัน (2 สัปดาห์)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPreset(30)}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 transition-all cursor-pointer shadow-2xs"
-                  >
-                    30 วัน (ปิดภาคเรียน 1 เดือน)
-                  </button>
-                </div>
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2">
+                      <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <p>
+                        <strong>สถานะเช็คยอดตามปกติ (PRESENT):</strong> กำหนดแบบรายวัน (1 วัน) ระบบจะระบุสถานะนักเรียนทุกคนในหอพักที่เลือกเป็น <strong>"อยู่หอพักปกติ"</strong> สำหรับวันที่ระบุ และพร้อมให้เช็คยอดตามปกติได้ทันที
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  /* Date range for HOME_BREAK, SEMESTER_BREAK, CLEAR */
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Start Date */}
+                      <div className="space-y-1.5">
+                        <ThaiDatePicker
+                          label="📅 วันที่เริ่มต้น:"
+                          value={rangeStartDate}
+                          onChange={(val) => {
+                            setRangeStartDate(val);
+                            if (val > rangeEndDate) setRangeEndDate(val);
+                          }}
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          ไทย: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
+                        </p>
+                      </div>
+
+                      {/* End Date */}
+                      <div className="space-y-1.5">
+                        <ThaiDatePicker
+                          label="📅 วันที่สิ้นสุด:"
+                          value={rangeEndDate}
+                          min={rangeStartDate}
+                          onChange={(val) => setRangeEndDate(val)}
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          ไทย: <strong>{formatThaiFullDate(rangeEndDate)}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div className="pt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                        ปุ่มเลือกด่วน:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRangeStartDate(selectedDate || getTodayDateString());
+                          setRangeEndDate(selectedDate || getTodayDateString());
+                        }}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition-all cursor-pointer shadow-2xs"
+                      >
+                        1 วัน (เฉพาะวันนี้)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(3)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                      >
+                        3 วัน (รวมสุดสัปดาห์)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(5)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                      >
+                        5 วัน (วันธรรมดา)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(7)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                      >
+                        7 วัน (1 สัปดาห์)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(14)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                      >
+                        14 วัน (2 สัปดาห์)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(30)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 transition-all cursor-pointer shadow-2xs"
+                      >
+                        30 วัน (ปิดภาคเรียน 1 เดือน)
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Step 2: Select Dormitories */}
@@ -683,7 +768,10 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
 
                   {/* Status 3: PRESENT */}
                   <div
-                    onClick={() => setTargetStatus("PRESENT")}
+                    onClick={() => {
+                      setTargetStatus("PRESENT");
+                      setRangeEndDate(rangeStartDate);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
                       targetStatus === "PRESENT"
                         ? "bg-emerald-50 border-emerald-500 shadow-sm ring-2 ring-emerald-400"
@@ -792,7 +880,11 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                     </span>
                   </div>
                   <div className="text-xs text-slate-300">
-                    ช่วงวัน: <strong>{formatThaiFullDate(rangeStartDate)}</strong> ถึง <strong>{formatThaiFullDate(rangeEndDate)}</strong> ({daysCount} วัน)
+                    {targetStatus === "PRESENT" ? (
+                      <span>วันที่ดำเนินการ: <strong>{formatThaiFullDate(rangeStartDate)}</strong> (1 วัน)</span>
+                    ) : (
+                      <span>ช่วงวัน: <strong>{formatThaiFullDate(rangeStartDate)}</strong> ถึง <strong>{formatThaiFullDate(rangeEndDate)}</strong> ({daysCount} วัน)</span>
+                    )}
                     {" • "}
                     หอพัก: <strong>{selectedDormIds.length}</strong> หอพัก
                   </div>
@@ -1182,9 +1274,13 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
 
               <div className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                 <div className="flex justify-between border-b border-slate-200 pb-1.5">
-                  <span className="text-slate-500 font-semibold">ช่วงวันที่:</span>
+                  <span className="text-slate-500 font-semibold">
+                    {targetStatus === "PRESENT" ? "วันที่ดำเนินการ:" : "ช่วงวันที่:"}
+                  </span>
                   <span className="font-bold text-slate-900">
-                    {formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(rangeEndDate)} ({daysCount} วัน)
+                    {targetStatus === "PRESENT"
+                      ? `${formatThaiFullDate(rangeStartDate)} (1 วัน)`
+                      : `${formatThaiFullDate(rangeStartDate)} ถึง ${formatThaiFullDate(rangeEndDate)} (${daysCount} วัน)`}
                   </span>
                 </div>
                 <div className="flex justify-between border-b border-slate-200 pb-1.5">

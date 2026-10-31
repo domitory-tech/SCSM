@@ -17,6 +17,7 @@ import { MonthlyReportView } from "./MonthlyReportView";
 import { DashboardReportView } from "./DashboardReportView";
 import { DormitorySummaryReportView } from "./DormitorySummaryReportView";
 import { ThaiCalendarPicker } from "../dashboard/ThaiCalendarPicker";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import { toPng, toBlob } from "html-to-image";
 import {
   BarChart3,
@@ -729,34 +730,30 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
             {/* New Line: Date Selector & Export Button */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-100">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-extrabold text-gray-700">เลือกวันที่รายงาน:</span>
-                <input
-                  type="date"
-                  value={selectedReportDate}
-                  max={getTodayDateString()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    const todayStr = getTodayDateString();
-                    if (val > todayStr) {
-                      alert("⚠️ ไม่สามารถเลือกรายงานเกินวันที่ปัจจุบันได้");
-                      setSelectedReportDate(todayStr);
-                    } else {
-                      setSelectedReportDate(val || todayStr);
-                    }
-                  }}
-                  className="bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:ring-2 focus:ring-[#A05AFF]"
-                />
+                <span className="text-xs font-extrabold text-gray-700 shrink-0">เลือกวันที่รายงาน:</span>
+                <div className="w-56 sm:w-64">
+                  <ThaiDatePicker
+                    value={selectedReportDate}
+                    max={getTodayDateString()}
+                    onChange={(val) => {
+                      const todayStr = getTodayDateString();
+                      if (val > todayStr) {
+                        alert("⚠️ ไม่สามารถเลือกรายงานเกินวันที่ปัจจุบันได้");
+                        setSelectedReportDate(todayStr);
+                      } else {
+                        setSelectedReportDate(val || todayStr);
+                      }
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowCalendarModal(true)}
-                  className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-[#A05AFF] text-xs font-extrabold rounded-xl px-3 py-1.5 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                  title="คลิกเพื่อเปิดปฏิทินรายงานเช็คยอดนักเรียน"
+                  className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-[#A05AFF] text-xs font-extrabold rounded-xl px-3 py-2 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="คลิกเพื่อเปิดปฏิทินรายงานเช็คยอดนักเรียนแบบเต็ม"
                 >
                   <Calendar className="w-3.5 h-3.5 text-[#A05AFF] shrink-0" />
-                  <span>{formatThaiFullDate(selectedReportDate)}</span>
-                  <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.5 rounded-md font-bold">
-                    เปิดปฏิทิน
-                  </span>
+                  <span>ปฏิทินรายงาน</span>
                 </button>
               </div>
 

@@ -22,6 +22,7 @@ import {
   printIndividualStudentHistory
 } from "../../utils/studentSearchReportExporter";
 import { formatStudentId } from "../../utils/studentUtils";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   Search,
   Calendar,
@@ -995,12 +996,12 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                 <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
                 <span>เริ่มค้นหาจากวันที่</span>
               </label>
-              <input
-                type="date"
-                id="input-start-date"
+              <ThaiDatePicker
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:border-[#A05AFF] focus:outline-none"
+                onChange={(val) => {
+                  setStartDate(val);
+                  if (val > endDate) setEndDate(val);
+                }}
               />
             </div>
 
@@ -1010,12 +1011,10 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                 <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
                 <span>ถึงวันที่</span>
               </label>
-              <input
-                type="date"
-                id="input-end-date"
+              <ThaiDatePicker
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:border-[#A05AFF] focus:outline-none"
+                min={startDate}
+                onChange={(val) => setEndDate(val)}
               />
             </div>
           </div>

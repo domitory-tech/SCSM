@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Notice } from "../../types";
 import { formatThaiFullDate, getTodayDateString } from "../../utils/dateUtils";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   AlertCircle,
   AlertTriangle,
@@ -283,27 +284,18 @@ export const NoticeManagerView: React.FC<NoticeManagerViewProps> = ({
               <label className="block text-xs font-bold text-gray-700 mb-1">
                 วันที่แจ้งเรื่อง (ไม่เกินวันนี้)
               </label>
-              <div className="space-y-1.5">
-                <input
-                  type="date"
-                  value={date}
-                  max={todayStr}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val > todayStr) {
-                      alert("⚠️ ไม่สามารถสร้างเรื่องแจ้งอบรมล่วงหน้าเกินวันที่ปัจจุบันได้");
-                      setDate(todayStr);
-                    } else {
-                      setDate(val || todayStr);
-                    }
-                  }}
-                  className="w-full bg-gray-50 border border-gray-200 text-xs text-gray-800 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-pink-500 cursor-pointer font-bold"
-                />
-                <div className="bg-pink-50 border border-pink-200 text-pink-800 text-xs font-bold rounded-xl px-3 py-1.5 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-pink-600 shrink-0" />
-                  <span>{formatThaiFullDate(date)}</span>
-                </div>
-              </div>
+              <ThaiDatePicker
+                value={date}
+                max={todayStr}
+                onChange={(val) => {
+                  if (val > todayStr) {
+                    alert("⚠️ ไม่สามารถสร้างเรื่องแจ้งอบรมล่วงหน้าเกินวันที่ปัจจุบันได้");
+                    setDate(todayStr);
+                  } else {
+                    setDate(val || todayStr);
+                  }
+                }}
+              />
             </div>
 
             <div>
@@ -520,24 +512,20 @@ export const NoticeManagerView: React.FC<NoticeManagerViewProps> = ({
               {/* ที่เหลือให้เลือกจากวันที่ (Custom Date) */}
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold text-gray-600 whitespace-nowrap">เลือกวันที่:</span>
-                <input
-                  type="date"
-                  value={customDate}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCustomDate(val);
-                    if (val) {
-                      setTimeRange("CUSTOM_DATE");
-                    } else {
-                      setTimeRange("ALL");
-                    }
-                  }}
-                  className={`bg-gray-50 border text-xs rounded-xl px-2.5 py-1.5 outline-none font-bold cursor-pointer transition-colors ${
-                    timeRange === "CUSTOM_DATE" && customDate
-                      ? "border-orange-400 ring-2 ring-orange-100 text-orange-900"
-                      : "border-gray-200 text-gray-700 focus:ring-2 focus:ring-purple-500"
-                  }`}
-                />
+                <div className="w-48 sm:w-56">
+                  <ThaiDatePicker
+                    value={customDate}
+                    placeholder="เลือกวันที่ค้นหา"
+                    onChange={(val) => {
+                      setCustomDate(val);
+                      if (val) {
+                        setTimeRange("CUSTOM_DATE");
+                      } else {
+                        setTimeRange("ALL");
+                      }
+                    }}
+                  />
+                </div>
                 {customDate && (
                   <button
                     type="button"

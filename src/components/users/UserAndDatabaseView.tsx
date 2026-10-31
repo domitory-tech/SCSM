@@ -5,6 +5,7 @@ import { NavigationPermissionsTab } from "./NavigationPermissionsTab";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
 import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   fetchUsers,
   addUser,
@@ -2828,19 +2829,12 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         <label htmlFor="att-backup-date" className="block text-xs font-bold text-slate-700">
                           ระบุวันที่ที่ต้องการสำรองข้อมูล <span className="text-purple-600">*</span>
                         </label>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            id="att-backup-date"
-                            type="date"
+                        <div className="max-w-md">
+                          <ThaiDatePicker
                             value={attBackupDate}
                             max={getTodayDateString()}
-                            onChange={(e) => setAttBackupDate(e.target.value)}
-                            className="bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] outline-none"
+                            onChange={(val) => setAttBackupDate(val)}
                           />
-                          <div className="bg-purple-100/80 text-purple-900 border border-purple-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
-                            <Calendar className="w-3.5 h-3.5 text-[#A05AFF]" />
-                            <span>{formatThaiFullDate(attBackupDate)}</span>
-                          </div>
                         </div>
                       </div>
                     )}
@@ -2869,35 +2863,26 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     {attBackupMode === "RANGE" && (
                       <>
                         <div className="space-y-1.5">
-                          <label htmlFor="att-backup-start-date" className="block text-xs font-bold text-slate-700">
+                          <label className="block text-xs font-bold text-slate-700">
                             ตั้งแต่วันที่ <span className="text-purple-600">*</span>
                           </label>
-                          <input
-                            id="att-backup-start-date"
-                            type="date"
+                          <ThaiDatePicker
                             value={attBackupStartDate}
-                            onChange={(e) => setAttBackupStartDate(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] outline-none"
+                            onChange={(val) => {
+                              setAttBackupStartDate(val);
+                              if (val > attBackupEndDate) setAttBackupEndDate(val);
+                            }}
                           />
-                          <span className="text-[11px] text-purple-700 font-bold block">
-                            {formatThaiFullDate(attBackupStartDate)}
-                          </span>
                         </div>
                         <div className="space-y-1.5">
-                          <label htmlFor="att-backup-end-date" className="block text-xs font-bold text-slate-700">
+                          <label className="block text-xs font-bold text-slate-700">
                             ถึงวันที่ <span className="text-purple-600">*</span>
                           </label>
-                          <input
-                            id="att-backup-end-date"
-                            type="date"
+                          <ThaiDatePicker
                             value={attBackupEndDate}
                             min={attBackupStartDate}
-                            onChange={(e) => setAttBackupEndDate(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] outline-none"
+                            onChange={(val) => setAttBackupEndDate(val)}
                           />
-                          <span className="text-[11px] text-purple-700 font-bold block">
-                            {formatThaiFullDate(attBackupEndDate)}
-                          </span>
                         </div>
                       </>
                     )}
@@ -3136,21 +3121,21 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         {attRestoreMode === "RANGE" && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-indigo-100">
                             <div>
-                              <label className="block text-[11px] font-bold text-slate-700">ตั้งแต่วันที่</label>
-                              <input
-                                type="date"
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">ตั้งแต่วันที่</label>
+                              <ThaiDatePicker
                                 value={attRestoreStartDate}
-                                onChange={(e) => setAttRestoreStartDate(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800"
+                                onChange={(val) => {
+                                  setAttRestoreStartDate(val);
+                                  if (val > attRestoreEndDate) setAttRestoreEndDate(val);
+                                }}
                               />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-bold text-slate-700">ถึงวันที่</label>
-                              <input
-                                type="date"
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">ถึงวันที่</label>
+                              <ThaiDatePicker
                                 value={attRestoreEndDate}
-                                onChange={(e) => setAttRestoreEndDate(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800"
+                                min={attRestoreStartDate}
+                                onChange={(val) => setAttRestoreEndDate(val)}
                               />
                             </div>
                           </div>
@@ -3322,19 +3307,12 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         <label htmlFor="att-clear-date" className="block text-xs font-bold text-slate-700">
                           ระบุวันที่ที่ต้องการล้างข้อมูล <span className="text-rose-600">*</span>
                         </label>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            id="att-clear-date"
-                            type="date"
+                        <div className="max-w-md">
+                          <ThaiDatePicker
                             value={attClearDate}
                             max={getTodayDateString()}
-                            onChange={(e) => setAttClearDate(e.target.value)}
-                            className="bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
+                            onChange={(val) => setAttClearDate(val)}
                           />
-                          <div className="bg-rose-100/80 text-rose-900 border border-rose-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
-                            <Calendar className="w-3.5 h-3.5 text-rose-600" />
-                            <span>{formatThaiFullDate(attClearDate)}</span>
-                          </div>
                         </div>
                       </div>
                     )}
@@ -3363,35 +3341,26 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     {attClearMode === "BY_RANGE" && (
                       <>
                         <div className="space-y-1.5">
-                          <label htmlFor="att-clear-start-date" className="block text-xs font-bold text-slate-700">
+                          <label className="block text-xs font-bold text-slate-700">
                             ตั้งแต่วันที่ <span className="text-rose-600">*</span>
                           </label>
-                          <input
-                            id="att-clear-start-date"
-                            type="date"
+                          <ThaiDatePicker
                             value={attClearStartDate}
-                            onChange={(e) => setAttClearStartDate(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
+                            onChange={(val) => {
+                              setAttClearStartDate(val);
+                              if (val > attClearEndDate) setAttClearEndDate(val);
+                            }}
                           />
-                          <span className="text-[11px] text-rose-700 font-bold block">
-                            {formatThaiFullDate(attClearStartDate)}
-                          </span>
                         </div>
                         <div className="space-y-1.5">
-                          <label htmlFor="att-clear-end-date" className="block text-xs font-bold text-slate-700">
+                          <label className="block text-xs font-bold text-slate-700">
                             ถึงวันที่ <span className="text-rose-600">*</span>
                           </label>
-                          <input
-                            id="att-clear-end-date"
-                            type="date"
+                          <ThaiDatePicker
                             value={attClearEndDate}
                             min={attClearStartDate}
-                            onChange={(e) => setAttClearEndDate(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
+                            onChange={(val) => setAttClearEndDate(val)}
                           />
-                          <span className="text-[11px] text-rose-700 font-bold block">
-                            {formatThaiFullDate(attClearEndDate)}
-                          </span>
                         </div>
                       </>
                     )}

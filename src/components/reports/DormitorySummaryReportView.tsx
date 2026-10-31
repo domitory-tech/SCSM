@@ -16,6 +16,7 @@ import { getStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, ge
 import { formatStudentId } from "../../utils/studentUtils";
 import { exportDormitoryReportHtmlDocument } from "../../utils/dormitoryReportExporter";
 import { useAttendanceQuery, useUsersQuery } from "../../services/useDormQueries";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   AlertCircle,
   Building2,
@@ -753,13 +754,14 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
               <Calendar className="w-3.5 h-3.5 text-purple-600" />
               <span>วันที่:</span>
             </span>
-            <input
-              type="date"
-              value={selectedDate}
-              max={todayStr}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            />
+            <div className="w-48 sm:w-60">
+              <ThaiDatePicker
+                value={selectedDate}
+                max={todayStr}
+                onChange={(val) => setSelectedDate(val || todayStr)}
+                placeholder="เลือกวันที่"
+              />
+            </div>
             <button
               onClick={() => setSelectedDate(todayStr)}
               className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${

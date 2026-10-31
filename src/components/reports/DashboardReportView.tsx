@@ -22,6 +22,7 @@ import {
   exportAbsentListOnlyHtml,
   DashboardReportExportData
 } from "../../utils/dashboardReportExporter";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   BarChart3,
   Calendar,
@@ -819,27 +820,27 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
           <div className="flex flex-wrap items-center gap-2.5">
             {periodType === "daily" && (
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-700">เลือกวันที่:</span>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  max={getTodayDateString()}
-                  onChange={(e) => setSelectedDate(e.target.value || todayStr)}
-                  className="bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-purple-500"
-                />
+                <span className="text-xs font-bold text-slate-700 shrink-0">เลือกวันที่:</span>
+                <div className="w-56 sm:w-64">
+                  <ThaiDatePicker
+                    value={selectedDate}
+                    max={getTodayDateString()}
+                    onChange={(val) => setSelectedDate(val || todayStr)}
+                  />
+                </div>
               </div>
             )}
 
             {periodType === "weekly" && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-700">เลือกวันในสัปดาห์:</span>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  max={getTodayDateString()}
-                  onChange={(e) => setSelectedDate(e.target.value || todayStr)}
-                  className="bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-purple-500"
-                />
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-700 shrink-0">เลือกวันในสัปดาห์:</span>
+                <div className="w-56 sm:w-64">
+                  <ThaiDatePicker
+                    value={selectedDate}
+                    max={getTodayDateString()}
+                    onChange={(val) => setSelectedDate(val || todayStr)}
+                  />
+                </div>
                 <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
                   {dateRangeText}
                 </span>

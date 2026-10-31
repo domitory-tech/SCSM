@@ -3,6 +3,7 @@ import { DailyAttendance, Dormitory, Notice, Student, StudentAttendanceRecord, U
 import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString, isDormAttendancePaused } from "../../utils/dateUtils";
 import { formatStudentId } from "../../utils/studentUtils";
 import { fetchAttendance } from "../../services/api";
+import { ThaiDatePicker } from "../common/ThaiDatePicker";
 
 // Helper parsers for sorting grade, room, and student number
 const parseGradeNum = (grade: string | undefined): number => {
@@ -731,18 +732,16 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               )}
             </div>
 
-            {/* Date Picker */}
+            {/* Thai Date Picker */}
             <div>
               <label className="block text-[10px] font-bold text-gray-400 mb-1 uppercase">
-                วันที่เช็คยอด (เลือกย้อนหลังได้ ไม่เกินวันนี้)
+                วันที่เช็คยอด (ปฏิทินไทย ไม่เกินวันนี้)
               </label>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                <input
-                  type="date"
+              <div className="w-full sm:w-72">
+                <ThaiDatePicker
                   value={selectedDate}
                   max={todayStr}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  onChange={(val) => {
                     if (val > todayStr) {
                       alert("⚠️ ไม่สามารถเช็คยอดเกินวันที่ปัจจุบันได้");
                       setSelectedDate(todayStr);
@@ -750,12 +749,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                       setSelectedDate(val || todayStr);
                     }
                   }}
-                  className="bg-gray-50 border border-gray-300 text-gray-800 text-xs font-bold rounded-xl px-3 py-2 focus:ring-2 focus:ring-pink-500 outline-none cursor-pointer"
                 />
-                <div className="bg-pink-50 border border-pink-200 text-pink-800 text-xs font-bold rounded-xl px-3 py-2 flex items-center gap-1.5 shadow-xs">
-                  <Calendar className="w-4 h-4 text-pink-600 shrink-0" />
-                  <span>{formatThaiFullDate(selectedDate)}</span>
-                </div>
               </div>
             </div>
 
