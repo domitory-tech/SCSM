@@ -68,6 +68,19 @@ export const ALL_NAVIGATION_MENUS: NavigationMenuDefinition[] = [
     }
   },
   {
+    id: "special-status",
+    name: "กำหนดสถานะพิเศษ (Special Status)",
+    shortName: "กำหนดสถานะพิเศษ",
+    description: "จัดการกำหนดสถานะรอบกลับบ้านและปิดภาคเรียนตามช่วงวัน สำหรับวันหยุดยาวและปิดเทอม",
+    category: "OPERATIONS",
+    defaultRoles: {
+      guest: true,
+      level3: true,
+      level2: true,
+      level1: true
+    }
+  },
+  {
     id: "notices",
     name: "เรื่องแจ้งอบรม (Notices)",
     shortName: "แจ้งอบรม",
@@ -87,7 +100,7 @@ export const ALL_NAVIGATION_MENUS: NavigationMenuDefinition[] = [
     description: "สรุปยอดประจำวัน พิมพ์ใบรายงานผล และส่งออกข้อมูล",
     category: "OPERATIONS",
     defaultRoles: {
-      guest: false,
+      guest: true,
       level3: true,
       level2: true,
       level1: true
@@ -135,11 +148,42 @@ export const ALL_NAVIGATION_MENUS: NavigationMenuDefinition[] = [
 ];
 
 export const DEFAULT_ROLE_NAVIGATION_PERMISSIONS: RoleNavigationPermissions = {
-  guest: ["dashboard"],
-  level3: ["dashboard", "dorm-layout", "student-search", "check-attendance", "reports", "users-db"],
-  level2: ["dashboard", "dorm-layout", "student-search", "check-attendance", "notices", "reports", "students", "dorms", "users-db"],
-  level1: ["dashboard", "dorm-layout", "student-search", "check-attendance", "notices", "reports", "students", "dorms", "users-db"]
+  guest: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "reports"],
+  level3: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "reports", "users-db"],
+  level2: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "notices", "reports", "students", "dorms", "users-db"],
+  level1: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "notices", "reports", "students", "dorms", "users-db"]
 };
+
+/**
+ * Normalizes navigation permissions by ensuring newly added system menus like
+ * "special-status" are included even if older system settings were persisted in Firestore.
+ */
+export function normalizeNavigationPermissions(
+  permissions?: RoleNavigationPermissions | null
+): RoleNavigationPermissions {
+  const result: RoleNavigationPermissions = {
+    guest: permissions?.guest ? [...permissions.guest] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest],
+    level3: permissions?.level3 ? [...permissions.level3] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3],
+    level2: permissions?.level2 ? [...permissions.level2] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2],
+    level1: permissions?.level1 ? [...permissions.level1] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1]
+  };
+
+  // Backwards compatibility migration: ensure "special-status" is present in level1, level2, level3, and guest
+  if (!result.level1.includes("special-status")) {
+    result.level1.push("special-status");
+  }
+  if (!result.level2.includes("special-status")) {
+    result.level2.push("special-status");
+  }
+  if (!result.level3.includes("special-status")) {
+    result.level3.push("special-status");
+  }
+  if (!result.guest.includes("special-status")) {
+    result.guest.push("special-status");
+  }
+
+  return result;
+}
 
 /**
  * Checks if a specific user role or guest has access to a target tab ID
@@ -149,27 +193,23 @@ export function isMenuAccessible(
   currentUser: { roleLevel?: number } | null | undefined,
   permissions?: RoleNavigationPermissions | null
 ): boolean {
-  const activePerms = permissions || DEFAULT_ROLE_NAVIGATION_PERMISSIONS;
+  const activePerms = normalizeNavigationPermissions(permissions);
 
   // Level 1 Admin always has full access fallback
   if (currentUser?.roleLevel === 1) {
-    const l1List = activePerms.level1 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1 ?? [];
-    return l1List.includes(menuId);
+    return activePerms.level1.includes(menuId);
   }
 
   // Level 2 Staff
   if (currentUser?.roleLevel === 2) {
-    const l2List = activePerms.level2 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2 ?? [];
-    return l2List.includes(menuId);
+    return activePerms.level2.includes(menuId);
   }
 
   // Level 3 Teacher / User
   if (currentUser?.roleLevel === 3) {
-    const l3List = activePerms.level3 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3 ?? [];
-    return l3List.includes(menuId);
+    return activePerms.level3.includes(menuId);
   }
 
   // Guest (Not logged in)
-  const guestList = activePerms.guest ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest ?? [];
-  return guestList.includes(menuId);
+  return activePerms.guest.includes(menuId);
 }

@@ -4,6 +4,8 @@ import {
   addStudent,
   addUser,
   batchDeleteStudents,
+  batchSetAttendanceDateRange,
+  BatchSetAttendanceDateRangePayload,
   batchTransferStudentsDorm,
   bulkSetHomeBreakAllDorms,
   clearStudentsDatabase,
@@ -313,6 +315,22 @@ export function useBulkHomeBreakMutation() {
       queryClient.invalidateQueries({ queryKey: ["attendance"] });
       queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
       queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      queryClient.invalidateQueries({ queryKey: ["checkedDates"] });
+    }
+  });
+}
+
+export function useBatchSetAttendanceDateRangeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: BatchSetAttendanceDateRangePayload) =>
+      batchSetAttendanceDateRange(payload),
+    onSuccess: () => {
+      recordLastDbSave();
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["allAttendanceRecords"] });
+      queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      queryClient.invalidateQueries({ queryKey: ["checkedDates"] });
     }
   });
 }

@@ -22,6 +22,7 @@ import {
   BedDouble,
   LayoutGrid,
   Calendar,
+  CalendarRange,
   ChevronDown,
   X
 } from "lucide-react";
@@ -144,6 +145,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badgeColor: systemSettings?.isAttendancePaused
         ? "bg-rose-600 text-white font-black animate-pulse"
         : "bg-[#FE9496] text-white font-extrabold"
+    },
+    {
+      id: "special-status",
+      label: "กำหนดสถานะพิเศษ",
+      fullLabel: "กำหนดสถานะพิเศษ",
+      icon: CalendarRange
     },
     {
       id: "notices",

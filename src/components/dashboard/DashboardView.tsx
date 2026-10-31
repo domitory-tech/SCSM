@@ -34,6 +34,7 @@ import {
   AlertCircle,
   ArrowRight,
   Calendar,
+  CalendarRange,
   CheckCircle2,
   Clock,
   Copy,
@@ -74,10 +75,18 @@ interface DashboardViewProps {
   onNavigateToReports: () => void;
   onNavigateToDormLayout?: () => void;
   onNavigateToStudents?: () => void;
+  onNavigateToSpecialStatus?: () => void;
   currentUser?: UserProfile | null;
   systemSettings?: SystemSettings;
   onUpdateSystemSettings?: (settings: SystemSettings) => Promise<void> | void;
   onBulkHomeBreak?: (mode: "SET_HOME_BREAK" | "REVERT_NORMAL") => Promise<void>;
+  onBatchSetDateRange?: (payload: {
+    startDate: string;
+    endDate: string;
+    dormIds: string[] | "ALL";
+    status: "HOME_BREAK" | "SEMESTER_BREAK" | "PRESENT" | "CLEAR";
+    orientationNotes?: string[];
+  }) => Promise<{ affectedDatesCount: number; affectedRecordsCount: number; message: string }>;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -92,10 +101,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToReports,
   onNavigateToDormLayout,
   onNavigateToStudents,
+  onNavigateToSpecialStatus,
   currentUser,
   systemSettings,
   onUpdateSystemSettings,
-  onBulkHomeBreak
+  onBulkHomeBreak,
+  onBatchSetDateRange
 }) => {
   const { data: queriedUsers = [] } = useUsersQuery();
   const effectiveUsers = users && users.length > 0 ? users : queriedUsers;
@@ -106,7 +117,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isNoticesModalOpen, setIsNoticesModalOpen] = React.useState<boolean>(false);
   const [isDormStatsModalOpen, setIsDormStatsModalOpen] = React.useState<boolean>(false);
   const [isControlModalOpen, setIsControlModalOpen] = React.useState<boolean>(false);
-  const [controlModalInitialTab, setControlModalInitialTab] = React.useState<"PAUSE_RESUME" | "HOME_BREAK">("PAUSE_RESUME");
+  const [controlModalInitialTab, setControlModalInitialTab] = React.useState<"DATE_RANGE" | "PAUSE_RESUME" | "HOME_BREAK">("DATE_RANGE");
 
   // Dorm filter state for the Grade Statistics table (allowing user to view grade breakdown per dorm or all)
   const [gradeStatsDormFilter, setGradeStatsDormFilter] = React.useState<string>("ALL");
@@ -2479,13 +2490,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  เปลี่ยนสถานะทุกหอพักเป็นรอบกลับบ้าน หรือควบคุมการหยุด/เปิดระบบเช็คยอด (ทุกหอ & แยกหอ)
+                  กำหนดสถานะตามช่วงวัน (รอบกลับบ้าน / ปิดภาคเรียน / ปกติ) หรือควบคุมการหยุด/เปิดระบบเช็คยอด
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start md:self-auto">
-              {/* Button 1: สถานะรอบกลับบ้าน ทุกหอพัก */}
+              {/* Button 0: กำหนดสถานะพิเศษ (เปิดหน้าเมนูกำหนดสถานะพิเศษ หรือเปิดหน้าต่าง) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onNavigateToSpecialStatus) {
+                    onNavigateToSpecialStatus();
+                  } else {
+                    setControlModalInitialTab("DATE_RANGE");
+                    setIsControlModalOpen(true);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white border border-indigo-400/60"
+                title="เปิดหน้าเมนู 'กำหนดสถานะพิเศษ' เพื่อจัดการวันหยุดยาว รอบกลับบ้าน และปิดภาคเรียน"
+              >
+                <CalendarRange className="w-4 h-4 shrink-0 text-amber-300" />
+                <span>กำหนดสถานะพิเศษ</span>
+                <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase">
+                  เมนูใหม่
+                </span>
+              </button>
+
+              {/* Button 1: สถานะรอบกลับบ้าน ทุกหอพัก (เฉพาะวันนี้) */}
               <button
                 type="button"
                 onClick={() => {
@@ -2507,7 +2539,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     ? "✓ รอบกลับบ้านครบทุกหอแล้ว"
                     : dorms.filter((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK").length > 0
                     ? `รอบกลับบ้าน (${dorms.filter((d) => activeAttendanceMap[d.id]?.isHomeBreak || activeAttendanceMap[d.id]?.status === "HOME_BREAK").length}/${dorms.length} หอ)`
-                    : "รอบกลับบ้านทุกหอพัก"}
+                    : "รอบกลับบ้านด่วน"}
                 </span>
               </button>
 
@@ -2800,6 +2832,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           selectedDate={effectiveDashboardDate}
           activeAttendanceMap={activeAttendanceMap}
           onBulkHomeBreak={onBulkHomeBreak}
+          onBatchSetDateRange={onBatchSetDateRange}
           initialTab={controlModalInitialTab}
         />
       )}

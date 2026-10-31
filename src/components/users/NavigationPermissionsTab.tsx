@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { RoleNavigationPermissions, SystemSettings } from "../../types";
-import { ALL_NAVIGATION_MENUS, DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../../utils/permissionUtils";
+import { ALL_NAVIGATION_MENUS, DEFAULT_ROLE_NAVIGATION_PERMISSIONS, normalizeNavigationPermissions } from "../../utils/permissionUtils";
 import {
   ShieldCheck,
   CheckCircle2,
@@ -33,24 +33,14 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
   isAdmin,
   showNotification
 }) => {
-  const currentPermissions: RoleNavigationPermissions = {
-    guest: systemSettings.navigationPermissions?.guest ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest ?? [],
-    level3: systemSettings.navigationPermissions?.level3 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3 ?? [],
-    level2: systemSettings.navigationPermissions?.level2 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2 ?? [],
-    level1: systemSettings.navigationPermissions?.level1 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1 ?? []
-  };
+  const currentPermissions = normalizeNavigationPermissions(systemSettings.navigationPermissions);
 
   const [permissionsState, setPermissionsState] = useState<RoleNavigationPermissions>(currentPermissions);
   const [selectedCategory, setSelectedCategory] = useState<"ALL" | "MAIN" | "OPERATIONS" | "DATA" | "ADMIN">("ALL");
 
   // Keep synced if systemSettings changes externally
   React.useEffect(() => {
-    setPermissionsState({
-      guest: systemSettings.navigationPermissions?.guest ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest ?? [],
-      level3: systemSettings.navigationPermissions?.level3 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3 ?? [],
-      level2: systemSettings.navigationPermissions?.level2 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2 ?? [],
-      level1: systemSettings.navigationPermissions?.level1 ?? DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1 ?? []
-    });
+    setPermissionsState(normalizeNavigationPermissions(systemSettings.navigationPermissions));
   }, [systemSettings.navigationPermissions]);
 
   const togglePermission = (roleKey: keyof RoleNavigationPermissions, menuId: string) => {

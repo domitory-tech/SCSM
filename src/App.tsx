@@ -17,6 +17,7 @@ import { DailyReportView } from "./components/reports/DailyReportView";
 import { DormsManagementView } from "./components/dorms/DormsManagementView";
 import { DormLayoutView } from "./components/dorms/DormLayoutView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
+import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusManagerView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { FirebaseStatusBadge } from "./components/common/FirebaseStatusBadge";
 import {
@@ -43,7 +44,8 @@ import {
   useUpdateNoticeMutation,
   useUpdateStudentMutation,
   useUpdateSystemSettingsMutation,
-  useUsersQuery
+  useUsersQuery,
+  useBatchSetAttendanceDateRangeMutation
 } from "./services/useDormQueries";
 
 // Create TanStack Query Client
@@ -166,6 +168,7 @@ function MainAppContent() {
   const deleteNoticeMutation = useDeleteNoticeMutation();
   const saveAttendanceMutation = useSaveAttendanceMutation();
   const bulkHomeBreakMutation = useBulkHomeBreakMutation();
+  const batchSetDateRangeMutation = useBatchSetAttendanceDateRangeMutation();
   const exportSheetsMutation = useExportGoogleSheetsMutation();
 
   // Count unchecked dorms today
@@ -191,6 +194,7 @@ function MainAppContent() {
         "dorm-layout": "ผังการจัดหอพัก",
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก (20.00 น.)",
+        "special-status": "กำหนดสถานะพิเศษ",
         "notices": "เรื่องแจ้งอบรม",
         "reports": "รายงานสรุปประจำวัน",
         "students": "จัดการรายชื่อนักเรียน",
@@ -209,6 +213,7 @@ function MainAppContent() {
         "dorm-layout": "ผังการจัดหอพัก",
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก",
+        "special-status": "กำหนดสถานะพิเศษ",
         "notices": "เรื่องแจ้งอบรม",
         "reports": "รายงานสรุปประจำวัน",
         "students": "จัดการรายชื่อนักเรียน",
@@ -289,6 +294,7 @@ function MainAppContent() {
               onNavigateToReports={handleNavigateToReports}
               onNavigateToDormLayout={() => handleSelectTab("dorm-layout")}
               onNavigateToStudents={() => setActiveTab("students")}
+              onNavigateToSpecialStatus={() => handleSelectTab("special-status")}
               currentUser={currentUser}
               systemSettings={systemSettings}
               onUpdateSystemSettings={handleUpdateSystemSettings}
@@ -299,6 +305,14 @@ function MainAppContent() {
                   students,
                   operatorName: currentUser?.name || "ผู้ดูแล/เจ้าหน้าที่",
                   mode
+                });
+              }}
+              onBatchSetDateRange={async (payload) => {
+                return await batchSetDateRangeMutation.mutateAsync({
+                  ...payload,
+                  dorms,
+                  students,
+                  operatorName: currentUser?.name || "ผู้ดูแล/เจ้าหน้าที่"
                 });
               }}
             />
@@ -360,6 +374,27 @@ function MainAppContent() {
                   mode
                 });
               }}
+            />
+          )}
+
+          {activeTab === "special-status" && (
+            <SpecialStatusManagerView
+              dorms={dorms}
+              students={students}
+              currentUser={currentUser}
+              systemSettings={systemSettings}
+              onUpdateSystemSettings={handleUpdateSystemSettings}
+              allAttendanceRecords={allAttendanceRecords}
+              onBatchSetDateRange={async (payload) => {
+                return await batchSetDateRangeMutation.mutateAsync({
+                  ...payload,
+                  dorms,
+                  students,
+                  operatorName: currentUser?.name || "ผู้ดูแล/เจ้าหน้าที่"
+                });
+              }}
+              onNavigateToDashboard={() => handleSelectTab("dashboard")}
+              onNavigateToCheck={handleNavigateToCheck}
             />
           )}
 
