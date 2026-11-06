@@ -560,6 +560,14 @@ export function generateCombinedDailyReportHtml(
         </svg>
         <span>พิมพ์ / บันทึก PDF (ครบทั้ง 3 ใบ)</span>
       </button>
+
+      <button
+        onclick="window.close()"
+        class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-lg transition-colors cursor-pointer border border-slate-700"
+        title="ปิดแท็บนี้"
+      >
+        ปิดหน้านี้
+      </button>
     </div>
   </div>
 
@@ -571,6 +579,37 @@ export function generateCombinedDailyReportHtml(
 </html>`;
 
   return htmlContent;
+}
+
+/**
+ * Opens the combined Daily Report (3 sheets) HTML preview directly in a new browser tab without downloading.
+ */
+export function openCombinedDailyReportInNewTab(
+  sheetIds: string[] = [
+    "daily-report-printable-sheet1",
+    "daily-report-printable-sheet2",
+    "daily-report-printable-sheet3"
+  ],
+  fileName: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน_รวม3ใบ.html",
+  reportDateTitle: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน"
+): Window | null {
+  const htmlContent = generateCombinedDailyReportHtml(sheetIds, fileName, reportDateTitle);
+  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const newTab = window.open(url, "_blank");
+  if (newTab) {
+    newTab.focus();
+    return newTab;
+  } else {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return null;
+  }
 }
 
 /**
