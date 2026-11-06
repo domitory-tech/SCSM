@@ -1,14 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import {
   formatThaiFullDate,
   getNextDateString,
   getPreviousDateString,
   getTodayDateString,
-  isDormAttendancePaused
+  isDormAttendancePaused,
+  findNextSpecialStatus,
+  NextSpecialStatusInfo,
+  calculateDaysCount
 } from "../../utils/dateUtils";
 import { getDormTypeBadgeStyle, getDormTypeLabel } from "../../utils/dormUtils";
-import { useBatchSetAttendanceDateRangeMutation } from "../../services/useDormQueries";
+import { useBatchSetAttendanceDateRangeMutation, useAllAttendanceRecordsQuery } from "../../services/useDormQueries";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   AlertCircle,
@@ -29,6 +32,7 @@ import {
   RotateCcw,
   School,
   Shield,
+  ShieldCheck,
   Sparkles,
   Square,
   Trash2,
@@ -49,6 +53,7 @@ interface AttendanceControlModalProps {
   currentUser?: UserProfile | null;
   selectedDate: string;
   activeAttendanceMap: Record<string, DailyAttendance>;
+  allAttendanceRecords?: DailyAttendance[];
   onBulkHomeBreak: (mode: "SET_HOME_BREAK" | "REVERT_NORMAL") => Promise<void>;
   onBatchSetDateRange?: (payload: {
     startDate: string;
@@ -70,6 +75,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
   currentUser,
   selectedDate,
   activeAttendanceMap,
+  allAttendanceRecords,
   onBulkHomeBreak,
   onBatchSetDateRange,
   initialTab = "DATE_RANGE"
@@ -91,8 +97,47 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
   const [orientationNoteText, setOrientationNoteText] = useState<string>("");
   const [confirmDateRangeOpen, setConfirmDateRangeOpen] = useState(false);
   const [dateRangeSuccessMsg, setDateRangeSuccessMsg] = useState<string | null>(null);
+  const [presentFallbackDays, setPresentFallbackDays] = useState<number>(7);
+
+  const { data: allRecordsFromQuery = [] } = useAllAttendanceRecordsQuery();
+  const recordsToUse = (allAttendanceRecords && allAttendanceRecords.length > 0) ? allAttendanceRecords : allRecordsFromQuery;
 
   const batchMutation = useBatchSetAttendanceDateRangeMutation();
+
+  // Automatic Next Special Status Detection for "เช็คยอดตามปกติ" (PRESENT)
+  const nextSpecialStatusInfo = useMemo<NextSpecialStatusInfo | null>(() => {
+    return findNextSpecialStatus(rangeStartDate, recordsToUse, selectedDormIds);
+  }, [rangeStartDate, recordsToUse, selectedDormIds]);
+
+  const effectiveEndDate = useMemo<string>(() => {
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate) {
+        return nextSpecialStatusInfo.stopDate;
+      }
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        return rangeStartDate;
+      }
+      let curr = rangeStartDate;
+      for (let i = 1; i < presentFallbackDays; i++) {
+        curr = getNextDateString(curr);
+      }
+      return curr;
+    }
+    return rangeEndDate;
+  }, [targetStatus, rangeStartDate, rangeEndDate, nextSpecialStatusInfo, presentFallbackDays]);
+
+  const effectiveDaysCount = useMemo<number>(() => {
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate) {
+        return nextSpecialStatusInfo.daysCount;
+      }
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        return 0;
+      }
+      return presentFallbackDays;
+    }
+    return calculateDaysCount(rangeStartDate, rangeEndDate);
+  }, [targetStatus, rangeStartDate, rangeEndDate, nextSpecialStatusInfo, presentFallbackDays]);
 
   // Sync state when modal opens or initialTab/selectedDate changes
   React.useEffect(() => {
@@ -134,15 +179,6 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
     return `${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} น.`;
   };
 
-  // Calculate day count between rangeStartDate and rangeEndDate
-  const calculateDaysCount = (start: string, end: string): number => {
-    if (!start || !end || start > end) return 0;
-    const s = new Date(start);
-    const e = new Date(end);
-    const diffTime = e.getTime() - s.getTime();
-    return Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  };
-
   const daysCount = calculateDaysCount(rangeStartDate, rangeEndDate);
 
   // Quick Preset Helper for Date Range
@@ -174,10 +210,22 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
 
   // Execute Date-Range Attendance Check
   const handleExecuteDateRangeCheck = async () => {
-    if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) {
-      alert("กรุณาระบุช่วงวันที่ให้ถูกต้อง");
-      return;
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        alert(`วันที่ ${formatThaiFullDate(rangeStartDate)} มีการกำหนดสถานะพิเศษ (${nextSpecialStatusInfo.typeLabel}) อยู่แล้ว ไม่สามารถเช็คยอดตามปกติในวันนี้ได้`);
+        return;
+      }
+      if (effectiveDaysCount <= 0) {
+        alert("กรุณาระบุวันที่เริ่มต้นเช็คยอดให้ถูกต้อง");
+        return;
+      }
+    } else {
+      if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) {
+        alert("กรุณาระบุช่วงวันที่ให้ถูกต้อง");
+        return;
+      }
     }
+
     if (selectedDormIds.length === 0) {
       alert("กรุณาเลือกหอพักอย่างน้อย 1 หอพัก");
       return;
@@ -192,7 +240,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
       if (onBatchSetDateRange) {
         const res = await onBatchSetDateRange({
           startDate: rangeStartDate,
-          endDate: rangeEndDate,
+          endDate: effectiveEndDate,
           dormIds: selectedDormIds.length === dorms.length ? "ALL" : selectedDormIds,
           status: targetStatus,
           orientationNotes: notes
@@ -201,7 +249,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
       } else {
         const res = await batchMutation.mutateAsync({
           startDate: rangeStartDate,
-          endDate: rangeEndDate,
+          endDate: effectiveEndDate,
           dormIds: selectedDormIds.length === dorms.length ? "ALL" : selectedDormIds,
           status: targetStatus,
           orientationNotes: notes,
@@ -212,7 +260,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
         resMessage = res.message;
       }
 
-      setDateRangeSuccessMsg(resMessage || "บันทึกสถานะตามช่วงวันที่ระบุเรียบร้อยแล้ว");
+      setDateRangeSuccessMsg(resMessage || "บันทึกสถานะเรียบร้อยแล้ว");
       setConfirmDateRangeOpen(false);
     } catch (err: any) {
       alert("เกิดข้อผิดพลาดในการบันทึก: " + (err.message || String(err)));
@@ -433,14 +481,25 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                     <Calendar className="w-5 h-5 text-indigo-600" />
                     <h4 className="text-sm font-black text-slate-900">
                       {targetStatus === "PRESENT"
-                        ? "ขั้นตอนที่ 1: เลือกวันที่ดำเนินการ (เช็คยอดตามปกติ 1 วัน - ไม่ต้องเลือกช่วงวัน)"
+                        ? "ขั้นตอนที่ 1: กำหนดวันที่เริ่มต้นเช็คยอดตามปกติ (เช็คต่อเนื่องไปจนถึงวันที่มีสถานะพิเศษโดยอัตโนมัติ)"
                         : "ขั้นตอนที่ 1: เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - วันที่สิ้นสุด)"}
                     </h4>
                   </div>
                   {targetStatus === "PRESENT" ? (
-                    <span className="text-xs font-black bg-emerald-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
-                      เช็คยอดตามปกติวันที่ {formatThaiFullDate(rangeStartDate)} (1 วัน)
-                    </span>
+                    nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                      <span className="text-xs font-black bg-emerald-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>เช็คยอดต่อเนื่อง {effectiveDaysCount} วัน (ถึง {formatThaiFullDate(effectiveEndDate)})</span>
+                      </span>
+                    ) : nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate ? (
+                      <span className="text-xs font-black bg-amber-500 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                        วันที่เริ่มต้นเป็นสถานะพิเศษอยู่แล้ว
+                      </span>
+                    ) : (
+                      <span className="text-xs font-black bg-indigo-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                        ยังไม่พบสถานะพิเศษถัดไป (กำหนดล่วงหน้า {effectiveDaysCount} วัน)
+                      </span>
+                    )
                   ) : daysCount > 0 ? (
                     <span className="text-xs font-black bg-indigo-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
                       รวม {daysCount} วัน ({formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(rangeEndDate)})
@@ -453,18 +512,17 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                 </div>
 
                 {targetStatus === "PRESENT" ? (
-                  /* Single date for PRESENT */
-                  <div className="space-y-3">
-                    <div className="max-w-md">
+                  /* Single date for PRESENT - No End Date input needed! */
+                  <div className="space-y-4">
+                    <div className="max-w-md space-y-1.5">
                       <ThaiDatePicker
-                        label="📅 เลือกวันที่ต้องการเช็คยอดตามปกติ:"
+                        label="📅 วันที่เริ่มต้นเช็คยอดตามปกติ:"
                         value={rangeStartDate}
                         onChange={(val) => {
                           setRangeStartDate(val);
-                          setRangeEndDate(val);
                         }}
                       />
-                      <p className="text-[11px] text-slate-500 mt-1">
+                      <p className="text-[11px] text-slate-500">
                         ไทย: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
                       </p>
                     </div>
@@ -479,7 +537,6 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                         onClick={() => {
                           const today = getTodayDateString();
                           setRangeStartDate(today);
-                          setRangeEndDate(today);
                         }}
                         className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
                           rangeStartDate === getTodayDateString()
@@ -492,24 +549,8 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          const yest = getPreviousDateString(getTodayDateString());
-                          setRangeStartDate(yest);
-                          setRangeEndDate(yest);
-                        }}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
-                          rangeStartDate === getPreviousDateString(getTodayDateString())
-                            ? "bg-emerald-600 text-white"
-                            : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
-                        }`}
-                      >
-                        เมื่อวานนี้
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
                           const next = getNextDateString(getTodayDateString());
                           setRangeStartDate(next);
-                          setRangeEndDate(next);
                         }}
                         className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
                           rangeStartDate === getNextDateString(getTodayDateString())
@@ -519,14 +560,119 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                       >
                         พรุ่งนี้
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const yest = getPreviousDateString(getTodayDateString());
+                          setRangeStartDate(yest);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                          rangeStartDate === getPreviousDateString(getTodayDateString())
+                            ? "bg-emerald-600 text-white"
+                            : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                        }`}
+                      >
+                        เมื่อวานนี้
+                      </button>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2">
-                      <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                      <p>
-                        <strong>สถานะเช็คยอดตามปกติ (PRESENT):</strong> กำหนดแบบรายวัน (1 วัน) ระบบจะระบุสถานะนักเรียนทุกคนในหอพักที่เลือกเป็น <strong>"อยู่หอพักปกติ"</strong> สำหรับวันที่ระบุ และพร้อมให้เช็คยอดตามปกติได้ทันที
-                      </p>
-                    </div>
+                    {/* Next Special Status Detection Alert & Feedback Box */}
+                    {nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-300 text-emerald-950 space-y-2.5 shadow-2xs">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/80 pb-2">
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                            <h4 className="text-xs sm:text-sm font-black text-emerald-900 flex items-center gap-1.5">
+                              <span>ตรวจพบวันที่มีการตั้งสถานะพิเศษถัดไป:</span>
+                              <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${
+                                nextSpecialStatusInfo.type === "HOME_BREAK" ? "bg-amber-200 text-amber-900" : "bg-sky-200 text-sky-900"
+                              }`}>
+                                {nextSpecialStatusInfo.type === "HOME_BREAK" ? "🏡 รอบกลับบ้าน" : "🏖️ ปิดภาคเรียน"}
+                              </span>
+                            </h4>
+                          </div>
+                          <span className="text-xs font-bold text-emerald-800 bg-white/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+                            เริ่มวันที่ {formatThaiFullDate(nextSpecialStatusInfo.date)}
+                          </span>
+                        </div>
+
+                        <p className="text-xs leading-relaxed text-emerald-900 font-medium">
+                          ระบบจะดำเนินการเช็คยอดตามปกติสำหรับ {selectedDormIds.length} หอพัก ตั้งแต่วันที่ <strong>{formatThaiFullDate(rangeStartDate)}</strong> ไปจนถึงวันที่ <strong>{formatThaiFullDate(nextSpecialStatusInfo.stopDate)}</strong> (รวม <strong>{nextSpecialStatusInfo.daysCount}</strong> วัน) โดยหยุดก่อนถึงวันที่มีสถานะพิเศษโดยอัตโนมัติ เพื่อไม่ให้ทับซ้อนข้อมูลรอบพิเศษ
+                        </p>
+
+                        <div className="pt-1 flex items-center gap-1.5 text-[11px] text-emerald-800 flex-wrap">
+                          <span className="font-bold text-emerald-900">ช่วงวันที่จะเช็คยอดตามปกติ:</span>
+                          <span className="bg-emerald-200 text-emerald-950 font-black px-2 py-0.5 rounded-md">
+                            {formatThaiFullDate(rangeStartDate)}
+                          </span>
+                          <span>ถึง</span>
+                          <span className="bg-emerald-200 text-emerald-950 font-black px-2 py-0.5 rounded-md">
+                            {formatThaiFullDate(nextSpecialStatusInfo.stopDate)}
+                          </span>
+                          <span className="text-emerald-700 font-bold">({nextSpecialStatusInfo.daysCount} วัน)</span>
+                        </div>
+                      </div>
+                    ) : nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate ? (
+                      <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex items-start gap-3 shadow-2xs">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="text-xs leading-relaxed space-y-1">
+                          <h4 className="font-black text-amber-900">
+                            วันที่เริ่มต้นที่เลือก ({formatThaiFullDate(rangeStartDate)}) มีการตั้งสถานะพิเศษอยู่แล้ว
+                          </h4>
+                          <p className="text-amber-800">
+                            ในวันที่ดังกล่าว หอพักอยู่ในสถานะ <strong>[{nextSpecialStatusInfo.typeLabel}]</strong> เรียบร้อยแล้ว จึงไม่ต้องเช็คยอดตามปกติในวันนี้ กรุณาเปลี่ยนวันที่เริ่มต้นไปเป็นวันอื่น หรือหากต้องการแก้ไขให้เข้าไปล้างสถานะเดิมก่อน
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 text-indigo-950 space-y-3 shadow-2xs">
+                        <div className="flex items-center gap-2">
+                          <Info className="w-5 h-5 text-indigo-600 shrink-0" />
+                          <h4 className="text-xs sm:text-sm font-black text-indigo-900">
+                            ยังไม่พบวันที่มีการตั้งสถานะพิเศษ (รอบกลับบ้าน & ปิดภาคเรียน) ล่วงหน้าในระบบ
+                          </h4>
+                        </div>
+                        <p className="text-xs text-indigo-800 leading-relaxed font-medium">
+                          หากมีการตั้งค่า <strong>รอบกลับบ้าน</strong> หรือ <strong>ปิดภาคเรียน</strong> ไว้ล่วงหน้า ระบบจะเช็คยอดตามปกติต่อเนื่องไปจนถึงวันนั้นโดยอัตโนมัติ
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <span className="text-xs font-bold text-indigo-900">ทางเลือกดำเนินการ:</span>
+                          <button
+                            type="button"
+                            onClick={() => setTargetStatus("HOME_BREAK")}
+                            className="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border border-amber-300"
+                          >
+                            <Home className="w-3.5 h-3.5 text-amber-700" />
+                            <span>ไปตั้งค่า "รอบกลับบ้าน" ก่อน</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTargetStatus("SEMESTER_BREAK")}
+                            className="px-3 py-1.5 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-900 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border border-sky-300"
+                          >
+                            <School className="w-3.5 h-3.5 text-sky-700" />
+                            <span>ไปตั้งค่า "ปิดภาคเรียน" ก่อน</span>
+                          </button>
+                        </div>
+                        <div className="pt-2 border-t border-indigo-200/60 flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-bold text-slate-700">หรือเลือกระยะเวลาเช็คยอดตามปกติตอนนี้:</span>
+                          {[3, 5, 7, 14, 30].map((num) => (
+                            <button
+                              key={num}
+                              type="button"
+                              onClick={() => setPresentFallbackDays(num)}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                presentFallbackDays === num
+                                  ? "bg-indigo-600 text-white shadow-2xs"
+                                  : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                              }`}
+                            >
+                              {num} วัน
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   /* Date range for HOME_BREAK, SEMESTER_BREAK, CLEAR */
@@ -717,7 +863,9 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                             <h5 className="font-black text-xs sm:text-sm text-slate-900">
                               🏡 รอบกลับบ้าน
                             </h5>
-                            <span className="text-[10px] font-bold text-amber-700">HOME_BREAK / ROUND_HOME</span>
+                            <span className="text-[10px] font-bold text-amber-700 block">
+                              เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
+                            </span>
                           </div>
                         </div>
                         {targetStatus === "HOME_BREAK" && (
@@ -727,7 +875,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                         )}
                       </div>
                       <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                        บันทึกสถานะหอพักเป็น "รอบกลับบ้าน" และนักเรียนทุกคนในหอพักจะถูกบันทึกเป็น <strong>รอบกลับบ้าน (ROUND_HOME)</strong>
+                        เลือกช่วงวันที่ดำเนินการ (เริ่มต้น - สิ้นสุด) บันทึกสถานะหอพักและนักเรียนทุกคนเป็น <strong>รอบกลับบ้าน (ROUND_HOME)</strong>
                       </p>
                     </div>
                   </div>
@@ -751,7 +899,9 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                             <h5 className="font-black text-xs sm:text-sm text-slate-900">
                               🏖️ ปิดภาคเรียน
                             </h5>
-                            <span className="text-[10px] font-bold text-blue-700">SEMESTER_BREAK</span>
+                            <span className="text-[10px] font-bold text-blue-700 block">
+                              เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
+                            </span>
                           </div>
                         </div>
                         {targetStatus === "SEMESTER_BREAK" && (
@@ -761,7 +911,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                         )}
                       </div>
                       <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                        บันทึกสถานะหอพักเป็น "ปิดภาคเรียน" และนักเรียนทุกคนในหอพักจะถูกบันทึกเป็น <strong>ปิดภาคเรียน (SEMESTER_BREAK)</strong>
+                        เลือกช่วงวันที่ดำเนินการ (เริ่มต้น - สิ้นสุด) บันทึกสถานะหอพักและนักเรียนทุกคนเป็น <strong>ปิดภาคเรียน (SEMESTER_BREAK)</strong>
                       </p>
                     </div>
                   </div>
@@ -770,7 +920,6 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                   <div
                     onClick={() => {
                       setTargetStatus("PRESENT");
-                      setRangeEndDate(rangeStartDate);
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
                       targetStatus === "PRESENT"
@@ -788,7 +937,9 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                             <h5 className="font-black text-xs sm:text-sm text-slate-900">
                               🟢 เช็คยอดตามปกติ
                             </h5>
-                            <span className="text-[10px] font-bold text-emerald-700">เช็คยอดตามปกติ (PRESENT)</span>
+                            <span className="text-[10px] font-bold text-emerald-700 block">
+                              ไม่ต้องเลือกช่วงวัน (เช็คต่อเนื่องจนถึงสถานะพิเศษ)
+                            </span>
                           </div>
                         </div>
                         {targetStatus === "PRESENT" && (
@@ -798,7 +949,7 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                         )}
                       </div>
                       <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                        บันทึกการเช็คยอดว่านักเรียนทุกคน <strong>เช็คยอดตามปกติ (PRESENT)</strong> พร้อมบันทึกชื่อเจ้าหน้าที่ผู้ดำเนินการ
+                        ไม่ต้องเลือกช่วงวันสิ้นสุด ระบบจะดำเนินการเช็คยอดตามปกติต่อเนื่องไปจนถึงวันที่มีการตั้งสถานะพิเศษ (รอบกลับบ้าน และ ปิดภาคเรียน) โดยอัตโนมัติ
                       </p>
                     </div>
                   </div>
@@ -822,7 +973,9 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                             <h5 className="font-black text-xs sm:text-sm text-slate-900">
                               🗑️ ล้างข้อมูลช่วงวัน / ยกเลิกการเช็คยอด
                             </h5>
-                            <span className="text-[10px] font-bold text-rose-700">CLEAR / PENDING</span>
+                            <span className="text-[10px] font-bold text-rose-700 block">
+                              เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
+                            </span>
                           </div>
                         </div>
                         {targetStatus === "CLEAR" && (
@@ -881,9 +1034,23 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                   </div>
                   <div className="text-xs text-slate-300">
                     {targetStatus === "PRESENT" ? (
-                      <span>วันที่ดำเนินการ: <strong>{formatThaiFullDate(rangeStartDate)}</strong> (1 วัน)</span>
+                      <span>
+                        เริ่ม: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
+                        {nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                          <>
+                            {" "}ถึง{" "}
+                            <strong>{formatThaiFullDate(effectiveEndDate)}</strong>{" "}
+                            (รวม <strong>{effectiveDaysCount}</strong> วัน จนถึง {nextSpecialStatusInfo.typeLabel})
+                          </>
+                        ) : (
+                          <> (ล่วงหน้า <strong>{effectiveDaysCount}</strong> วัน)</>
+                        )}
+                      </span>
                     ) : (
-                      <span>ช่วงวัน: <strong>{formatThaiFullDate(rangeStartDate)}</strong> ถึง <strong>{formatThaiFullDate(rangeEndDate)}</strong> ({daysCount} วัน)</span>
+                      <span>
+                        ช่วงวัน: <strong>{formatThaiFullDate(rangeStartDate)}</strong> ถึง{" "}
+                        <strong>{formatThaiFullDate(rangeEndDate)}</strong> ({daysCount} วัน)
+                      </span>
                     )}
                     {" • "}
                     หอพัก: <strong>{selectedDormIds.length}</strong> หอพัก
@@ -893,11 +1060,11 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setConfirmDateRangeOpen(true)}
-                  disabled={isUpdating || daysCount <= 0 || selectedDormIds.length === 0}
+                  disabled={isUpdating || (targetStatus === "PRESENT" ? effectiveDaysCount <= 0 : daysCount <= 0) || selectedDormIds.length === 0}
                   className="px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>ตรวจสอบและบันทึกสถานะช่วงวัน</span>
+                  <span>ตรวจสอบและบันทึกสถานะ</span>
                 </button>
               </div>
             </div>
@@ -1275,12 +1442,25 @@ export const AttendanceControlModal: React.FC<AttendanceControlModalProps> = ({
               <div className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                 <div className="flex justify-between border-b border-slate-200 pb-1.5">
                   <span className="text-slate-500 font-semibold">
-                    {targetStatus === "PRESENT" ? "วันที่ดำเนินการ:" : "ช่วงวันที่:"}
+                    {targetStatus === "PRESENT" ? "ช่วงวันดำเนินการเช็คยอด:" : "ช่วงวันที่:"}
                   </span>
-                  <span className="font-bold text-slate-900">
-                    {targetStatus === "PRESENT"
-                      ? `${formatThaiFullDate(rangeStartDate)} (1 วัน)`
-                      : `${formatThaiFullDate(rangeStartDate)} ถึง ${formatThaiFullDate(rangeEndDate)} (${daysCount} วัน)`}
+                  <span className="font-bold text-slate-900 text-right">
+                    {targetStatus === "PRESENT" ? (
+                      nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                        <span>
+                          {formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(effectiveEndDate)}
+                          <span className="text-emerald-700 block text-[11px] font-bold">
+                            (รวม {effectiveDaysCount} วัน จนถึงวัน{nextSpecialStatusInfo.typeLabel})
+                          </span>
+                        </span>
+                      ) : (
+                        <span>
+                          {formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(effectiveEndDate)} ({effectiveDaysCount} วัน)
+                        </span>
+                      )
+                    ) : (
+                      `${formatThaiFullDate(rangeStartDate)} ถึง ${formatThaiFullDate(rangeEndDate)} (${daysCount} วัน)`
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between border-b border-slate-200 pb-1.5">

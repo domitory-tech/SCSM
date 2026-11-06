@@ -27,7 +27,7 @@ import {
   SystemSettings,
   UserProfile
 } from "../types";
-import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck } from "../utils/dateUtils";
+import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck, findNextSpecialStatus } from "../utils/dateUtils";
 import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
 import { formatStudentId, generateDefault5DigitStudentId, formatGrade } from "../utils/studentUtils";
 
@@ -1179,18 +1179,21 @@ export function getAttendanceBreakType(
 
 export interface BatchSetAttendanceDateRangePayload {
   startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD (optional for PRESENT: auto-resolved until next special status)
   dormIds: string[] | "ALL"; // specific dorm ids or "ALL"
   status: "HOME_BREAK" | "SEMESTER_BREAK" | "PRESENT" | "CLEAR";
   orientationNotes?: string[];
   operatorName?: string;
   dorms: Dormitory[];
   students: Student[];
+  stopAtSpecialStatus?: boolean;
 }
 
 /**
  * กำหนดสถานะเช็คยอดตามช่วงวันที่ โดยเจ้าหน้าที่/ผู้ดูแลระบบเป็นผู้ระบุเอง (Manual Date-Range Batch Attendance Check)
- * แทนที่ระบบอัตโนมัติเดิม: เจ้าหน้าที่จะทำการเลือกวันที่เริ่มต้น - สิ้นสุด และกำหนดสถานะเอง
+ * - รอบกลับบ้าน: ให้เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด)
+ * - ปิดภาคเรียน: ให้เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด)
+ * - เช็คยอดตามปกติ: ไม่ต้องเลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด) แต่ให้เช็คยอดไปจนถึงวันที่มีการตั้งสถานะพิเศษ รอบกลับบ้าน และ ปิดภาคเรียน
  */
 export async function batchSetAttendanceDateRange(
   payload: BatchSetAttendanceDateRangePayload
@@ -1200,17 +1203,42 @@ export async function batchSetAttendanceDateRange(
   affectedRecordsCount: number;
   message: string;
 }> {
-  const { startDate, endDate, dormIds, status, orientationNotes, operatorName, dorms, students } = payload;
+  const { startDate, dormIds, status, orientationNotes, operatorName, dorms, students, stopAtSpecialStatus } = payload;
+  let effectiveEndDate = payload.endDate;
 
-  if (!startDate || !endDate || startDate > endDate) {
-    throw new Error("ช่วงวันที่ไม่ถูกต้อง กรุณาระบุวันที่เริ่มต้นและวันที่สิ้นสุดให้ถูกต้อง");
+  if (!startDate) {
+    throw new Error("กรุณาระบุวันที่เริ่มต้นให้ถูกต้อง");
   }
 
-  // Generate date list from startDate to endDate
+  // Load cached attendance to inspect existing special statuses
+  const cachedAttendance = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+
+  // For PRESENT status: if no endDate is provided, auto-calculate up to the next special status!
+  if (status === "PRESENT" && (!effectiveEndDate || effectiveEndDate < startDate)) {
+    const nextSpecial = findNextSpecialStatus(startDate, cachedAttendance, dormIds);
+    if (nextSpecial && nextSpecial.date > startDate) {
+      effectiveEndDate = nextSpecial.stopDate;
+    } else if (nextSpecial && nextSpecial.date === startDate) {
+      throw new Error(`วันที่ ${startDate} มีการกำหนดสถานะพิเศษ (${nextSpecial.typeLabel}) อยู่แล้ว ไม่สามารถเช็คยอดตามปกติในวันที่มีสถานะพิเศษได้`);
+    } else {
+      // If no upcoming special status is found, default to 7 days ahead or same date
+      let curr = startDate;
+      for (let i = 1; i < 7; i++) {
+        curr = getNextDateString(curr);
+      }
+      effectiveEndDate = curr;
+    }
+  }
+
+  if (!effectiveEndDate || startDate > effectiveEndDate) {
+    throw new Error("ช่วงวันที่ไม่ถูกต้อง วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่มต้น");
+  }
+
+  // Generate date list from startDate to effectiveEndDate
   const dateList: string[] = [];
   let curr = startDate;
   let safety = 0;
-  while (curr <= endDate && safety < 180) {
+  while (curr <= effectiveEndDate && safety < 180) {
     dateList.push(curr);
     curr = getNextDateString(curr);
     safety++;
@@ -1251,7 +1279,7 @@ export async function batchSetAttendanceDateRange(
       success: true,
       affectedDatesCount: dateList.length,
       affectedRecordsCount,
-      message: `ล้างข้อมูลการเช็คยอดสำหรับ ${targetDorms.length} หอพัก ตั้งแต่วันที่ ${startDate} ถึง ${endDate} (รวม ${dateList.length} วัน) เรียบร้อยแล้ว`
+      message: `ล้างข้อมูลการเช็คยอดสำหรับ ${targetDorms.length} หอพัก ตั้งแต่วันที่ ${startDate} ถึง ${effectiveEndDate} (รวม ${dateList.length} วัน) เรียบร้อยแล้ว`
     };
   }
 
@@ -1261,6 +1289,16 @@ export async function batchSetAttendanceDateRange(
   dateList.forEach((dateStr) => {
     targetDorms.forEach((dorm) => {
       const docId = `${dateStr}_${dorm.id}`;
+
+      // Check if existing record has special status when mode is PRESENT
+      if (status === "PRESENT") {
+        const existing = cachedAttendance.find((c) => (c.date === dateStr || c.id === docId) && c.dormId === dorm.id);
+        if (existing && (existing.isHomeBreak || existing.status === "HOME_BREAK" || existing.status === "SEMESTER_BREAK")) {
+          // Do not overwrite existing special status with normal check
+          return;
+        }
+      }
+
       // Find students belonging to this dorm
       const dormStudents = students.filter((s) => {
         const sDormId = String(s.dormId || "").trim();
@@ -1293,7 +1331,7 @@ export async function batchSetAttendanceDateRange(
           ? `${opName} (กำหนดรอบกลับบ้านตามช่วงวัน)`
           : isSemBreak
           ? `${opName} (กำหนดปิดภาคเรียนตามช่วงวัน)`
-          : `${opName} (กำหนดเช็คยอดปกติ)`,
+          : `${opName} (เช็คยอดตามปกติ)`,
         teacherOrientationNotes: notes,
         records: studentRecords
       };
@@ -1320,7 +1358,9 @@ export async function batchSetAttendanceDateRange(
     success: true,
     affectedDatesCount: dateList.length,
     affectedRecordsCount: recordsToSave.length,
-    message: `กำหนดสถานะ [${statusLabel}] สำหรับ ${targetDorms.length} หอพัก ตั้งแต่วันที่ ${startDate} ถึง ${endDate} (รวม ${dateList.length} วัน รวม ${recordsToSave.length} บันทึก) สำเร็จเรียบร้อยแล้ว`
+    message: status === "PRESENT"
+      ? `เช็คยอดตามปกติสำหรับ ${targetDorms.length} หอพัก ตั้งแต่วันที่ ${startDate} ไปจนถึงวันที่ ${effectiveEndDate} (รวม ${dateList.length} วัน รวม ${recordsToSave.length} บันทึก) สำเร็จเรียบร้อยแล้ว`
+      : `กำหนดสถานะ [${statusLabel}] สำหรับ ${targetDorms.length} หอพัก ตั้งแต่วันที่ ${startDate} ถึง ${effectiveEndDate} (รวม ${dateList.length} วัน รวม ${recordsToSave.length} บันทึก) สำเร็จเรียบร้อยแล้ว`
   };
 }
 

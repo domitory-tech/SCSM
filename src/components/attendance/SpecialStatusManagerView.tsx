@@ -4,7 +4,10 @@ import {
   formatThaiFullDate,
   getNextDateString,
   getPreviousDateString,
-  getTodayDateString
+  getTodayDateString,
+  findNextSpecialStatus,
+  NextSpecialStatusInfo,
+  calculateDaysCount
 } from "../../utils/dateUtils";
 import { getDormTypeBadgeStyle, getDormTypeLabel } from "../../utils/dormUtils";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
@@ -26,6 +29,7 @@ import {
   Square,
   Info,
   Shield,
+  ShieldCheck,
   RotateCcw,
   ArrowRight,
   Filter,
@@ -74,6 +78,9 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
   const [targetStatus, setTargetStatus] = useState<"HOME_BREAK" | "SEMESTER_BREAK" | "PRESENT" | "CLEAR">("HOME_BREAK");
   const [orientationNoteText, setOrientationNoteText] = useState<string>("");
 
+  // Fallback days ahead when no future special status is scheduled yet (for PRESENT mode)
+  const [presentFallbackDays, setPresentFallbackDays] = useState<number>(7);
+
   // UI Control states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -89,18 +96,9 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
     }
   }, [dorms]);
 
-  // Calculate day count
-  const calculateDaysCount = (start: string, end: string): number => {
-    if (!start || !end || start > end) return 0;
-    const s = new Date(start);
-    const e = new Date(end);
-    const diffTime = e.getTime() - s.getTime();
-    return Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  };
-
   const daysCount = calculateDaysCount(rangeStartDate, rangeEndDate);
 
-  // Quick Preset Helper
+  // Quick Preset Helper for rangeEndDate
   const handleApplyPreset = (daysAhead: number) => {
     const start = rangeStartDate || todayStr;
     let curr = start;
@@ -114,7 +112,6 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
   const handleApplyThisWeekendPreset = () => {
     const now = new Date();
     const dayOfWeek = now.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
-    // calculate days until Friday
     const daysUntilFriday = (5 - dayOfWeek + 7) % 7;
     const friday = new Date(now);
     friday.setDate(now.getDate() + daysUntilFriday);
@@ -133,6 +130,45 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
     setTargetStatus("HOME_BREAK");
     setOrientationNoteText("รอบกลับบ้านประจำสัปดาห์ (ศุกร์ - อาทิตย์)");
   };
+
+  // ---------------------------------------------------------------------------
+  // Automatic Next Special Status Detection for "เช็คยอดตามปกติ" (PRESENT)
+  // ---------------------------------------------------------------------------
+  const nextSpecialStatusInfo = useMemo<NextSpecialStatusInfo | null>(() => {
+    return findNextSpecialStatus(rangeStartDate, allAttendanceRecords, selectedDormIds);
+  }, [rangeStartDate, allAttendanceRecords, selectedDormIds]);
+
+  // Effective end date determined automatically for PRESENT, or manually for HOME_BREAK/SEMESTER_BREAK/CLEAR
+  const effectiveEndDate = useMemo<string>(() => {
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate) {
+        return nextSpecialStatusInfo.stopDate;
+      }
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        return rangeStartDate;
+      }
+      // If no future special status found yet, use fallback preset
+      let curr = rangeStartDate;
+      for (let i = 1; i < presentFallbackDays; i++) {
+        curr = getNextDateString(curr);
+      }
+      return curr;
+    }
+    return rangeEndDate;
+  }, [targetStatus, rangeStartDate, rangeEndDate, nextSpecialStatusInfo, presentFallbackDays]);
+
+  const effectiveDaysCount = useMemo<number>(() => {
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate) {
+        return nextSpecialStatusInfo.daysCount;
+      }
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        return 0;
+      }
+      return presentFallbackDays;
+    }
+    return calculateDaysCount(rangeStartDate, rangeEndDate);
+  }, [targetStatus, rangeStartDate, rangeEndDate, nextSpecialStatusInfo, presentFallbackDays]);
 
   // Dorm Selection helpers
   const isAllDormsSelected = dorms.length > 0 && selectedDormIds.length === dorms.length;
@@ -153,10 +189,22 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
 
   // Execute Batch Assignment
   const handleExecuteBatch = async () => {
-    if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) {
-      alert("กรุณาระบุช่วงวันที่ให้ถูกต้อง");
-      return;
+    if (targetStatus === "PRESENT") {
+      if (nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate) {
+        alert(`วันที่ ${formatThaiFullDate(rangeStartDate)} มีการกำหนดสถานะพิเศษ (${nextSpecialStatusInfo.typeLabel}) อยู่แล้ว ไม่สามารถเช็คยอดตามปกติในวันนี้ได้`);
+        return;
+      }
+      if (effectiveDaysCount <= 0) {
+        alert("กรุณาระบุวันที่เริ่มต้นเช็คยอดให้ถูกต้อง");
+        return;
+      }
+    } else {
+      if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) {
+        alert("กรุณาระบุช่วงวันที่ให้ถูกต้อง");
+        return;
+      }
     }
+
     if (selectedDormIds.length === 0) {
       alert("กรุณาเลือกหอพักอย่างน้อย 1 หอพัก");
       return;
@@ -168,7 +216,7 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
       const notes = orientationNoteText.trim() ? [orientationNoteText.trim()] : [];
       const res = await onBatchSetDateRange({
         startDate: rangeStartDate,
-        endDate: rangeEndDate,
+        endDate: effectiveEndDate,
         dormIds: selectedDormIds.length === dorms.length ? "ALL" : selectedDormIds,
         status: targetStatus,
         orientationNotes: notes
@@ -505,10 +553,10 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                     🏡 รอบกลับบ้าน
                   </h4>
                   <span className="text-[10px] font-bold text-amber-700 block mt-0.5">
-                    HOME_BREAK (ROUND_HOME)
+                    เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
                   </span>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                    บันทึกสถานะหอพักเป็น "รอบกลับบ้าน" และนักเรียนทุกคนในหอพักจะถูกบันทึกเป็น <strong>รอบกลับบ้าน</strong>
+                    เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด) บันทึกสถานะหอพักและนักเรียนทุกคนเป็น <strong>รอบกลับบ้าน</strong>
                   </p>
                 </div>
               </div>
@@ -537,20 +585,17 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                     🏖️ ปิดภาคเรียน
                   </h4>
                   <span className="text-[10px] font-bold text-blue-700 block mt-0.5">
-                    SEMESTER_BREAK
+                    เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
                   </span>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                    บันทึกสถานะหอพักเป็น "ปิดภาคเรียน" และนักเรียนทุกคนในหอพักจะถูกบันทึกเป็น <strong>ปิดภาคเรียน</strong>
+                    เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด) บันทึกสถานะหอพักและนักเรียนทุกคนเป็น <strong>ปิดภาคเรียน</strong>
                   </p>
                 </div>
               </div>
 
               {/* Option C: PRESENT */}
               <div
-                onClick={() => {
-                  setTargetStatus("PRESENT");
-                  setRangeEndDate(rangeStartDate);
-                }}
+                onClick={() => setTargetStatus("PRESENT")}
                 className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
                   targetStatus === "PRESENT"
                     ? "bg-emerald-50/80 border-emerald-500 shadow-md ring-2 ring-emerald-400"
@@ -572,10 +617,10 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                     🟢 เช็คยอดตามปกติ
                   </h4>
                   <span className="text-[10px] font-bold text-emerald-700 block mt-0.5">
-                    เช็คยอดตามปกติ (PRESENT)
+                    ไม่ต้องเลือกช่วงวัน (เช็คต่อเนื่องจนถึงสถานะพิเศษ)
                   </span>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                    บันทึกสถานะเปิดเรียนปกติ นักเรียนทุกคน <strong>เช็คยอดตามปกติ (อยู่หอพัก)</strong>
+                    ไม่ต้องเลือกช่วงวันสิ้นสุด ระบบจะดำเนินการเช็คยอดตามปกติต่อเนื่องไปจนถึงวันที่มีการตั้งสถานะพิเศษ (รอบกลับบ้าน และ ปิดภาคเรียน) โดยอัตโนมัติ
                   </p>
                 </div>
               </div>
@@ -604,17 +649,17 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                     🗑️ ล้างข้อมูลช่วงวัน
                   </h4>
                   <span className="text-[10px] font-bold text-rose-700 block mt-0.5">
-                    CLEAR / คืนค่า PENDING
+                    เลือกช่วงวัน (เริ่มต้น - สิ้นสุด)
                   </span>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                    ลบเอกสารเช็คยอดช่วงวันที่เลือก คืนค่าเป็น <strong>รอเช็คยอด</strong> เพื่อให้ครูหอเช็คใหม่
+                    ลบเอกสารเช็คยอดช่วงวันที่เลือก คืนค่าเป็น <strong>รอเช็คยอด (PENDING)</strong> เพื่อให้ครูหอเช็คใหม่
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Form Step 2: Select Date (Single Date for PRESENT, or Date Range for others) */}
+          {/* Form Step 2: Select Date (Single Start Date for PRESENT, or Date Range for others) */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
@@ -623,15 +668,26 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                 </span>
                 <h3 className="text-sm font-black text-slate-900">
                   {targetStatus === "PRESENT"
-                    ? "เลือกวันที่ดำเนินการ (เช็คยอดตามปกติ 1 วัน - ไม่ต้องเลือกช่วงวัน)"
+                    ? "กำหนดวันที่เริ่มต้นเช็คยอดตามปกติ (ระบบเช็คต่อเนื่องไปจนถึงวันที่มีสถานะพิเศษโดยอัตโนมัติ)"
                     : "เลือกช่วงวันที่ดำเนินการ (วันที่เริ่มต้น - สิ้นสุด)"}
                 </h3>
               </div>
 
               {targetStatus === "PRESENT" ? (
-                <span className="text-xs font-black bg-emerald-600 text-white px-3 py-1 rounded-full shadow-xs">
-                  เช็คยอดตามปกติวันที่ {formatThaiFullDate(rangeStartDate)} (1 วัน)
-                </span>
+                nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                  <span className="text-xs font-black bg-emerald-600 text-white px-3 py-1 rounded-full shadow-xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>เช็คยอดต่อเนื่อง {effectiveDaysCount} วัน (ถึง {formatThaiFullDate(effectiveEndDate)})</span>
+                  </span>
+                ) : nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate ? (
+                  <span className="text-xs font-black bg-amber-500 text-white px-3 py-1 rounded-full shadow-xs">
+                    วันที่เริ่มต้นเป็นสถานะพิเศษอยู่แล้ว
+                  </span>
+                ) : (
+                  <span className="text-xs font-black bg-indigo-600 text-white px-3 py-1 rounded-full shadow-xs">
+                    ยังไม่พบสถานะพิเศษถัดไป (กำหนดล่วงหน้า {effectiveDaysCount} วัน)
+                  </span>
+                )
               ) : daysCount > 0 ? (
                 <span className="text-xs font-black bg-indigo-600 text-white px-3 py-1 rounded-full shadow-xs">
                   รวม {daysCount} วัน ({formatThaiFullDate(rangeStartDate)} ถึง {formatThaiFullDate(rangeEndDate)})
@@ -644,34 +700,30 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
             </div>
 
             {targetStatus === "PRESENT" ? (
-              /* Single Date Selector for PRESENT - No range needed */
-              <div className="space-y-3.5">
-                <div className="max-w-md">
+              /* Single Start Date Selector for PRESENT - No End Date input required! */
+              <div className="space-y-4">
+                <div className="max-w-md space-y-1.5">
                   <ThaiDatePicker
-                    label="📅 เลือกวันที่ต้องการเช็คยอดตามปกติ:"
+                    label="📅 วันที่เริ่มต้นเช็คยอดตามปกติ:"
                     value={rangeStartDate}
                     onChange={(val) => {
                       setRangeStartDate(val);
-                      setRangeEndDate(val);
                     }}
                   />
-                  <p className="text-[11px] text-slate-500 mt-1.5">
+                  <p className="text-[11px] text-slate-500">
                     ไทย: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
                   </p>
                 </div>
 
-                {/* Quick Shortcuts for Single Date */}
-                <div className="pt-1 flex flex-wrap items-center gap-2">
+                {/* Quick Shortcuts for Starting Date */}
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" />
                     เลือกด่วน:
                   </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      setRangeStartDate(todayStr);
-                      setRangeEndDate(todayStr);
-                    }}
+                    onClick={() => setRangeStartDate(todayStr)}
                     className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                       rangeStartDate === todayStr
                         ? "bg-emerald-600 text-white shadow-xs"
@@ -682,26 +734,7 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      const yStr = getPreviousDateString(todayStr);
-                      setRangeStartDate(yStr);
-                      setRangeEndDate(yStr);
-                    }}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                      rangeStartDate === getPreviousDateString(todayStr)
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-                    }`}
-                  >
-                    เมื่อวานนี้
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nStr = getNextDateString(todayStr);
-                      setRangeStartDate(nStr);
-                      setRangeEndDate(nStr);
-                    }}
+                    onClick={() => setRangeStartDate(getNextDateString(todayStr))}
                     className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                       rangeStartDate === getNextDateString(todayStr)
                         ? "bg-emerald-600 text-white shadow-xs"
@@ -710,14 +743,119 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
                   >
                     พรุ่งนี้
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setRangeStartDate(getPreviousDateString(todayStr))}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                      rangeStartDate === getPreviousDateString(todayStr)
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    เมื่อวานนี้
+                  </button>
                 </div>
 
-                <div className="p-3 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5">
-                  <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">
-                    <strong>สถานะเช็คยอดตามปกติ (PRESENT):</strong> ไม่ต้องเลือกช่วงวันที่เริ่มต้น-สิ้นสุด ดำเนินการแบบรายวัน (1 วัน) ระบบจะกำหนดสถานะนักเรียนทุกคนในหอพักที่เลือกเป็น <strong>"อยู่หอพักปกติ"</strong> สำหรับวันที่ระบุ และพร้อมให้ครูประจำหอพักเช็คยอดต่อได้ทันที
-                  </p>
-                </div>
+                {/* Next Special Status Detection Alert & Feedback Box */}
+                {nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-300 text-emerald-950 space-y-2.5 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/80 pb-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                        <h4 className="text-xs sm:text-sm font-black text-emerald-900 flex items-center gap-1.5">
+                          <span>ตรวจพบวันที่มีการตั้งสถานะพิเศษถัดไป:</span>
+                          <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${
+                            nextSpecialStatusInfo.type === "HOME_BREAK" ? "bg-amber-200 text-amber-900" : "bg-sky-200 text-sky-900"
+                          }`}>
+                            {nextSpecialStatusInfo.type === "HOME_BREAK" ? "🏡 รอบกลับบ้าน" : "🏖️ ปิดภาคเรียน"}
+                          </span>
+                        </h4>
+                      </div>
+                      <span className="text-xs font-bold text-emerald-800 bg-white/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+                        เริ่มวันที่ {formatThaiFullDate(nextSpecialStatusInfo.date)}
+                      </span>
+                    </div>
+
+                    <p className="text-xs leading-relaxed text-emerald-900 font-medium">
+                      ระบบจะดำเนินการเช็คยอดตามปกติ (นักเรียนอยู่หอพัก) สำหรับ {selectedDormIds.length} หอพัก ตั้งแต่วันที่ <strong>{formatThaiFullDate(rangeStartDate)}</strong> ไปจนถึงวันที่ <strong>{formatThaiFullDate(nextSpecialStatusInfo.stopDate)}</strong> (รวม <strong>{nextSpecialStatusInfo.daysCount}</strong> วัน) โดยหยุดก่อนถึงวันที่มีสถานะพิเศษโดยอัตโนมัติ เพื่อไม่ให้ทับซ้อนข้อมูลรอบพิเศษ
+                    </p>
+
+                    <div className="pt-1 flex items-center gap-1.5 text-[11px] text-emerald-800 flex-wrap">
+                      <span className="font-bold text-emerald-900">ช่วงวันที่จะถูกเช็คยอดตามปกติ:</span>
+                      <span className="bg-emerald-200 text-emerald-950 font-black px-2 py-0.5 rounded-md">
+                        {formatThaiFullDate(rangeStartDate)}
+                      </span>
+                      <span>ถึง</span>
+                      <span className="bg-emerald-200 text-emerald-950 font-black px-2 py-0.5 rounded-md">
+                        {formatThaiFullDate(nextSpecialStatusInfo.stopDate)}
+                      </span>
+                      <span className="text-emerald-700 font-bold">({nextSpecialStatusInfo.daysCount} วัน)</span>
+                    </div>
+                  </div>
+                ) : nextSpecialStatusInfo && nextSpecialStatusInfo.date === rangeStartDate ? (
+                  <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex items-start gap-3 shadow-2xs">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs leading-relaxed space-y-1">
+                      <h4 className="font-black text-amber-900">
+                        วันที่เริ่มต้นที่เลือก ({formatThaiFullDate(rangeStartDate)}) มีการตั้งสถานะพิเศษอยู่แล้ว
+                      </h4>
+                      <p className="text-amber-800">
+                        ในวันที่ดังกล่าว หอพักอยู่ในสถานะ <strong>[{nextSpecialStatusInfo.typeLabel}]</strong> เรียบร้อยแล้ว จึงไม่ต้องเช็คยอดตามปกติในวันนี้ กรุณาเปลี่ยนวันที่เริ่มต้นไปเป็นวันอื่น หรือหากต้องการแก้ไขให้เข้าไปล้างสถานะเดิมก่อน
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 text-indigo-950 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-5 h-5 text-indigo-600 shrink-0" />
+                      <h4 className="text-xs sm:text-sm font-black text-indigo-900">
+                        ยังไม่พบวันที่มีการตั้งสถานะพิเศษ (รอบกลับบ้าน & ปิดภาคเรียน) ล่วงหน้าในระบบ
+                      </h4>
+                    </div>
+                    <p className="text-xs text-indigo-800 leading-relaxed font-medium">
+                      ตามเงื่อนไข: หากมีการตั้งค่า <strong>รอบกลับบ้าน</strong> หรือ <strong>ปิดภาคเรียน</strong> ไว้ล่วงหน้า ระบบจะเช็คยอดตามปกติต่อเนื่องไปจนถึงวันนั้นโดยอัตโนมัติ
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-xs font-bold text-indigo-900">ทางเลือกดำเนินการ:</span>
+                      <button
+                        type="button"
+                        onClick={() => setTargetStatus("HOME_BREAK")}
+                        className="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border border-amber-300"
+                      >
+                        <Home className="w-3.5 h-3.5 text-amber-700" />
+                        <span>ไปตั้งค่า "รอบกลับบ้าน" ก่อน</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTargetStatus("SEMESTER_BREAK")}
+                        className="px-3 py-1.5 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-900 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border border-sky-300"
+                      >
+                        <School className="w-3.5 h-3.5 text-sky-700" />
+                        <span>ไปตั้งค่า "ปิดภาคเรียน" ก่อน</span>
+                      </button>
+                    </div>
+                    <div className="pt-2 border-t border-indigo-200/60 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-bold text-slate-700">หรือเลือกระยะเวลาเช็คยอดตามปกติตอนนี้:</span>
+                      {[3, 5, 7, 14, 30].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setPresentFallbackDays(num)}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                            presentFallbackDays === num
+                              ? "bg-indigo-600 text-white shadow-2xs"
+                              : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                          }`}
+                        >
+                          {num} วัน
+                        </button>
+                      ))}
+                      <span className="text-[11px] text-slate-500">
+                        (ถึงวันที่: {formatThaiFullDate(effectiveEndDate)})
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* Date Range Selector for HOME_BREAK, SEMESTER_BREAK, CLEAR */
@@ -935,7 +1073,14 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
               </div>
               <div className="text-xs text-slate-300 flex items-center gap-3 flex-wrap">
                 {targetStatus === "PRESENT" ? (
-                  <span>วันที่ดำเนินการ: <strong>{formatThaiFullDate(rangeStartDate)}</strong> (1 วัน)</span>
+                  <span>
+                    เช็คยอดตามปกติ: <strong>{formatThaiFullDate(rangeStartDate)}</strong>
+                    {nextSpecialStatusInfo && nextSpecialStatusInfo.date > rangeStartDate ? (
+                      <span> ไปจนถึงวันก่อนหน้าสถานะพิเศษ ({nextSpecialStatusInfo.typeLabel}) วันที่ <strong>{formatThaiFullDate(effectiveEndDate)}</strong> (รวม {effectiveDaysCount} วัน)</span>
+                    ) : (
+                      <span> ถึงวันที่ <strong>{formatThaiFullDate(effectiveEndDate)}</strong> (รวม {effectiveDaysCount} วัน)</span>
+                    )}
+                  </span>
                 ) : (
                   <span>ช่วงวันที่: <strong>{formatThaiFullDate(rangeStartDate)}</strong> ถึง <strong>{formatThaiFullDate(rangeEndDate)}</strong> ({daysCount} วัน)</span>
                 )}
@@ -949,11 +1094,11 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
             <button
               type="button"
               onClick={() => setConfirmModalOpen(true)}
-              disabled={isSubmitting || daysCount <= 0 || selectedDormIds.length === 0}
+              disabled={isSubmitting || effectiveDaysCount <= 0 || selectedDormIds.length === 0}
               className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-black text-sm shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>{isSubmitting ? "กำลังดำเนินการ..." : "ยืนยันและบันทึกสถานะช่วงวัน"}</span>
+              <span>{isSubmitting ? "กำลังดำเนินการ..." : "ยืนยันและบันทึกสถานะ"}</span>
             </button>
           </div>
         </div>
@@ -1135,11 +1280,11 @@ export const SpecialStatusManagerView: React.FC<SpecialStatusManagerViewProps> =
             <div className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
               <div className="flex justify-between border-b border-slate-200 pb-1.5">
                 <span className="text-slate-500 font-semibold">
-                  {targetStatus === "PRESENT" ? "วันที่ดำเนินการ:" : "ช่วงวันที่:"}
+                  {targetStatus === "PRESENT" ? "ช่วงวันที่เช็คยอดตามปกติ:" : "ช่วงวันที่:"}
                 </span>
-                <span className="font-bold text-slate-900">
+                <span className="font-bold text-slate-900 text-right">
                   {targetStatus === "PRESENT"
-                    ? `${formatThaiFullDate(rangeStartDate)} (1 วัน)`
+                    ? `${formatThaiFullDate(rangeStartDate)} ถึง ${formatThaiFullDate(effectiveEndDate)} (${effectiveDaysCount} วัน)`
                     : `${formatThaiFullDate(rangeStartDate)} ถึง ${formatThaiFullDate(rangeEndDate)} (${daysCount} วัน)`}
                 </span>
               </div>

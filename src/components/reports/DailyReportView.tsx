@@ -8,6 +8,7 @@ import {
   GOOGLE_DRIVE_FOLDER_URL
 } from "../../utils/excelReportExport";
 import {
+  generateCombinedDailyReportHtml,
   exportCombinedDailyReportHtml,
   exportHtmlDocument,
   exportHtmlToPdf,
@@ -85,6 +86,11 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const [copyImageSuccess, setCopyImageSuccess] = useState<boolean>(false);
   const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
 
+  // Print Preview Modal State (Combined 3 Sheets)
+  const [showPrintPreviewModal, setShowPrintPreviewModal] = useState<boolean>(false);
+  const [combinedPreviewHtml, setCombinedPreviewHtml] = useState<string>("");
+  const printPreviewIframeRef = useRef<HTMLIFrameElement>(null);
+
   // Categorize checked dates, semester break dates, and home break dates for ThaiCalendarPicker
   const { reportCheckedDates, reportSemesterBreakDates, reportHomeBreakDates } = React.useMemo(() => {
     const checked = new Set<string>();
@@ -122,14 +128,14 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   const sheet2Ref = useRef<HTMLDivElement>(null);
   const sheet3Ref = useRef<HTMLDivElement>(null);
 
-  const handleExportHtml = () => {
+  const handleOpenPrintPreview = () => {
     try {
-      const dateStr = reportData?.reportDate || selectedReportDate || "latest";
+      const dateStr = reportData?.reportDate || selectedReportDate || getTodayDateString();
       const formattedDate = formatThaiFullDate(dateStr);
       const fileName = `รายงานสรุปยอดนักเรียนในหอพักประจำวัน_รวม3ใบ_${dateStr}.html`;
       const reportTitle = `รายงานสรุปยอดนักเรียนในหอพักประจำวัน (${formattedDate})`;
-      
-      exportCombinedDailyReportHtml(
+
+      const htmlContent = generateCombinedDailyReportHtml(
         [
           "daily-report-printable-sheet1",
           "daily-report-printable-sheet2",
@@ -138,8 +144,29 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
         fileName,
         reportTitle
       );
+
+      setCombinedPreviewHtml(htmlContent);
+      setShowPrintPreviewModal(true);
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาดในการบันทึก HTML: " + err.message);
+      alert("เกิดข้อผิดพลาดในการโหลดตัวอย่างการพิมพ์: " + (err?.message || "ไม่สามารถแสดงตัวอย่างได้"));
+    }
+  };
+
+  const handlePrintFromModal = () => {
+    const iframe = printPreviewIframeRef.current;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }
+  };
+
+  const handleOpenInNewTab = () => {
+    if (!combinedPreviewHtml) return;
+    const blob = new Blob([combinedPreviewHtml], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (win) {
+      win.focus();
     }
   };
 
@@ -815,12 +842,12 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
 
                 {currentUser && (
                   <button
-                    onClick={handleExportHtml}
-                    className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 active:scale-95"
-                    title="ส่งออกรายงานทั้ง 3 ใบ (ใบที่ 1, ใบที่ 2, ใบที่ 3) อยู่ในไฟล์ HTML เดียวกัน สะดวกในการเปิดดูและพิมพ์ A4"
+                    onClick={handleOpenPrintPreview}
+                    className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 active:scale-95"
+                    title="แสดงตัวอย่างการพิมพ์รายงานสรุปยอดประจำวัน รวมทั้ง 3 ใบ (ใบสรุปยอด, ใบเรื่องแจ้งอบรม, ใบรายชื่อออกหอพัก) พร้อมสั่งพิมพ์ A4 หรือบันทึกเป็น PDF โดยไม่ต้องดาวน์โหลดไฟล์"
                   >
-                    <FileCode className="w-4 h-4 text-indigo-200" />
-                    <span>ส่งออกรายงาน / พิมพ์ (HTML รวม 3 ใบ)</span>
+                    <Printer className="w-4 h-4 text-indigo-200" />
+                    <span>ตัวอย่างการพิมพ์ / สรุปยอดประจำวัน (รวม 3 ใบ)</span>
                   </button>
                 )}
               </div>
@@ -1498,6 +1525,88 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
               title="ปฏิทินรายงานเช็คยอดนักเรียน"
               subtitle="คลิกวันที่เพื่อเปิดดูรายงานประจำวัน"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Print Preview Modal (ตัวอย่างการพิมพ์ รวม 3 ใบ) */}
+      {showPrintPreviewModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fade-in print:hidden">
+          <div className="bg-slate-900 rounded-3xl max-w-6xl w-full h-[94vh] flex flex-col shadow-2xl overflow-hidden border border-slate-700">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-black text-xs shadow-md">
+                  <Printer className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                    <span>ตัวอย่างการพิมพ์ / สรุปยอดประจำวัน (รวม 3 ใบ)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium">
+                    {formatThaiFullDate(reportData?.reportDate || selectedReportDate || getTodayDateString())} • รูปแบบ A4 แยก 3 หน้า (ใบสรุปยอด, เรื่องแจ้งอบรม, รายชื่อออกหอพัก)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Print button */}
+                <button
+                  type="button"
+                  onClick={handlePrintFromModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black rounded-xl shadow-md cursor-pointer transition-all active:scale-95"
+                  title="สั่งพิมพ์เอกสาร หรือเลือกบันทึกเป็น PDF (Print / Save as PDF)"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>สั่งพิมพ์ (Print)</span>
+                </button>
+
+                {/* Open in new tab button */}
+                <button
+                  type="button"
+                  onClick={handleOpenInNewTab}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold rounded-xl transition-colors cursor-pointer border border-slate-700"
+                  title="เปิดดูในแท็บใหม่ของเบราว์เซอร์ (Open in new tab)"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>เปิดในแท็บใหม่</span>
+                </button>
+
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowPrintPreviewModal(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-slate-700"
+                  title="ปิดหน้าต่างตัวอย่างการพิมพ์"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Iframe Preview */}
+            <div className="flex-1 w-full bg-slate-950 overflow-hidden relative">
+              <iframe
+                ref={printPreviewIframeRef}
+                srcDoc={combinedPreviewHtml}
+                title="ตัวอย่างการพิมพ์ / สรุปยอดประจำวัน (รวม 3 ใบ)"
+                className="w-full h-full border-0 bg-slate-900"
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-2.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+              <span className="truncate">
+                💡 คำแนะนำ: กดปุ่ม <strong>สั่งพิมพ์ (Print)</strong> เพื่อสั่งพิมพ์ หรือเลือก "บันทึกเป็น PDF" ในหน้าต่างเครื่องพิมพ์ของเบราว์เซอร์
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPrintPreviewModal(false)}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition cursor-pointer"
+              >
+                ปิด
+              </button>
+            </div>
           </div>
         </div>
       )}

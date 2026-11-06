@@ -364,10 +364,10 @@ export function printOrSaveElementAsPdf(
 
 
 /**
- * Combines all 3 Daily Report sheets (ใบที่ 1, ใบที่ 2, ใบที่ 3) into a single standalone HTML document.
+ * Generates the full HTML document string combining all 3 Daily Report sheets (ใบที่ 1, ใบที่ 2, ใบที่ 3).
  * Each sheet is formatted as an independent A4 portrait page with CSS page-break for seamless printing.
  */
-export function exportCombinedDailyReportHtml(
+export function generateCombinedDailyReportHtml(
   sheetIds: string[] = [
     "daily-report-printable-sheet1",
     "daily-report-printable-sheet2",
@@ -375,7 +375,7 @@ export function exportCombinedDailyReportHtml(
   ],
   fileName: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน_รวม3ใบ.html",
   reportDateTitle: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน"
-): void {
+): string {
   const sheetTitles = [
     "ใบที่ 1: ตารางสรุปยอดจำนวนนักเรียน",
     "ใบที่ 2: ใบรายงานเรื่องแจ้งอบรมประจำวัน",
@@ -524,6 +524,9 @@ export function exportCombinedDailyReportHtml(
       border-collapse: collapse;
       width: 100%;
     }
+    .capture-ignore, .print\\:hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -567,14 +570,39 @@ export function exportCombinedDailyReportHtml(
 </body>
 </html>`;
 
-  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return htmlContent;
 }
+
+/**
+ * Combines all 3 Daily Report sheets (ใบที่ 1, ใบที่ 2, ใบที่ 3) into a single standalone HTML document.
+ * Each sheet is formatted as an independent A4 portrait page with CSS page-break for seamless printing.
+ * Set download: true if user explicitly requests file download.
+ */
+export function exportCombinedDailyReportHtml(
+  sheetIds: string[] = [
+    "daily-report-printable-sheet1",
+    "daily-report-printable-sheet2",
+    "daily-report-printable-sheet3"
+  ],
+  fileName: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน_รวม3ใบ.html",
+  reportDateTitle: string = "รายงานสรุปยอดนักเรียนในหอพักประจำวัน",
+  download: boolean = false
+): string {
+  const htmlContent = generateCombinedDailyReportHtml(sheetIds, fileName, reportDateTitle);
+
+  if (download) {
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return htmlContent;
+}
+
 

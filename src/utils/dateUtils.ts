@@ -482,4 +482,112 @@ export function detectStudentGender(
   return "male";
 }
 
+/**
+ * Checks whether an attendance record has a special status ("HOME_BREAK" หรือ "SEMESTER_BREAK")
+ */
+export function isSpecialStatusRecord(att: any): "HOME_BREAK" | "SEMESTER_BREAK" | null {
+  if (!att) return null;
+  if (att.status === "SEMESTER_BREAK") return "SEMESTER_BREAK";
+  if (att.isHomeBreak || att.status === "HOME_BREAK") return "HOME_BREAK";
+  if (Array.isArray(att.records) && att.records.length > 0) {
+    if (att.records.every((r: any) => r.status === "SEMESTER_BREAK" || r.reason === "ปิดภาคเรียน")) {
+      return "SEMESTER_BREAK";
+    }
+    if (att.records.every((r: any) => r.status === "ROUND_HOME" || r.reason === "รอบกลับบ้าน")) {
+      return "HOME_BREAK";
+    }
+  }
+  return null;
+}
+
+export interface NextSpecialStatusInfo {
+  date: string; // The earliest date where special status starts (YYYY-MM-DD)
+  type: "HOME_BREAK" | "SEMESTER_BREAK";
+  typeLabel: string; // "รอบกลับบ้าน" | "ปิดภาคเรียน"
+  stopDate: string; // The day before the special status starts (YYYY-MM-DD)
+  daysCount: number; // Number of days from startDate to stopDate (inclusive)
+  dormsAffected: string[]; // Dormitory IDs with special status on that date
+}
+
+/**
+ * Finds the earliest upcoming special status (รอบกลับบ้าน หรือ ปิดภาคเรียน) on or after startDate.
+ * Used for "เช็คยอดตามปกติ" to automatically calculate the end date up until the special status starts.
+ */
+export function findNextSpecialStatus(
+  startDate: string,
+  attendanceRecords: any[],
+  targetDormIds?: string[] | "ALL"
+): NextSpecialStatusInfo | null {
+  if (!startDate || !attendanceRecords || !Array.isArray(attendanceRecords) || attendanceRecords.length === 0) {
+    return null;
+  }
+
+  const targetSet = Array.isArray(targetDormIds) && targetDormIds.length > 0 && targetDormIds[0] !== "ALL"
+    ? new Set(targetDormIds)
+    : null;
+
+  // Filter and group special statuses by date >= startDate
+  const dateMap: Record<string, { homeDorms: Set<string>; semesterDorms: Set<string> }> = {};
+
+  attendanceRecords.forEach((att) => {
+    if (!att || !att.date) return;
+    if (att.date < startDate) return;
+    if (targetSet && att.dormId && !targetSet.has(att.dormId)) return;
+
+    const specialType = isSpecialStatusRecord(att);
+    if (!specialType) return;
+
+    if (!dateMap[att.date]) {
+      dateMap[att.date] = { homeDorms: new Set(), semesterDorms: new Set() };
+    }
+    if (specialType === "HOME_BREAK") {
+      dateMap[att.date].homeDorms.add(att.dormId);
+    } else {
+      dateMap[att.date].semesterDorms.add(att.dormId);
+    }
+  });
+
+  const sortedDates = Object.keys(dateMap).sort((a, b) => a.localeCompare(b));
+  if (sortedDates.length === 0) return null;
+
+  const earliestDate = sortedDates[0];
+  const item = dateMap[earliestDate];
+  const isSemester = item.semesterDorms.size >= item.homeDorms.size && item.semesterDorms.size > 0;
+  const type: "HOME_BREAK" | "SEMESTER_BREAK" = isSemester ? "SEMESTER_BREAK" : "HOME_BREAK";
+  const typeLabel = isSemester ? "ปิดภาคเรียน" : "รอบกลับบ้าน";
+  const dormsAffected = Array.from(isSemester ? item.semesterDorms : item.homeDorms);
+
+  // If earliestDate === startDate, today itself has special status
+  const stopDate = earliestDate === startDate ? startDate : getPreviousDateString(earliestDate);
+
+  let daysCount = 0;
+  if (earliestDate > startDate) {
+    const s = new Date(startDate);
+    const e = new Date(stopDate);
+    const diffTime = e.getTime() - s.getTime();
+    daysCount = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1);
+  }
+
+  return {
+    date: earliestDate,
+    type,
+    typeLabel,
+    stopDate,
+    daysCount,
+    dormsAffected
+  };
+}
+
+/**
+ * Calculates number of days between two YYYY-MM-DD date strings inclusive.
+ */
+export function calculateDaysCount(start: string, end: string): number {
+  if (!start || !end || start > end) return 0;
+  const s = new Date(start);
+  const e = new Date(end);
+  const diffTime = e.getTime() - s.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
+}
+
+
 
