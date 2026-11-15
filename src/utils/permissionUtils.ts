@@ -81,6 +81,19 @@ export const ALL_NAVIGATION_MENUS: NavigationMenuDefinition[] = [
     }
   },
   {
+    id: "fingerprint-compare",
+    name: "ลงหอสาย (สแกนลายนิ้วมือ)",
+    shortName: "ลงหอสาย",
+    description: "นำเข้าข้อมูลจากระบบสแกนลายนิ้วมือเพื่อตรวจสอบนักเรียนที่สแกนก่อนเวลา ลงหอสาย และออกหอพัก",
+    category: "OPERATIONS",
+    defaultRoles: {
+      guest: true,
+      level3: true,
+      level2: true,
+      level1: true
+    }
+  },
+  {
     id: "notices",
     name: "เรื่องแจ้งอบรม (Notices)",
     shortName: "แจ้งอบรม",
@@ -148,15 +161,15 @@ export const ALL_NAVIGATION_MENUS: NavigationMenuDefinition[] = [
 ];
 
 export const DEFAULT_ROLE_NAVIGATION_PERMISSIONS: RoleNavigationPermissions = {
-  guest: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "reports"],
-  level3: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "reports", "users-db"],
-  level2: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "notices", "reports", "students", "dorms", "users-db"],
-  level1: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "notices", "reports", "students", "dorms", "users-db"]
+  guest: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "fingerprint-compare", "reports"],
+  level3: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "fingerprint-compare", "reports", "users-db"],
+  level2: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "fingerprint-compare", "notices", "reports", "students", "dorms", "users-db"],
+  level1: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "fingerprint-compare", "notices", "reports", "students", "dorms", "users-db"]
 };
 
 /**
  * Normalizes navigation permissions by ensuring newly added system menus like
- * "special-status" are included even if older system settings were persisted in Firestore.
+ * "special-status" and "fingerprint-compare" are included even if older system settings were persisted in Firestore.
  */
 export function normalizeNavigationPermissions(
   permissions?: RoleNavigationPermissions | null
@@ -180,6 +193,20 @@ export function normalizeNavigationPermissions(
   }
   if (!result.guest.includes("special-status")) {
     result.guest.push("special-status");
+  }
+
+  // Backwards compatibility migration: ensure "fingerprint-compare" is present in level1, level2, level3, and guest
+  if (!result.level1.includes("fingerprint-compare")) {
+    result.level1.push("fingerprint-compare");
+  }
+  if (!result.level2.includes("fingerprint-compare")) {
+    result.level2.push("fingerprint-compare");
+  }
+  if (!result.level3.includes("fingerprint-compare")) {
+    result.level3.push("fingerprint-compare");
+  }
+  if (!result.guest.includes("fingerprint-compare")) {
+    result.guest.push("fingerprint-compare");
   }
 
   return result;

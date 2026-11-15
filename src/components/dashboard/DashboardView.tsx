@@ -89,13 +89,15 @@ interface DashboardViewProps {
   }) => Promise<{ affectedDatesCount: number; affectedRecordsCount: number; message: string }>;
 }
 
+const EMPTY_TODAY_ATTENDANCE: Record<string, DailyAttendance> = {};
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   reportData,
   isLoading,
   dorms = [],
   students = [],
   users = [],
-  todayAttendance = {},
+  todayAttendance = EMPTY_TODAY_ATTENDANCE,
   latestNotice,
   onNavigateToCheck,
   onNavigateToReports,

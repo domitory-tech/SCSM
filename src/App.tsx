@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { UserProfile, SystemSettings } from "./types";
+import { DailyAttendance, UserProfile, SystemSettings } from "./types";
 import { DEFAULT_SYSTEM_SETTINGS, getTodayDateString } from "./utils/dateUtils";
 import { matchStudentToDorm } from "./utils/dormUtils";
 import { isMenuAccessible } from "./utils/permissionUtils";
@@ -18,6 +18,7 @@ import { DormsManagementView } from "./components/dorms/DormsManagementView";
 import { DormLayoutView } from "./components/dorms/DormLayoutView";
 import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
 import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusManagerView";
+import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { FirebaseStatusBadge } from "./components/common/FirebaseStatusBadge";
 import {
@@ -58,6 +59,8 @@ const queryClient = new QueryClient({
   }
 });
 
+const EMPTY_TODAY_ATTENDANCE: Record<string, DailyAttendance> = {};
+
 function MainAppContent() {
   const { data: dbSettings } = useSystemSettingsQuery();
   const updateSystemSettingsMutation = useUpdateSystemSettingsMutation();
@@ -66,7 +69,12 @@ function MainAppContent() {
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
     try {
       const saved = localStorage.getItem("dorm_system_settings");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return { ...DEFAULT_SYSTEM_SETTINGS, ...parsed };
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -153,6 +161,13 @@ function MainAppContent() {
   const { data: allAttendanceRecords = [] } = useAllAttendanceRecordsQuery();
   const { data: reportData, isLoading: isLoadingReport } = useDailyReportQuery(selectedReportDate);
 
+  const resolvedTodayAttendance = React.useMemo<Record<string, DailyAttendance>>(() => {
+    if (todayAttendanceAll && typeof todayAttendanceAll === "object" && !("records" in todayAttendanceAll)) {
+      return todayAttendanceAll as Record<string, DailyAttendance>;
+    }
+    return EMPTY_TODAY_ATTENDANCE;
+  }, [todayAttendanceAll]);
+
   // Mutations
   const addDormMutation = useAddDormMutation();
   const updateDormMutation = useUpdateDormMutation();
@@ -195,6 +210,7 @@ function MainAppContent() {
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก (20.00 น.)",
         "special-status": "กำหนดสถานะพิเศษ",
+        "fingerprint-compare": "ลงหอสาย",
         "notices": "เรื่องแจ้งอบรม",
         "reports": "รายงานสรุปประจำวัน",
         "students": "จัดการรายชื่อนักเรียน",
@@ -214,6 +230,7 @@ function MainAppContent() {
         "student-search": "ค้นหานักเรียน",
         "check-attendance": "เช็คยอดหอพัก",
         "special-status": "กำหนดสถานะพิเศษ",
+        "fingerprint-compare": "ลงหอสาย",
         "notices": "เรื่องแจ้งอบรม",
         "reports": "รายงานสรุปประจำวัน",
         "students": "จัดการรายชื่อนักเรียน",
@@ -284,11 +301,7 @@ function MainAppContent() {
               dorms={dorms}
               students={students}
               users={users}
-              todayAttendance={
-                todayAttendanceAll && typeof todayAttendanceAll === "object" && !("records" in todayAttendanceAll)
-                  ? (todayAttendanceAll as any)
-                  : {}
-              }
+              todayAttendance={resolvedTodayAttendance}
               latestNotice={notices[0]}
               onNavigateToCheck={handleNavigateToCheck}
               onNavigateToReports={handleNavigateToReports}
@@ -394,6 +407,17 @@ function MainAppContent() {
                 });
               }}
               onNavigateToDashboard={() => handleSelectTab("dashboard")}
+              onNavigateToCheck={handleNavigateToCheck}
+            />
+          )}
+
+          {activeTab === "fingerprint-compare" && (
+            <FingerprintCompareView
+              students={students}
+              dorms={dorms}
+              attendanceRecords={allAttendanceRecords}
+              systemSettings={systemSettings}
+              currentUser={currentUser}
               onNavigateToCheck={handleNavigateToCheck}
             />
           )}
@@ -518,6 +542,7 @@ function MainAppContent() {
           if (targetTabPrompt) {
             // Attempt to switch to requested tab after login
             if (targetTabPrompt.includes("จัดการหอพัก") && user.roleLevel === 1) setActiveTab("dorms");
+            else if (targetTabPrompt.includes("ลงหอสาย")) setActiveTab("fingerprint-compare");
             else if (targetTabPrompt.includes("เช็คยอด")) setActiveTab("check-attendance");
             else if (targetTabPrompt.includes("นักเรียน")) setActiveTab("students");
             else if (targetTabPrompt.includes("รายงาน")) setActiveTab("reports");

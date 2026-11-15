@@ -24,6 +24,7 @@ import {
   Calendar,
   CalendarRange,
   ChevronDown,
+  Fingerprint,
   X
 } from "lucide-react";
 
@@ -151,6 +152,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "กำหนดสถานะพิเศษ",
       fullLabel: "กำหนดสถานะพิเศษ",
       icon: CalendarRange
+    },
+    {
+      id: "fingerprint-compare",
+      label: "ลงหอสาย",
+      fullLabel: "ลงหอสาย",
+      icon: Fingerprint
     },
     {
       id: "notices",

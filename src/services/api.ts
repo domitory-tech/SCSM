@@ -82,11 +82,63 @@ export function setLocalCache<T>(key: string, data: T): void {
   }
 }
 
+// ----------------------------------------------------------------------
+// Short-TTL & In-Flight Deduplicated Firestore Collection Read Cache
+// ----------------------------------------------------------------------
+const READ_DEDUPE_TTL_MS = 4000;
+const inFlightCollectionReads = new Map<string, Promise<Array<{ id: string; data: Record<string, any> }>>>();
+const recentCollectionReads = new Map<string, { timestamp: number; items: Array<{ id: string; data: Record<string, any> }> }>();
+
+export function invalidateFirestoreReadCache(collectionName?: string): void {
+  if (!collectionName) {
+    recentCollectionReads.clear();
+    inFlightCollectionReads.clear();
+    return;
+  }
+  recentCollectionReads.delete(collectionName);
+  inFlightCollectionReads.delete(collectionName);
+}
+
+async function readCollectionCached(
+  collectionName: string,
+  timeoutMs: number = 3500
+): Promise<Array<{ id: string; data: Record<string, any> }>> {
+  const cached = recentCollectionReads.get(collectionName);
+  if (cached && Date.now() - cached.timestamp < READ_DEDUPE_TTL_MS) {
+    return cached.items;
+  }
+
+  const existingPromise = inFlightCollectionReads.get(collectionName);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const promise = (async () => {
+    try {
+      const snap = await withTimeout(getDocs(collection(db, collectionName)), timeoutMs);
+      const items = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+      recentCollectionReads.set(collectionName, { timestamp: Date.now(), items });
+      return items;
+    } finally {
+      inFlightCollectionReads.delete(collectionName);
+    }
+  })();
+
+  inFlightCollectionReads.set(collectionName, promise);
+  return promise;
+}
+
 export function updateLocalCacheList<T extends { id: string }>(
   key: string,
   newItem: T,
   operation: "UPSERT" | "DELETE"
 ): T[] {
+  if (key === CACHE_KEYS.DORMS) invalidateFirestoreReadCache("dorms");
+  else if (key === CACHE_KEYS.STUDENTS) invalidateFirestoreReadCache("students");
+  else if (key === CACHE_KEYS.USERS) invalidateFirestoreReadCache("users");
+  else if (key === CACHE_KEYS.NOTICES) invalidateFirestoreReadCache("notices");
+  else if (key === CACHE_KEYS.ATTENDANCE) invalidateFirestoreReadCache("attendance");
+
   const current = getLocalCache<T[]>(key) || [];
   let updated: T[];
   if (operation === "DELETE") {
@@ -109,9 +161,9 @@ export function updateLocalCacheList<T extends { id: string }>(
 // ----------------------------------------------------------------------
 export async function fetchDorms(): Promise<Dormitory[]> {
   try {
-    const snapshot = await withTimeout(getDocs(collection(db, "dorms")), 3500);
-    if (!snapshot.empty) {
-      const dorms = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Dormitory));
+    const docs = await readCollectionCached("dorms", 3500);
+    if (docs.length > 0) {
+      const dorms = docs.map((d) => ({ id: d.id, ...d.data } as Dormitory));
       const sorted = dorms.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setLocalCache(CACHE_KEYS.DORMS, sorted);
       return sorted;
@@ -182,12 +234,12 @@ export async function fetchStudents(params?: {
   room?: number;
 }): Promise<Student[]> {
   try {
-    const snapshot = await withTimeout(getDocs(collection(db, "students")), 3500);
+    const docs = await readCollectionCached("students", 3500);
     let students: Student[] = [];
 
-    if (!snapshot.empty) {
-      students = snapshot.docs.map((d) => {
-        const raw = d.data();
+    if (docs.length > 0) {
+      students = docs.map((d) => {
+        const raw = d.data;
         const bedVal = (raw.dormBed !== undefined && raw.dormBed !== null && String(raw.dormBed).trim() !== "")
           ? String(raw.dormBed).trim()
           : ((raw.bed !== undefined && raw.bed !== null) ? String(raw.bed).trim() : "");
@@ -275,6 +327,7 @@ export async function importStudents(dormId: string, students: Partial<Student>[
     count = createdStudents.length;
   }
 
+  invalidateFirestoreReadCache("students");
   // Update local cache
   const cached = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
   const createdMap = new Map(createdStudents.map((s) => [s.id, s]));
@@ -365,6 +418,7 @@ export async function batchDeleteStudents(ids: string[]) {
     console.warn("Batch deleted students offline locally:", e);
   }
 
+  invalidateFirestoreReadCache("students");
   const cached = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
   const idSet = new Set(ids);
   const remaining = cached.filter((s) => !idSet.has(s.id));
@@ -401,6 +455,7 @@ export async function batchTransferStudentsDorm(
     console.warn("Batch transferred students offline locally:", e);
   }
 
+  invalidateFirestoreReadCache("students");
   setLocalCache(CACHE_KEYS.STUDENTS, updatedCache);
   return { success: true, count: updatedStudents.length };
 }
@@ -410,9 +465,9 @@ export async function batchTransferStudentsDorm(
 // ----------------------------------------------------------------------
 export async function fetchUsers(): Promise<UserProfile[]> {
   try {
-    const snapshot = await withTimeout(getDocs(collection(db, "users")), 2500);
-    if (!snapshot.empty) {
-      const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserProfile));
+    const docs = await readCollectionCached("users", 2500);
+    if (docs.length > 0) {
+      const users = docs.map((d) => ({ id: d.id, ...d.data } as UserProfile));
       const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
       setLocalCache(CACHE_KEYS.USERS, sorted);
       return sorted;
@@ -593,6 +648,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
     setLocalCache(CACHE_KEYS.NOTICES, []);
   }
 
+  invalidateFirestoreReadCache();
   const total = deletedCounts.students + deletedCounts.dorms + deletedCounts.users + deletedCounts.attendance + deletedCounts.notices;
   return {
     success: true,
@@ -617,6 +673,7 @@ export async function clearDatabase() {
     }
   }
 
+  invalidateFirestoreReadCache();
   // Clear local caches
   setLocalCache(CACHE_KEYS.DORMS, []);
   setLocalCache(CACHE_KEYS.STUDENTS, []);
@@ -708,6 +765,8 @@ export async function clearAttendanceDatabase(payload: {
     setLocalCache(CACHE_KEYS.NOTICES, filteredNotices);
   }
 
+  invalidateFirestoreReadCache("attendance");
+  if (clearNotices) invalidateFirestoreReadCache("notices");
   return {
     success: true,
     message: `ล้างข้อมูลเช็คยอดเรียบร้อยแล้ว (${deletedAttendanceCount} รายการเช็คยอด${clearNotices ? `, ${deletedNoticesCount} เรื่องแจ้งอบรม` : ""})`,
@@ -866,6 +925,8 @@ export async function restoreAttendanceAndNoticesDatabase(payload: {
     setLocalCache(CACHE_KEYS.NOTICES, Array.from(noticeMap.values()));
   }
 
+  invalidateFirestoreReadCache("attendance");
+  if (noticesToRestore.length > 0) invalidateFirestoreReadCache("notices");
   return {
     success: true,
     message: `กู้คืนข้อมูลสำเร็จ: เช็คยอด ${attendanceToRestore.length} รายการ, เรื่องแจ้งอบรม ${noticesToRestore.length} รายการ`,
@@ -906,6 +967,7 @@ export async function clearStudentsDatabase(payload: {
     if (payload.mode === "BY_DORM" && payload.dormId && item.dormId === payload.dormId) return false;
     return true;
   });
+  invalidateFirestoreReadCache("students");
   setLocalCache(CACHE_KEYS.STUDENTS, filtered);
 
   return { success: true, message: "ลบรายชื่อนักเรียนเรียบร้อยแล้ว" };
@@ -1001,6 +1063,7 @@ export async function restoreDatabase(data: any) {
     } catch (e) { console.warn("Restored settings offline:", e); }
   }
 
+  invalidateFirestoreReadCache();
   return { success: true, message: `กู้คืนข้อมูลสำเร็จเรียบร้อยแล้ว (${restoredCount} รายการ)` };
 }
 
@@ -1077,9 +1140,9 @@ export async function savePrimaryDatabase() {
 // ----------------------------------------------------------------------
 export async function fetchNotices(date?: string): Promise<Notice[]> {
   try {
-    const snap = await withTimeout(getDocs(collection(db, "notices")), 3500);
-    if (!snap.empty) {
-      let notices = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Notice));
+    const docs = await readCollectionCached("notices", 3500);
+    if (docs.length > 0) {
+      let notices = docs.map((d) => ({ id: d.id, ...d.data } as Notice));
       setLocalCache(CACHE_KEYS.NOTICES, notices);
       if (date) notices = notices.filter((n) => n.date === date);
       return notices.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -1344,6 +1407,7 @@ export async function batchSetAttendanceDateRange(
     affectedRecordsCount = await commitChunkedSetDocs("attendance", recordsToSave);
   }
 
+  invalidateFirestoreReadCache("attendance");
   // Update local cache
   const cached = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   const map = new Map<string, DailyAttendance>();
@@ -1373,8 +1437,8 @@ export const syncSemesterBreakAutoAttendance = syncAutoAttendanceCarryOver;
 export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
   let records: DailyAttendance[] = [];
   try {
-    const snap = await getDocs(collection(db, "attendance"));
-    records = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
+    const docs = await readCollectionCached("attendance", 15000);
+    records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
   } catch (err: any) {
     console.warn("Firestore fetchAllCheckedAttendanceDates offline fallback:", err?.message || err);
@@ -1401,8 +1465,8 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
 export async function fetchAllAttendanceRecords(): Promise<DailyAttendance[]> {
   let records: DailyAttendance[] = [];
   try {
-    const snap = await withTimeout(getDocs(collection(db, "attendance")), 15000);
-    records = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
+    const docs = await readCollectionCached("attendance", 15000);
+    records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
   } catch (err: any) {
     console.warn("Firestore fetchAllAttendanceRecords offline fallback:", err?.message || err);
@@ -1417,8 +1481,8 @@ export async function fetchAttendance(
 ): Promise<Record<string, DailyAttendance> | DailyAttendance> {
   let allRecords: DailyAttendance[] = [];
   try {
-    const snap = await withTimeout(getDocs(collection(db, "attendance")), 15000);
-    allRecords = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyAttendance));
+    const docs = await readCollectionCached("attendance", 15000);
+    allRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
   } catch (err: any) {
     console.warn("Firestore fetchAttendance offline fallback:", err?.message || err);
@@ -1610,6 +1674,7 @@ export async function bulkSetHomeBreakAllDorms(
     console.warn("Firestore bulkSetHomeBreakAllDorms saved offline locally:", err?.message || err);
   }
 
+  invalidateFirestoreReadCache("attendance");
   // Update local cache
   const cached = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   const map = new Map<string, DailyAttendance>();

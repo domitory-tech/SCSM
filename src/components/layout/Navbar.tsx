@@ -12,6 +12,7 @@ import {
   Search,
   BedDouble,
   CalendarRange,
+  Fingerprint,
   Menu,
   X
 } from "lucide-react";
@@ -45,6 +46,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         return { label: "เช็คยอดหอพัก", icon: CheckCircle2 };
       case "special-status":
         return { label: "กำหนดสถานะพิเศษ (รอบกลับบ้าน / ปิดภาคเรียน)", icon: CalendarRange };
+      case "fingerprint-compare":
+        return { label: "ลงหอสาย", icon: Fingerprint };
       case "notices":
         return { label: "เรื่องแจ้งอบรม", icon: Megaphone };
       case "reports":
