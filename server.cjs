@@ -1167,8 +1167,23 @@ app.post("/api/google-sheets/export", async (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: "spa"
+    });
+    app.get("/@vite/client", async (_req, res, next) => {
+      try {
+        const result = await vite.transformRequest("/@vite/client");
+        if (result && result.code) {
+          const patched = result.code.replace(
+            /transport\.connect\(createHMRHandler\(handleMessage\)\);?/g,
+            "/* HMR WebSocket disabled */"
+          );
+          res.type("application/javascript").send(patched);
+          return;
+        }
+      } catch (_err) {
+      }
+      next();
     });
     app.use(vite.middlewares);
   } else {

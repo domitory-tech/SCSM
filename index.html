@@ -32,8 +32,8 @@
         }
       })();
     </script>
-    <script type="module" crossorigin src="./assets/index-C-Y-ElkB.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-B8QEb_SA.css">
+    <script type="module" crossorigin src="./assets/index-D1Q8L-fx.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-8QiUcdvN.css">
   </head>
   <body class="bg-[#f2f4f9]">
     <div id="root">
@@ -70,12 +70,32 @@
           }
 
           window.addEventListener('error', function(event) {
+            var msg = (event && event.message) ? String(event.message) : '';
+            if (msg.indexOf('WebSocket') !== -1) return;
             var rec = document.getElementById('loading-recovery');
             var recDetail = document.getElementById('loading-recovery-detail');
             if (rec && document.getElementById('root') && document.getElementById('root').contains(rec)) {
               rec.style.display = 'block';
-              if (recDetail && window.location.hostname.includes('github.io')) {
-                checkGitHubPagesIssue(recDetail);
+              if (recDetail) {
+                if (window.location.hostname.includes('github.io')) {
+                  checkGitHubPagesIssue(recDetail);
+                } else if (msg) {
+                  recDetail.innerHTML = 'หากหน้านี้ไม่แสดงผล กรุณากดปุ่มเพื่อรีโหลดหรือล้างข้อมูลแคช<br><span style="color:#dc2626;font-size:11px;display:inline-block;margin-top:6px;">สาเหตุ: ' + msg.replace(/</g, '&lt;') + '</span>';
+                }
+              }
+            }
+          });
+
+          window.addEventListener('unhandledrejection', function(event) {
+            var reason = event && event.reason;
+            var msg = (reason && reason.message) ? String(reason.message) : String(reason || '');
+            if (msg.indexOf('WebSocket') !== -1) return;
+            var rec = document.getElementById('loading-recovery');
+            var recDetail = document.getElementById('loading-recovery-detail');
+            if (rec && document.getElementById('root') && document.getElementById('root').contains(rec)) {
+              rec.style.display = 'block';
+              if (recDetail && msg && !window.location.hostname.includes('github.io')) {
+                recDetail.innerHTML = 'หากหน้านี้ไม่แสดงผล กรุณากดปุ่มเพื่อรีโหลดหรือล้างข้อมูลแคช<br><span style="color:#dc2626;font-size:11px;display:inline-block;margin-top:6px;">สาเหตุ: ' + msg.replace(/</g, '&lt;') + '</span>';
               }
             }
           });
@@ -89,7 +109,7 @@
                 checkGitHubPagesIssue(recDetail);
               }
             }
-          }, 3500);
+          }, 10000);
         </script>
         <style>
           @keyframes spin {
