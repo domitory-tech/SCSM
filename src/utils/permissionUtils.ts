@@ -167,49 +167,52 @@ export const DEFAULT_ROLE_NAVIGATION_PERMISSIONS: RoleNavigationPermissions = {
   level1: ["dashboard", "dorm-layout", "student-search", "check-attendance", "special-status", "fingerprint-compare", "notices", "reports", "students", "dorms", "users-db"]
 };
 
+const VALID_MENU_IDS = new Set(ALL_NAVIGATION_MENUS.map((m) => m.id));
+
+function sanitizeRoleMenuList(
+  list: string[] | undefined | null,
+  fallback: string[]
+): string[] {
+  if (!Array.isArray(list)) {
+    return [...fallback];
+  }
+  const cleaned = Array.from(new Set(list.filter((id) => VALID_MENU_IDS.has(id))));
+  if (cleaned.length === 0) {
+    return [fallback[0] || ALL_NAVIGATION_MENUS[0].id];
+  }
+  return cleaned;
+}
+
 /**
- * Normalizes navigation permissions by ensuring newly added system menus like
- * "special-status" and "fingerprint-compare" are included even if older system settings were persisted in Firestore.
+ * Normalizes navigation permissions while strictly preserving admin-configured
+ * opt-outs (including "special-status" and "fingerprint-compare") and ensuring
+ * every role level retains at least 1 permitted menu.
  */
 export function normalizeNavigationPermissions(
   permissions?: RoleNavigationPermissions | null
 ): RoleNavigationPermissions {
-  const result: RoleNavigationPermissions = {
-    guest: permissions?.guest ? [...permissions.guest] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest],
-    level3: permissions?.level3 ? [...permissions.level3] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3],
-    level2: permissions?.level2 ? [...permissions.level2] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2],
-    level1: permissions?.level1 ? [...permissions.level1] : [...DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1]
+  return {
+    guest: sanitizeRoleMenuList(permissions?.guest, DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest || ["dashboard"]),
+    level3: sanitizeRoleMenuList(permissions?.level3, DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3 || ["dashboard"]),
+    level2: sanitizeRoleMenuList(permissions?.level2, DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2 || ["dashboard"]),
+    level1: sanitizeRoleMenuList(permissions?.level1, DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1 || ["dashboard"])
   };
+}
 
-  // Backwards compatibility migration: ensure "special-status" is present in level1, level2, level3, and guest
-  if (!result.level1.includes("special-status")) {
-    result.level1.push("special-status");
-  }
-  if (!result.level2.includes("special-status")) {
-    result.level2.push("special-status");
-  }
-  if (!result.level3.includes("special-status")) {
-    result.level3.push("special-status");
-  }
-  if (!result.guest.includes("special-status")) {
-    result.guest.push("special-status");
-  }
-
-  // Backwards compatibility migration: ensure "fingerprint-compare" is present in level1, level2, level3, and guest
-  if (!result.level1.includes("fingerprint-compare")) {
-    result.level1.push("fingerprint-compare");
-  }
-  if (!result.level2.includes("fingerprint-compare")) {
-    result.level2.push("fingerprint-compare");
-  }
-  if (!result.level3.includes("fingerprint-compare")) {
-    result.level3.push("fingerprint-compare");
-  }
-  if (!result.guest.includes("fingerprint-compare")) {
-    result.guest.push("fingerprint-compare");
-  }
-
-  return result;
+/**
+ * Validates that every role level has at least 1 permitted menu.
+ */
+export function validateNavigationPermissions(
+  permissions: RoleNavigationPermissions
+): { valid: boolean; emptyRoles: Array<keyof RoleNavigationPermissions> } {
+  const roleKeys: Array<keyof RoleNavigationPermissions> = ["guest", "level3", "level2", "level1"];
+  const emptyRoles = roleKeys.filter(
+    (key) => !Array.isArray(permissions[key]) || permissions[key]!.length === 0
+  );
+  return {
+    valid: emptyRoles.length === 0,
+    emptyRoles
+  };
 }
 
 /**
@@ -222,21 +225,34 @@ export function isMenuAccessible(
 ): boolean {
   const activePerms = normalizeNavigationPermissions(permissions);
 
-  // Level 1 Admin always has full access fallback
+  // Level 1 Admin
   if (currentUser?.roleLevel === 1) {
-    return activePerms.level1.includes(menuId);
+    return (activePerms.level1 || []).includes(menuId);
   }
 
   // Level 2 Staff
   if (currentUser?.roleLevel === 2) {
-    return activePerms.level2.includes(menuId);
+    return (activePerms.level2 || []).includes(menuId);
   }
 
   // Level 3 Teacher / User
   if (currentUser?.roleLevel === 3) {
-    return activePerms.level3.includes(menuId);
+    return (activePerms.level3 || []).includes(menuId);
   }
 
-  // Guest (Not logged in)
-  return activePerms.guest.includes(menuId);
+  // Level 4 Visitor (Logged in) or Guest (Not logged in)
+  return (activePerms.guest || []).includes(menuId);
+}
+
+/**
+ * Returns the first accessible menu ID for the given user/guest
+ */
+export function getFirstAccessibleMenuId(
+  currentUser: { roleLevel?: number } | null | undefined,
+  permissions?: RoleNavigationPermissions | null
+): string {
+  const first = ALL_NAVIGATION_MENUS.find((m) =>
+    isMenuAccessible(m.id, currentUser, permissions)
+  );
+  return first ? first.id : ALL_NAVIGATION_MENUS[0].id;
 }

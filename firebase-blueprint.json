@@ -89,7 +89,9 @@
         "systemNameTh": { "type": "string" },
         "schoolLogoUrl": { "type": "string" },
         "isAttendancePaused": { "type": "boolean" },
-        "attendancePauseReason": { "type": "string" }
+        "attendancePauseReason": { "type": "string" },
+        "navigationPermissions": { "type": "object" },
+        "guestRequiresLogin": { "type": "boolean" }
       }
     }
   },

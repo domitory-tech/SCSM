@@ -1,28 +1,29 @@
 import React, { useState } from "react";
 import { RoleNavigationPermissions, SystemSettings } from "../../types";
-import { ALL_NAVIGATION_MENUS, DEFAULT_ROLE_NAVIGATION_PERMISSIONS, normalizeNavigationPermissions } from "../../utils/permissionUtils";
+import {
+  ALL_NAVIGATION_MENUS,
+  DEFAULT_ROLE_NAVIGATION_PERMISSIONS,
+  normalizeNavigationPermissions,
+  validateNavigationPermissions
+} from "../../utils/permissionUtils";
 import {
   ShieldCheck,
-  CheckCircle2,
   AlertTriangle,
   RotateCcw,
   Save,
   Lock,
-  Users,
-  Shield,
-  UserCheck,
+  Unlock,
   Sparkles,
   Info,
   Check,
   X,
   Eye,
-  Settings,
-  HelpCircle
+  LogIn
 } from "lucide-react";
 
 interface NavigationPermissionsTabProps {
   systemSettings: SystemSettings;
-  onSavePermissions: (newPermissions: RoleNavigationPermissions) => void;
+  onSavePermissions: (newPermissions: RoleNavigationPermissions, guestRequiresLogin: boolean) => void;
   isAdmin: boolean;
   showNotification: (type: "success" | "error", text: string) => void;
 }
@@ -36,59 +37,16 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
   const currentPermissions = normalizeNavigationPermissions(systemSettings.navigationPermissions);
 
   const [permissionsState, setPermissionsState] = useState<RoleNavigationPermissions>(currentPermissions);
+  const [guestRequiresLogin, setGuestRequiresLogin] = useState<boolean>(
+    Boolean(systemSettings.guestRequiresLogin)
+  );
   const [selectedCategory, setSelectedCategory] = useState<"ALL" | "MAIN" | "OPERATIONS" | "DATA" | "ADMIN">("ALL");
 
   // Keep synced if systemSettings changes externally
   React.useEffect(() => {
     setPermissionsState(normalizeNavigationPermissions(systemSettings.navigationPermissions));
-  }, [systemSettings.navigationPermissions]);
-
-  const togglePermission = (roleKey: keyof RoleNavigationPermissions, menuId: string) => {
-    if (!isAdmin) {
-      showNotification("error", "เฉพาะผู้ดูแลระบบ (Admin ระดับ 1) เท่านั้นที่สามารถตั้งค่าสิทธิ์การเข้าถึงเมนูได้");
-      return;
-    }
-
-    setPermissionsState((prev) => {
-      const currentList = prev[roleKey] || [];
-      const hasItem = currentList.includes(menuId);
-      const newList = hasItem
-        ? currentList.filter((id) => id !== menuId)
-        : [...currentList, menuId];
-
-      return {
-        ...prev,
-        [roleKey]: newList
-      };
-    });
-  };
-
-  const handleToggleColumnAll = (roleKey: keyof RoleNavigationPermissions, shouldEnable: boolean) => {
-    if (!isAdmin) return;
-    setPermissionsState((prev) => ({
-      ...prev,
-      [roleKey]: shouldEnable ? ALL_NAVIGATION_MENUS.map((m) => m.id) : []
-    }));
-  };
-
-  const handleResetToDefaults = () => {
-    if (!isAdmin) return;
-    setPermissionsState({ ...DEFAULT_ROLE_NAVIGATION_PERMISSIONS });
-    showNotification("success", "รีเซ็ตค่าสิทธิ์การเข้าถึงเมนูกลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว (อย่าลืมกดบันทึก)");
-  };
-
-  const handleSave = () => {
-    if (!isAdmin) {
-      showNotification("error", "เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถบันทึกได้");
-      return;
-    }
-    onSavePermissions(permissionsState);
-    showNotification("success", "บันทึกการตั้งค่าการอนุญาตเข้าถึงเมนู Navigation สำเร็จเรียบร้อยแล้ว");
-  };
-
-  const filteredMenus = selectedCategory === "ALL"
-    ? ALL_NAVIGATION_MENUS
-    : ALL_NAVIGATION_MENUS.filter((m) => m.category === selectedCategory);
+    setGuestRequiresLogin(Boolean(systemSettings.guestRequiresLogin));
+  }, [systemSettings.navigationPermissions, systemSettings.guestRequiresLogin]);
 
   const rolesConfig: Array<{
     key: keyof RoleNavigationPermissions;
@@ -103,8 +61,8 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
     {
       key: "guest",
       label: "ผู้เยี่ยมชม",
-      subLabel: "ยังไม่ได้เข้าสู่ระบบ (Guest)",
-      levelText: "สาธารณะ",
+      subLabel: "ผู้เยี่ยมชมระบบ / สาธารณะ (Visitor)",
+      levelText: "ระดับ 4",
       badgeBg: "bg-slate-100 text-slate-700 border-slate-300",
       textColor: "text-slate-800",
       borderColor: "border-slate-300",
@@ -142,6 +100,110 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
     }
   ];
 
+  const getRoleDisplayName = (roleKey: keyof RoleNavigationPermissions) => {
+    const found = rolesConfig.find((r) => r.key === roleKey);
+    return found ? `${found.levelText} ${found.label}` : roleKey;
+  };
+
+  const togglePermission = (roleKey: keyof RoleNavigationPermissions, menuId: string) => {
+    if (!isAdmin) {
+      showNotification("error", "เฉพาะผู้ดูแลระบบ (Admin ระดับ 1) เท่านั้นที่สามารถตั้งค่าสิทธิ์การเข้าถึงเมนูได้");
+      return;
+    }
+
+    const currentList = permissionsState[roleKey] || [];
+    const hasItem = currentList.includes(menuId);
+
+    if (hasItem && currentList.length <= 1) {
+      showNotification(
+        "error",
+        `ไม่สามารถปิดเมนูสุดท้ายได้: ${getRoleDisplayName(roleKey)} ต้องมีการอนุญาตเข้าถึงเมนูอย่างน้อย 1 เมนู`
+      );
+      return;
+    }
+
+    setPermissionsState((prev) => {
+      const prevList = prev[roleKey] || [];
+      const exists = prevList.includes(menuId);
+      if (exists && prevList.length <= 1) {
+        return prev;
+      }
+      const newList = exists
+        ? prevList.filter((id) => id !== menuId)
+        : [...prevList, menuId];
+
+      return {
+        ...prev,
+        [roleKey]: newList
+      };
+    });
+  };
+
+  const handleToggleColumnAll = (roleKey: keyof RoleNavigationPermissions, shouldEnable: boolean) => {
+    if (!isAdmin) return;
+    if (shouldEnable) {
+      setPermissionsState((prev) => ({
+        ...prev,
+        [roleKey]: ALL_NAVIGATION_MENUS.map((m) => m.id)
+      }));
+      return;
+    }
+
+    // Enforce minimum 1 menu permitted per role when clearing
+    const currentList = permissionsState[roleKey] || [];
+    const fallbackMenuId = currentList.includes("dashboard")
+      ? "dashboard"
+      : currentList[0] || ALL_NAVIGATION_MENUS[0].id;
+    const keptMenu = ALL_NAVIGATION_MENUS.find((m) => m.id === fallbackMenuId);
+
+    setPermissionsState((prev) => ({
+      ...prev,
+      [roleKey]: [fallbackMenuId]
+    }));
+    showNotification(
+      "success",
+      `คงเหลือสิทธิ์เข้าถึง 1 เมนู (${keptMenu?.shortName || fallbackMenuId}) สำหรับ ${getRoleDisplayName(roleKey)} เนื่องจากทุกระดับต้องมีอย่างน้อย 1 เมนู`
+    );
+  };
+
+  const handleResetToDefaults = () => {
+    if (!isAdmin) return;
+    setPermissionsState({
+      guest: [...(DEFAULT_ROLE_NAVIGATION_PERMISSIONS.guest || ["dashboard"])],
+      level3: [...(DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level3 || ["dashboard"])],
+      level2: [...(DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level2 || ["dashboard"])],
+      level1: [...(DEFAULT_ROLE_NAVIGATION_PERMISSIONS.level1 || ["dashboard"])]
+    });
+    setGuestRequiresLogin(false);
+    showNotification("success", "รีเซ็ตค่าสิทธิ์การเข้าถึงเมนูกลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว (อย่าลืมกดบันทึก)");
+  };
+
+  const handleSave = () => {
+    if (!isAdmin) {
+      showNotification("error", "เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถบันทึกได้");
+      return;
+    }
+
+    const validation = validateNavigationPermissions(permissionsState);
+    if (!validation.valid) {
+      const roleNames = validation.emptyRoles.map((r) => getRoleDisplayName(r)).join(", ");
+      showNotification(
+        "error",
+        `ไม่สามารถบันทึกได้: ${roleNames} ต้องมีการอนุญาตเข้าถึงเมนูอย่างน้อย 1 เมนู`
+      );
+      return;
+    }
+
+    onSavePermissions(permissionsState, guestRequiresLogin);
+    showNotification("success", "บันทึกการตั้งค่าการอนุญาตเข้าถึงเมนู Navigation สำเร็จเรียบร้อยแล้ว");
+  };
+
+  const filteredMenus = selectedCategory === "ALL"
+    ? ALL_NAVIGATION_MENUS
+    : ALL_NAVIGATION_MENUS.filter((m) => m.category === selectedCategory);
+
+  const validation = validateNavigationPermissions(permissionsState);
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header Banner */}
@@ -152,14 +214,14 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
               <ShieldCheck className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+              <h3 className="text-base font-black text-gray-900 flex items-center gap-2 flex-wrap">
                 <span>การอนุญาตเข้าถึงเมนู (Navigation Menu Access Control)</span>
                 <span className="text-[10px] font-extrabold px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-md">
                   เฉพาะ Admin ระดับ 1
                 </span>
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                กำหนดสิทธิ์การมองเห็นและการเข้าถึงเมนูแถบข้าง (Navigation Sidebar) และหน้าระบบ สำหรับผู้ใช้งานแต่ละระดับ
+                กำหนดสิทธิ์การมองเห็นและการเข้าถึงเมนูแถบข้าง (Navigation Sidebar) และหน้าระบบ สำหรับผู้ใช้งานทั้ง 4 ระดับ
               </p>
             </div>
           </div>
@@ -181,7 +243,7 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
           <button
             type="button"
             onClick={handleSave}
-            disabled={!isAdmin}
+            disabled={!isAdmin || !validation.valid}
             className="px-4.5 py-2 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-95 active:scale-98 text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save className="w-3.5 h-3.5" />
@@ -207,15 +269,123 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
           <div className="space-y-1">
             <div className="font-extrabold text-purple-950">คำแนะนำการตั้งค่าสิทธิ์ (Tick & Apply):</div>
             <p className="text-slate-600 leading-relaxed text-[11px]">
-              - <strong>ผู้เยี่ยมชม (Guest):</strong> แนะนำให้เปิดเฉพาะ "ภาพรวมหอพัก" เพื่อให้ดูสถิติทั่วไปได้โดยไม่ต้องล็อกอิน<br />
-              - <strong>ครูหอพัก (ระดับ 3):</strong> ติ๊กเลือกเมนูที่จำเป็น เช่น ผังการจัดหอพัก, ค้นหานักเรียน, เช็คยอดหอพัก, สรุป & พิมพ์รายงาน<br />
-              - ติ๊กถูก <strong className="text-emerald-700">✓ (เข้าถึงได้)</strong> หรือ ติ๊กออก <strong className="text-slate-400">✕ (ไม่ให้เข้า)</strong> แล้วกดปุ่ม <strong>"บันทึกการอนุญาต"</strong> ระบบจะมีผลทันที
+              - <strong>ทุกระดับ (ระดับ 1 - ระดับ 4 ผู้เยี่ยมชม)</strong> ต้องมีการอนุญาตให้เข้าถึงเมนู <strong>อย่างน้อย 1 เมนู</strong> เพื่อใช้งานระบบได้<br />
+              - <strong>ระดับ 4 ผู้เยี่ยมชม (Guest):</strong> สามารถกำหนดได้ว่าจะให้เข้าดูเมนูที่อนุญาตได้ทันที หรือต้องผ่านหน้าเข้าสู่ระบบ (Login) ก่อน<br />
+              - ติ๊กถูก <strong className="text-emerald-700">✓ (อนุญาต)</strong> หรือ ติ๊กออก <strong className="text-slate-400">✕ (ปิด)</strong> แล้วกดปุ่ม <strong>"บันทึกการอนุญาต"</strong> ระบบจะมีผลทันที
             </p>
           </div>
         </div>
       )}
 
-      {/* Category Filter Pills */}
+      {/* Guest / Visitor Login Requirement Setting Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center border border-slate-200 shrink-0">
+              <Eye className="w-4.5 h-4.5 text-[#A05AFF]" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-slate-900 flex items-center gap-2 flex-wrap">
+                <span>การตั้งค่าการล็อกอินสำหรับระดับ 4: ผู้เยี่ยมชม (Visitor Access Mode)</span>
+                <span
+                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                    guestRequiresLogin
+                      ? "bg-amber-50 text-amber-800 border-amber-300"
+                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  }`}
+                >
+                  {guestRequiresLogin ? "ต้องล็อกอินก่อนเข้าใช้งาน" : "เข้าชมได้โดยไม่ต้องล็อกอิน"}
+                </span>
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                เลือกว่าผู้เยี่ยมชมที่เปิดเว็บไซต์จะต้องเข้าสู่ระบบก่อน หรือสามารถเข้าดูเมนูที่อนุญาตได้ทันที
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Option 1: No Login Required */}
+          <button
+            type="button"
+            disabled={!isAdmin}
+            onClick={() => setGuestRequiresLogin(false)}
+            className={`p-4 rounded-2xl border-2 text-left transition-all flex items-start gap-3 ${
+              !isAdmin ? "opacity-75 cursor-not-allowed" : "cursor-pointer"
+            } ${
+              !guestRequiresLogin
+                ? "border-emerald-500 bg-emerald-50/60 shadow-xs ring-2 ring-emerald-500/20"
+                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                !guestRequiresLogin
+                  ? "bg-emerald-600 text-white"
+                  : "bg-slate-100 text-slate-400"
+              }`}
+            >
+              <Unlock className="w-4.5 h-4.5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-slate-900">
+                  ไม่ต้องผ่านการล็อกอิน (เข้าชมได้ทันที)
+                </span>
+                {!guestRequiresLogin && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">
+                    <Check className="w-3 h-3" /> เลือกอยู่
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                เมื่อเปิดเว็บไซต์ ระบบจะแสดงหน้าหลักและเมนูที่อนุญาตให้ระดับผู้เยี่ยมชมทันทีโดยไม่ต้องเข้าสู่ระบบ
+              </p>
+            </div>
+          </button>
+
+          {/* Option 2: Login Required First */}
+          <button
+            type="button"
+            disabled={!isAdmin}
+            onClick={() => setGuestRequiresLogin(true)}
+            className={`p-4 rounded-2xl border-2 text-left transition-all flex items-start gap-3 ${
+              !isAdmin ? "opacity-75 cursor-not-allowed" : "cursor-pointer"
+            } ${
+              guestRequiresLogin
+                ? "border-[#A05AFF] bg-purple-50/70 shadow-xs ring-2 ring-[#A05AFF]/20"
+                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                guestRequiresLogin
+                  ? "bg-[#A05AFF] text-white"
+                  : "bg-slate-100 text-slate-400"
+              }`}
+            >
+              <LogIn className="w-4.5 h-4.5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-slate-900">
+                  ต้องผ่านการล็อกอินก่อนเข้าใช้งาน
+                </span>
+                {guestRequiresLogin && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#A05AFF] bg-purple-100 px-2 py-0.5 rounded-md shrink-0">
+                    <Check className="w-3 h-3" /> เลือกอยู่
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                เมื่อยังไม่เข้าสู่ระบบ จะซ่อนเมนูและข้อมูลทั้งหมด แล้วแสดง<strong>เฉพาะกล่องหน้า Login อยู่กลางหน้าจอ</strong> จนกว่าจะเข้าสู่ระบบ (รวมถึงบัญชีระดับ 4 ผู้เยี่ยมชม)
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Category Filter Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         <span className="text-xs font-bold text-gray-500 mr-1 shrink-0">หมวดหมู่:</span>
         <button
@@ -275,6 +445,16 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
         </button>
       </div>
 
+      {/* Validation Error Banner (if any role ever has 0 menus) */}
+      {!validation.valid && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-rose-800">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>
+            ระดับสิทธิ์ต่อไปนี้ยังไม่มีเมนูที่อนุญาต: {validation.emptyRoles.map((r) => getRoleDisplayName(r)).join(", ")} (ทุกระดับต้องมีอย่างน้อย 1 เมนู)
+          </span>
+        </div>
+      )}
+
       {/* Permission Matrix Table */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -285,45 +465,58 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
                 <th className="py-3.5 px-4 font-black w-2/5 min-w-[240px]">
                   <span>เมนูระบบ (Navigation Menu)</span>
                 </th>
-                {rolesConfig.map((role) => (
-                  <th
-                    key={role.key}
-                    className={`py-3.5 px-3 text-center min-w-[130px] font-black border-l border-gray-200/80 ${role.headerBg}`}
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${role.badgeBg}`}>
-                        {role.levelText}
-                      </span>
-                      <span className={`text-xs font-black ${role.textColor}`}>
-                        {role.label}
-                      </span>
-                      <span className="text-[10px] font-medium text-gray-500 max-w-[120px] truncate" title={role.subLabel}>
-                        {role.subLabel}
-                      </span>
-                      {isAdmin && (
-                        <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200/60 w-full justify-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleColumnAll(role.key, true)}
-                            className="text-[9px] font-bold text-emerald-700 hover:underline px-1 cursor-pointer"
-                            title="เลือกทั้งหมด"
-                          >
-                            เลือกหมด
-                          </button>
-                          <span className="text-gray-300 text-[9px]">|</span>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleColumnAll(role.key, false)}
-                            className="text-[9px] font-bold text-rose-600 hover:underline px-1 cursor-pointer"
-                            title="ยกเลิกทั้งหมด"
-                          >
-                            ล้าง
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </th>
-                ))}
+                {rolesConfig.map((role) => {
+                  const enabledCount = (permissionsState[role.key] || []).length;
+                  const isEmpty = enabledCount === 0;
+                  return (
+                    <th
+                      key={role.key}
+                      className={`py-3.5 px-3 text-center min-w-[135px] font-black border-l border-gray-200/80 ${role.headerBg}`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${role.badgeBg}`}>
+                          {role.levelText}
+                        </span>
+                        <span className={`text-xs font-black ${role.textColor}`}>
+                          {role.label}
+                        </span>
+                        <span className="text-[10px] font-medium text-gray-500 max-w-[125px] truncate" title={role.subLabel}>
+                          {role.subLabel}
+                        </span>
+                        <span
+                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                            isEmpty
+                              ? "bg-rose-100 text-rose-700 border-rose-300"
+                              : "bg-white/90 text-emerald-700 border-emerald-200"
+                          }`}
+                        >
+                          เปิด {enabledCount}/{ALL_NAVIGATION_MENUS.length} เมนู
+                        </span>
+                        {isAdmin && (
+                          <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200/60 w-full justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleColumnAll(role.key, true)}
+                              className="text-[9px] font-bold text-emerald-700 hover:underline px-1 cursor-pointer"
+                              title="เลือกทั้งหมด"
+                            >
+                              เลือกหมด
+                            </button>
+                            <span className="text-gray-300 text-[9px]">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleColumnAll(role.key, false)}
+                              className="text-[9px] font-bold text-rose-600 hover:underline px-1 cursor-pointer"
+                              title="ลดเหลือ 1 เมนูหลัก"
+                            >
+                              เหลือ 1 เมนู
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
 
@@ -354,6 +547,7 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
                     {rolesConfig.map((role) => {
                       const list = permissionsState[role.key] || [];
                       const isChecked = list.includes(menu.id);
+                      const isLastRemaining = isChecked && list.length <= 1;
 
                       return (
                         <td
@@ -361,11 +555,24 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
                           className="py-3 px-3 text-center border-l border-gray-100 align-middle"
                         >
                           <label
+                            title={
+                              isLastRemaining
+                                ? "ต้องอนุญาตอย่างน้อย 1 เมนู (เปิดเมนูอื่นก่อนจึงจะปิดเมนูนี้ได้)"
+                                : isChecked
+                                ? "คลิกเพื่อปิดการเข้าถึงเมนูนี้"
+                                : "คลิกเพื่ออนุญาตเข้าถึงเมนูนี้"
+                            }
                             className={`inline-flex items-center justify-center p-2 rounded-xl transition-all select-none ${
-                              isAdmin ? "cursor-pointer hover:scale-110 active:scale-95" : "cursor-not-allowed opacity-80"
+                              isAdmin
+                                ? isLastRemaining
+                                  ? "cursor-pointer opacity-90"
+                                  : "cursor-pointer hover:scale-110 active:scale-95"
+                                : "cursor-not-allowed opacity-80"
                             } ${
                               isChecked
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs"
+                                ? isLastRemaining
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-400 ring-2 ring-emerald-200 shadow-2xs"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs"
                                 : "bg-gray-100 text-gray-400 border border-gray-200"
                             }`}
                           >
@@ -378,7 +585,11 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
                             />
                             {isChecked ? (
                               <div className="flex items-center gap-1 font-black text-xs text-emerald-700">
-                                <Check className="w-4 h-4 stroke-[3]" />
+                                {isLastRemaining ? (
+                                  <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Check className="w-4 h-4 stroke-[3]" />
+                                )}
                                 <span className="text-[11px]">อนุญาต</span>
                               </div>
                             ) : (
@@ -403,7 +614,7 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
           <div className="flex items-center gap-2">
             <Info className="w-4 h-4 text-[#A05AFF]" />
             <span>
-              จำนวนเมนูทั้งหมดในระบบ: <strong>{ALL_NAVIGATION_MENUS.length} เมนู</strong> | กำลังแสดง: <strong>{filteredMenus.length} เมนู</strong>
+              จำนวนเมนูทั้งหมดในระบบ: <strong>{ALL_NAVIGATION_MENUS.length} เมนู</strong> | กำลังแสดง: <strong>{filteredMenus.length} เมนู</strong> (ทุกระดับต้องมีอย่างน้อย 1 เมนู)
             </span>
           </div>
 
@@ -411,7 +622,8 @@ export const NavigationPermissionsTab: React.FC<NavigationPermissionsTabProps> =
             <button
               type="button"
               onClick={handleSave}
-              className="px-5 py-2 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer flex items-center gap-2 self-stretch sm:self-auto justify-center"
+              disabled={!validation.valid}
+              className="px-5 py-2 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer flex items-center gap-2 self-stretch sm:self-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="w-4 h-4" />
               <span>บันทึกการอนุญาตเข้าถึงเมนู</span>

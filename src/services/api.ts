@@ -50,7 +50,8 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   attendancePauseReason: "ระบบปิดการเช็คยอดชั่วคราว เพื่อปรับปรุงข้อมูลรายชื่อนักเรียน ย้ายหอพัก และนำเข้านักเรียนใหม่",
   attendancePausedAt: "",
   attendancePausedBy: "",
-  navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS
+  navigationPermissions: DEFAULT_ROLE_NAVIGATION_PERMISSIONS,
+  guestRequiresLogin: false
 };
 
 // ----------------------------------------------------------------------

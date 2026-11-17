@@ -412,8 +412,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
-    roleLevel: 2, // 1 = Admin, 2 = Staff, 3 = Teacher
-    roleCategory: "STAFF" as "ADMIN" | "STAFF" | "DORM_TEACHER",
+    roleLevel: 2, // 1 = Admin, 2 = Staff, 3 = Teacher, 4 = Guest/Visitor
+    roleCategory: "STAFF" as "ADMIN" | "STAFF" | "DORM_TEACHER" | "GUEST",
     dormId: "",
     dormPosition: "ครูประจำหอพัก" as DormPosition,
     allowedDormIds: [] as string[],
@@ -932,6 +932,10 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       roleCategoryName = "เจ้าหน้าที่";
       roleLabel = "เจ้าหน้าที่ส่วนกลาง";
       role = "ADMIN_OFFICER";
+    } else if (level === 4) {
+      roleCategoryName = "ผู้เยี่ยมชม";
+      roleLabel = "ผู้เยี่ยมชมระบบ (Visitor)";
+      role = "GUEST";
     }
 
     let processedAvatarUrl = getDirectImageUrl(formData.avatarUrl || PRESET_AVATARS[0]);
@@ -2320,8 +2324,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 {isAdmin
-                  ? "สามารถ เพิ่ม ลบ แก้ไข เจ้าหน้าที่ (Level 2) และครูหอพัก/ผู้ใช้ (Level 3) พร้อมกำหนดรูปไอคอนประจำตัว"
-                  : "สิทธิ์เจ้าหน้าที่ (Level 2) สามารถ เพิ่ม ลบ แก้ไข บัญชีผู้ใช้ครูหอพัก (Level 3) พร้อมกำหนดรูปไอคอนประจำตัว"}
+                  ? "สามารถ เพิ่ม ลบ แก้ไข เจ้าหน้าที่ (Level 2), ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมกำหนดรูปไอคอนประจำตัว"
+                  : "สิทธิ์เจ้าหน้าที่ (Level 2) สามารถ เพิ่ม ลบ แก้ไข บัญชีผู้ใช้ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมกำหนดรูปไอคอนประจำตัว"}
               </p>
             </div>
 
@@ -2398,8 +2402,16 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                           )}
                         </div>
                         <div className="text-[10px] text-gray-500 font-medium flex items-center gap-1.5 mt-0.5">
-                          <span>{u.roleLevel === 1 ? "ผู้ดูแล" : u.roleLevel === 2 ? "เจ้าหน้าที่" : "ครูหอพัก"}</span>
-                          {u.dormPosition && (
+                          <span>
+                            {u.roleLevel === 1
+                              ? "ผู้ดูแล"
+                              : u.roleLevel === 2
+                              ? "เจ้าหน้าที่"
+                              : u.roleLevel === 4
+                              ? "ผู้เยี่ยมชม"
+                              : "ครูหอพัก"}
+                          </span>
+                          {u.dormPosition && u.roleLevel !== 4 && (
                             <span className="text-purple-600 font-bold">• {u.dormPosition}</span>
                           )}
                         </div>
@@ -2411,6 +2423,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                               ? "bg-purple-100 text-purple-800"
                               : u.roleLevel === 2
                               ? "bg-cyan-100 text-cyan-800"
+                              : u.roleLevel === 4
+                              ? "bg-slate-100 text-slate-700"
                               : "bg-emerald-100 text-emerald-800"
                           }`}
                         >
@@ -2418,7 +2432,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-4 font-medium text-gray-700">
-                        {u.allowedDormIds && u.allowedDormIds.length > 0 ? (
+                        {u.roleLevel === 4 ? (
+                          <span className="text-slate-500 text-xs">ผู้เยี่ยมชม (สิทธิ์ดูตามเมนูที่กำหนด)</span>
+                        ) : u.allowedDormIds && u.allowedDormIds.length > 0 ? (
                           <div className="flex flex-wrap gap-1 max-w-xs">
                             {u.allowedDormIds.map((dId) => {
                               const dObj = dorms.find((d) => d.id === dId);
@@ -2443,7 +2459,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                         )}
                       </td>
                       <td className="py-3 px-4 font-mono font-bold text-purple-700">
-                        {(isAdmin || (isStaff && u.roleLevel === 3)) ? u.password || "123456" : "******"}
+                        {(isAdmin || (isStaff && (u.roleLevel === 3 || u.roleLevel === 4))) ? u.password || "123456" : "******"}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -2531,10 +2547,11 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           systemSettings={settingsForm}
           isAdmin={isAdmin}
           showNotification={showNotification}
-          onSavePermissions={(newPerms: RoleNavigationPermissions) => {
-            const updated = {
+          onSavePermissions={(newPerms: RoleNavigationPermissions, guestRequiresLogin: boolean) => {
+            const updated: SystemSettings = {
               ...settingsForm,
-              navigationPermissions: newPerms
+              navigationPermissions: newPerms,
+              guestRequiresLogin
             };
             setSettingsForm(updated);
             if (onUpdateSystemSettings) {
@@ -3766,9 +3783,10 @@ git push -u origin main`);
                     value={formData.roleLevel}
                     onChange={(e) => {
                       const level = Number(e.target.value);
-                      let category: "ADMIN" | "STAFF" | "DORM_TEACHER" = "STAFF";
+                      let category: "ADMIN" | "STAFF" | "DORM_TEACHER" | "GUEST" = "STAFF";
                       if (level === 1) category = "ADMIN";
-                      if (level === 3) category = "DORM_TEACHER";
+                      else if (level === 3) category = "DORM_TEACHER";
+                      else if (level === 4) category = "GUEST";
                       setFormData({ ...formData, roleLevel: level, roleCategory: category });
                     }}
                     className="w-full bg-gray-50 border border-gray-300 text-xs font-bold text-gray-800 rounded-xl px-3 py-2 outline-none"
@@ -3776,6 +3794,7 @@ git push -u origin main`);
                     <option value={1} disabled={isStaff}>ระดับ 1 - ผู้ดูแล (Admin) {isStaff ? "(เฉพาะผู้ดูแลเท่านั้น)" : ""}</option>
                     <option value={2} disabled={isStaff}>ระดับ 2 - เจ้าหน้าที่ (Staff) {isStaff ? "(เฉพาะผู้ดูแลเท่านั้น)" : ""}</option>
                     <option value={3}>ระดับ 3 - ครูหอพัก (Teacher)</option>
+                    <option value={4}>ระดับ 4 - ผู้เยี่ยมชม (Visitor / Guest)</option>
                   </select>
                 </div>
 
@@ -3832,7 +3851,8 @@ git push -u origin main`);
                 </div>
               )}
 
-              {/* Multi-Dorm Access Selection */}
+              {/* Multi-Dorm Access Selection (Hidden for Level 4 Visitor) */}
+              {formData.roleLevel !== 4 && (
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1.5">
                   <Building2 className="w-4 h-4 text-[#A05AFF]" />
@@ -3890,6 +3910,7 @@ git push -u origin main`);
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Avatar Selector with Local File Upload */}
               <div className="space-y-2.5">

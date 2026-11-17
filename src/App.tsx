@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DailyAttendance, UserProfile, SystemSettings } from "./types";
 import { DEFAULT_SYSTEM_SETTINGS, getTodayDateString } from "./utils/dateUtils";
 import { matchStudentToDorm } from "./utils/dormUtils";
-import { isMenuAccessible } from "./utils/permissionUtils";
+import { isMenuAccessible, getFirstAccessibleMenuId } from "./utils/permissionUtils";
 import { clearSessionUser, getSessionUser, setSessionUser } from "./utils/session";
 import { Navbar } from "./components/layout/Navbar";
 import { Sidebar } from "./components/layout/Sidebar";
@@ -109,10 +109,13 @@ function MainAppContent() {
 
   // Current user state (Restored from Session Cookie / sessionStorage so user stays logged in until browser is closed)
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getSessionUser());
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTab] = useState<string>(() =>
+    getFirstAccessibleMenuId(getSessionUser(), systemSettings.navigationPermissions)
+  );
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [targetTabPrompt, setTargetTabPrompt] = useState<string>("");
+  const [pendingTargetTabId, setPendingTargetTabId] = useState<string>("");
 
   // System Maintenance Auto Popup State (Shown 1 time per day)
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState<boolean>(false);
@@ -122,9 +125,21 @@ function MainAppContent() {
   const todayStr = getTodayDateString();
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(todayStr);
 
-  // Auto trigger popup for system maintenance notice (Once per day)
+  // Ensure activeTab is always an accessible menu for the current user/guest
+  React.useEffect(() => {
+    if (!isMenuAccessible(activeTab, currentUser, systemSettings.navigationPermissions)) {
+      const fallbackTab = getFirstAccessibleMenuId(currentUser, systemSettings.navigationPermissions);
+      if (fallbackTab !== activeTab) {
+        setActiveTab(fallbackTab);
+      }
+    }
+  }, [activeTab, currentUser, systemSettings.navigationPermissions]);
+
+  // Auto trigger popup for system maintenance notice (Once per day, only after entering the app)
+  const isLoginGateActive = Boolean(systemSettings.guestRequiresLogin) && !currentUser;
   React.useEffect(() => {
     if (
+      !isLoginGateActive &&
       systemSettings.showMaintenancePopup &&
       Boolean(systemSettings.maintenanceMessage?.trim())
     ) {
@@ -137,7 +152,7 @@ function MainAppContent() {
         console.error(e);
       }
     }
-  }, [systemSettings.showMaintenancePopup, systemSettings.maintenanceMessage, todayStr]);
+  }, [isLoginGateActive, systemSettings.showMaintenancePopup, systemSettings.maintenanceMessage, todayStr]);
 
   const handleCloseMaintenanceModal = () => {
     try {
@@ -217,6 +232,7 @@ function MainAppContent() {
         "dorms": "จัดการหอพัก",
         "users-db": "จัดการบัญชีผู้ใช้ สิทธิ์ และฐานข้อมูล"
       };
+      setPendingTargetTabId(tabId);
       setTargetTabPrompt(tabLabels[tabId] || tabId);
       setIsLoginModalOpen(true);
       return;
@@ -237,6 +253,7 @@ function MainAppContent() {
         "dorms": "จัดการหอพัก",
         "users-db": "ตั้งค่าระบบ & ฐานข้อมูล"
       };
+      setPendingTargetTabId(tabId);
       setTargetTabPrompt(`${tabLabels[tabId] || tabId} (บัญชีของคุณระดับ ${currentUser.roleLevel} ไม่มีสิทธิ์เข้าถึงเมนูนี้ตามที่ผู้ดูแลระบบกำหนด)`);
       setIsLoginModalOpen(true);
       return;
@@ -255,16 +272,44 @@ function MainAppContent() {
     handleSelectTab("reports");
   };
 
+  // If guestRequiresLogin is enabled and user is not logged in, render ONLY the centered login box
+  if (isLoginGateActive) {
+    return (
+      <LoginModal
+        isOpen={true}
+        standalone={true}
+        systemSettings={systemSettings}
+        onClose={() => {}}
+        currentUser={null}
+        onLogin={(user) => {
+          setSessionUser(user);
+          setCurrentUser(user);
+          if (user.dormId) setSelectedDormId(user.dormId);
+          setActiveTab(getFirstAccessibleMenuId(user, systemSettings.navigationPermissions));
+        }}
+        onLogout={() => {
+          clearSessionUser();
+          setCurrentUser(null);
+        }}
+      />
+    );
+  }
+
+  const effectiveTab = isMenuAccessible(activeTab, currentUser, systemSettings.navigationPermissions)
+    ? activeTab
+    : getFirstAccessibleMenuId(currentUser, systemSettings.navigationPermissions);
+
   return (
     <div className="min-h-screen lg:h-screen bg-[#f2f4f9] flex flex-col font-sans text-slate-800 lg:overflow-hidden">
       <Navbar
         currentUser={currentUser}
         systemSettings={systemSettings}
         onOpenSwitchUser={() => {
+          setPendingTargetTabId("");
           setTargetTabPrompt("");
           setIsLoginModalOpen(true);
         }}
-        activeTab={activeTab}
+        activeTab={effectiveTab}
         onExportSheetsClick={() => handleSelectTab("reports")}
         onToggleMobileMenu={() => setIsOpenMobile((prev) => !prev)}
         isMobileMenuOpen={isOpenMobile}
@@ -273,7 +318,7 @@ function MainAppContent() {
 
       <div className="flex-1 flex min-h-0 overflow-hidden items-stretch">
         <Sidebar
-          activeTab={activeTab}
+          activeTab={effectiveTab}
           setActiveTab={handleSelectTab}
           isOpenMobile={isOpenMobile}
           setIsOpenMobile={setIsOpenMobile}
@@ -281,10 +326,12 @@ function MainAppContent() {
           currentUser={currentUser}
           systemSettings={systemSettings}
           onOpenLogin={() => {
+            setPendingTargetTabId("");
             setTargetTabPrompt("");
             setIsLoginModalOpen(true);
           }}
           onOpenSwitchUser={() => {
+            setPendingTargetTabId("");
             setTargetTabPrompt("");
             setIsLoginModalOpen(true);
           }}
@@ -294,7 +341,7 @@ function MainAppContent() {
         {/* Right Side Column: Main Content Area + Bottom Footer */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#f2f4f9]">
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-6">
-          {activeTab === "dashboard" && (
+          {effectiveTab === "dashboard" && (
             <DashboardView
               reportData={reportData}
               isLoading={isLoadingReport || isLoadingDorms}
@@ -306,7 +353,7 @@ function MainAppContent() {
               onNavigateToCheck={handleNavigateToCheck}
               onNavigateToReports={handleNavigateToReports}
               onNavigateToDormLayout={() => handleSelectTab("dorm-layout")}
-              onNavigateToStudents={() => setActiveTab("students")}
+              onNavigateToStudents={() => handleSelectTab("students")}
               onNavigateToSpecialStatus={() => handleSelectTab("special-status")}
               currentUser={currentUser}
               systemSettings={systemSettings}
@@ -331,7 +378,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "dorm-layout" && (
+          {effectiveTab === "dorm-layout" && (
             <DormLayoutView
               dorms={dorms}
               students={students}
@@ -341,7 +388,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "student-search" && (
+          {effectiveTab === "student-search" && (
             <StudentSearchView
               students={students}
               dorms={dorms}
@@ -352,7 +399,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "check-attendance" && (
+          {effectiveTab === "check-attendance" && (
             <AttendanceCheckView
               dorms={dorms}
               selectedDormId={selectedDormId}
@@ -374,10 +421,10 @@ function MainAppContent() {
               currentUser={currentUser}
               selectedDate={selectedAttendanceDate}
               onDateChange={setSelectedAttendanceDate}
-              onReturnToDashboard={() => setActiveTab("dashboard")}
+              onReturnToDashboard={() => handleSelectTab("dashboard")}
               systemSettings={systemSettings}
               onUpdateSystemSettings={handleUpdateSystemSettings}
-              onNavigateToStudents={() => setActiveTab("students")}
+              onNavigateToStudents={() => handleSelectTab("students")}
               onBulkHomeBreak={async (mode) => {
                 await bulkHomeBreakMutation.mutateAsync({
                   targetDate: selectedAttendanceDate || todayStr,
@@ -390,7 +437,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "special-status" && (
+          {effectiveTab === "special-status" && (
             <SpecialStatusManagerView
               dorms={dorms}
               students={students}
@@ -411,7 +458,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "fingerprint-compare" && (
+          {effectiveTab === "fingerprint-compare" && (
             <FingerprintCompareView
               students={students}
               dorms={dorms}
@@ -422,7 +469,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "notices" && (
+          {effectiveTab === "notices" && (
             <NoticeManagerView
               notices={notices}
               onPostNotice={async (data) => {
@@ -438,7 +485,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "reports" && (
+          {effectiveTab === "reports" && (
             <DailyReportView
               reportData={reportData}
               isLoading={isLoadingReport}
@@ -456,7 +503,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "students" && (
+          {effectiveTab === "students" && (
             <StudentManagementView
               dorms={dorms}
               students={students}
@@ -487,7 +534,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === "dorms" && (
+          {effectiveTab === "dorms" && (
             <DormsManagementView
               dorms={dorms}
               students={students}
@@ -501,11 +548,11 @@ function MainAppContent() {
               onUpdateDorm={async (id, dData) => {
                 await updateDormMutation.mutateAsync({ id, data: dData });
               }}
-              onNavigateToUsers={() => setActiveTab("users-db")}
+              onNavigateToUsers={() => handleSelectTab("users-db")}
             />
           )}
 
-          {activeTab === "users-db" && (
+          {effectiveTab === "users-db" && (
             <UserAndDatabaseView
               currentUser={currentUser}
               dorms={dorms}
@@ -532,27 +579,32 @@ function MainAppContent() {
 
       <LoginModal
         isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
+        onClose={() => {
+          setIsLoginModalOpen(false);
+          setPendingTargetTabId("");
+          setTargetTabPrompt("");
+        }}
         currentUser={currentUser}
         targetTabName={targetTabPrompt}
+        systemSettings={systemSettings}
         onLogin={(user) => {
           setSessionUser(user);
           setCurrentUser(user);
           if (user.dormId) setSelectedDormId(user.dormId);
-          if (targetTabPrompt) {
-            // Attempt to switch to requested tab after login
-            if (targetTabPrompt.includes("จัดการหอพัก") && user.roleLevel === 1) setActiveTab("dorms");
-            else if (targetTabPrompt.includes("ลงหอสาย")) setActiveTab("fingerprint-compare");
-            else if (targetTabPrompt.includes("เช็คยอด")) setActiveTab("check-attendance");
-            else if (targetTabPrompt.includes("นักเรียน")) setActiveTab("students");
-            else if (targetTabPrompt.includes("รายงาน")) setActiveTab("reports");
-            else if (targetTabPrompt.includes("อบรม")) setActiveTab("notices");
+          if (pendingTargetTabId && isMenuAccessible(pendingTargetTabId, user, systemSettings.navigationPermissions)) {
+            setActiveTab(pendingTargetTabId);
+          } else if (!isMenuAccessible(activeTab, user, systemSettings.navigationPermissions)) {
+            setActiveTab(getFirstAccessibleMenuId(user, systemSettings.navigationPermissions));
           }
+          setPendingTargetTabId("");
+          setTargetTabPrompt("");
         }}
         onLogout={() => {
           clearSessionUser();
           setCurrentUser(null);
-          setActiveTab("dashboard");
+          setActiveTab(getFirstAccessibleMenuId(null, systemSettings.navigationPermissions));
+          setPendingTargetTabId("");
+          setTargetTabPrompt("");
           setIsLoginModalOpen(false);
         }}
       />

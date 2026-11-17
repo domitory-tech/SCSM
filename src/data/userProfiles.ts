@@ -39,6 +39,18 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     dormPosition: "ครูประจำหอพัก",
     password: "123456",
     avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
+  },
+  {
+    id: "user-guest",
+    name: "ผู้เยี่ยมชมระบบ (Visitor)",
+    role: "GUEST",
+    roleLevel: 4,
+    roleCategory: "GUEST",
+    roleCategoryName: "ผู้เยี่ยมชม",
+    roleLabel: "ผู้เยี่ยมชมทั่วไป (Visitor)",
+    dormPosition: "ผู้เยี่ยมชม",
+    password: "123456",
+    avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80"
   }
 ];
 

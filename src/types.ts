@@ -1,15 +1,15 @@
-export type UserRoleCategory = "ADMIN" | "STAFF" | "DORM_TEACHER";
-export type UserRole = "ADMIN_OFFICER" | "HEAD_TEACHER" | "DORM_TEACHER" | "DEPUTY_DIRECTOR" | "SYSTEM_ADMIN";
+export type UserRoleCategory = "ADMIN" | "STAFF" | "DORM_TEACHER" | "GUEST";
+export type UserRole = "ADMIN_OFFICER" | "HEAD_TEACHER" | "DORM_TEACHER" | "DEPUTY_DIRECTOR" | "SYSTEM_ADMIN" | "GUEST";
 
-export type DormPosition = "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก" | "ผู้ดูแลระบบ" | "เจ้าหน้าที่ส่วนกลาง" | string;
+export type DormPosition = "ครูประธานหอพัก" | "ครูรองประธานหอพัก" | "ครูหัวหน้าหอพัก" | "ครูประจำหอพัก" | "ผู้ดูแลระบบ" | "เจ้าหน้าที่ส่วนกลาง" | "ผู้เยี่ยมชม" | string;
 
 export interface UserProfile {
   id: string;
   name: string;
   role: UserRole;
-  roleLevel: 1 | 2 | 3; // 1 = ผู้ดูแล, 2 = เจ้าหน้าที่, 3 = ครูหอพัก
+  roleLevel: 1 | 2 | 3 | 4; // 1 = ผู้ดูแล, 2 = เจ้าหน้าที่, 3 = ครูหอพัก, 4 = ผู้เยี่ยมชม
   roleCategory: UserRoleCategory;
-  roleCategoryName: string; // "ผู้ดูแล", "เจ้าหน้าที่", "ครูหอพัก"
+  roleCategoryName: string; // "ผู้ดูแล", "เจ้าหน้าที่", "ครูหอพัก", "ผู้เยี่ยมชม"
   roleLabel: string;
   phone?: string;
   dormId?: string; // Primary Dorm ID
@@ -167,4 +167,6 @@ export interface SystemSettings {
   attendancePausedBy?: string;
   // Dynamic Navigation Access Permissions
   navigationPermissions?: RoleNavigationPermissions;
+  // Require login before accessing the system even for guest/visitor level
+  guestRequiresLogin?: boolean;
 }
