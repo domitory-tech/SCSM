@@ -178,7 +178,7 @@ function escapeHtml(text: string): string {
  */
 export function generateLateDormReportHtml(data: LateDormPrintData): string {
   const {
-    items,
+    items: rawItems,
     dorms = [],
     reportDate,
     startTime,
@@ -187,6 +187,17 @@ export function generateLateDormReportHtml(data: LateDormPrintData): string {
     gradeFilterLabel,
     orientation
   } = data;
+
+  const items = rawItems.filter(
+    (item) =>
+      !(
+        item.dormStatus === "QUARANTINE" &&
+        (!item.hasScanned ||
+          item.punctualityStatus === "LATE_SCANNED" ||
+          item.punctualityStatus === "LATE_NOT_SCANNED" ||
+          item.punctualityStatus === "QUARANTINE_EXEMPT")
+      )
+  );
 
   const isLandscape = orientation === "landscape";
   const isPortrait = !isLandscape;

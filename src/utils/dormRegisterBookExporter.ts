@@ -68,6 +68,7 @@ export interface DormRegisterBookData {
 
 export const ATTENDANCE_LEGEND_ITEMS = [
   { code: "✓", label: "อยู่หอพัก", desc: "อยู่หอพักตามปกติ" },
+  { code: "กต", label: "อยู่หอพัก (กักตัว)", desc: "อยู่หอพักตามปกติ (กักตัว)" },
   { code: "รบ", label: "รอบกลับบ้าน", desc: "รอบกลับบ้านตามรอบโรงเรียน" },
   { code: "กบ", label: "กลับบ้าน", desc: "กลับบ้านกรณีพิเศษ/ผู้ปกครองรับ" },
   { code: "ค", label: "เข้าค่าย", desc: "เข้าค่ายวิชาการ/ลูกเสือ" },
@@ -82,6 +83,7 @@ export const ATTENDANCE_LEGEND_ITEMS = [
 
 export const ATTENDANCE_CODE_MAPPING: Record<string, string> = {
   PRESENT: "✓",
+  QUARANTINE: "กต",
   ROUND_HOME: "รบ",
   HOME: "กบ",
   CAMP: "ค",
@@ -293,6 +295,9 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
               if (code === "✓") {
                 cellContent = "✓";
                 cellStyle = "color: #059669; font-weight: bold; font-size: 11px;";
+              } else if (code === "กต") {
+                cellContent = "กต";
+                cellStyle = "color: #b91c1c; font-weight: 800; font-size: 9.5px; background-color: #a7f3d0;";
               } else if (code === "รบ") {
                 cellContent = "รบ";
                 cellStyle = "color: #b45309; font-weight: bold; font-size: 9.5px; background-color: #fef08a;";
@@ -378,6 +383,7 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 6px 14px;">
               <span><strong>✓</strong> = อยู่หอพัก</span>
+              <span><strong style="color:#b91c1c; background-color:#a7f3d0; padding:0 3px; border-radius:2px;">กต</strong> = อยู่หอพัก (กักตัว)</span>
               <span><strong>รบ</strong> = รอบกลับบ้าน</span>
               <span><strong>กบ</strong> = กลับบ้าน</span>
               <span><strong>ค</strong> = เข้าค่าย</span>

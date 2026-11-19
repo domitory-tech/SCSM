@@ -15,7 +15,8 @@ import {
   isDormAttendancePaused,
   isGradeMatch,
   normalizeGradeLevel,
-  isRealAttendanceCheck
+  isRealAttendanceCheck,
+  isDormPresentStatus
 } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor, getDormType, getDormTypeLabel, getDormTypeBadgeStyle } from "../../utils/dormUtils";
 import { formatStudentId } from "../../utils/studentUtils";
@@ -748,7 +749,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         if (Array.isArray(att.records)) {
           const absentSidSet = new Set<string>();
           att.records.forEach((r) => {
-            if (r.status && r.status !== "PRESENT") {
+            if (r.status && !isDormPresentStatus(r.status)) {
               const sid = (r.studentId || "").trim();
               if (sid) {
                 absentSidSet.add(sid);
@@ -770,7 +771,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             );
           }).length;
 
-          const totalAbsentRecords = att.records.filter((r) => r.status && r.status !== "PRESENT").length;
+          const totalAbsentRecords = att.records.filter((r) => r.status && !isDormPresentStatus(r.status)).length;
           // Ensure outCount accurately reflects actual absent records from the real-time check
           outCount = Math.max(matchedAbsent, Math.min(totalCount, totalAbsentRecords));
         }
@@ -863,7 +864,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           absentStudentIds.add(formatStudentId(s.studentId));
         });
       } else if (att.records && Array.isArray(att.records)) {
-        const absentRecords = att.records.filter((r) => r.status && r.status !== "PRESENT");
+        const absentRecords = att.records.filter((r) => r.status && !isDormPresentStatus(r.status));
         const matchedStudentIdsInDorm = new Set<string>();
 
         absentRecords.forEach((rec) => {
@@ -1122,7 +1123,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       } else if (att.records && Array.isArray(att.records)) {
         // Exclude PRESENT and excluded statuses: ปิดภาคเรียน, รอบกลับบ้าน, ยังไม่เข้าหอพัก
         outCount = att.records.filter((r) => {
-          if (!r.status || r.status === "PRESENT") return false;
+          if (!r.status || isDormPresentStatus(r.status)) return false;
           if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
           return true;
         }).length;
@@ -1143,7 +1144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         } else if (att.records && Array.isArray(att.records)) {
           // Exclude PRESENT and excluded statuses: ปิดภาคเรียน, รอบกลับบ้าน, ยังไม่เข้าหอพัก
           outCount = att.records.filter((r) => {
-            if (!r.status || r.status === "PRESENT") return false;
+            if (!r.status || isDormPresentStatus(r.status)) return false;
             if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
             return true;
           }).length;
@@ -1224,7 +1225,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
         if (att.records && Array.isArray(att.records)) {
           return att.records.filter((r) => {
-            if (!r.status || r.status === "PRESENT") return false;
+            if (!r.status || isDormPresentStatus(r.status)) return false;
             if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
             return true;
           }).length;
@@ -1308,7 +1309,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             }
             if (att.records && Array.isArray(att.records)) {
               sum += att.records.filter((r) => {
-                if (!r.status || r.status === "PRESENT") return false;
+                if (!r.status || isDormPresentStatus(r.status)) return false;
                 if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
                 return true;
               }).length;

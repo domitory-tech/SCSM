@@ -245,9 +245,17 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
   // Filter items by active tab
   const filteredItems = useMemo(() => {
     return comparison.items.filter((item) => {
+      const isQuarantineLateOrMissing =
+        item.dormStatus === "QUARANTINE" &&
+        (!item.hasScanned ||
+          item.punctualityStatus === "LATE_SCANNED" ||
+          item.punctualityStatus === "LATE_NOT_SCANNED" ||
+          item.punctualityStatus === "QUARANTINE_EXEMPT");
+
       if (
         activeResultTab === "ALL" &&
         (item.isDormOut ||
+          isQuarantineLateOrMissing ||
           (item.punctualityStatus !== "EARLY" &&
             item.punctualityStatus !== "LATE_SCANNED" &&
             item.punctualityStatus !== "LATE_NOT_SCANNED"))
@@ -256,13 +264,13 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
       }
       if (
         activeResultTab === "LATE_NOT_SCANNED" &&
-        (item.isDormOut || item.punctualityStatus !== "LATE_NOT_SCANNED")
+        (item.isDormOut || isQuarantineLateOrMissing || item.punctualityStatus !== "LATE_NOT_SCANNED")
       ) {
         return false;
       }
       if (
         activeResultTab === "LATE_SCANNED" &&
-        (item.isDormOut || item.punctualityStatus !== "LATE_SCANNED")
+        (item.isDormOut || isQuarantineLateOrMissing || item.punctualityStatus !== "LATE_SCANNED")
       ) {
         return false;
       }
@@ -298,6 +306,15 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
   const printItems = useMemo(() => {
     const filtered = comparison.items.filter((item) => {
       if (item.isDormOut) return false;
+      if (
+        item.dormStatus === "QUARANTINE" &&
+        (!item.hasScanned ||
+          item.punctualityStatus === "LATE_SCANNED" ||
+          item.punctualityStatus === "LATE_NOT_SCANNED" ||
+          item.punctualityStatus === "QUARANTINE_EXEMPT")
+      ) {
+        return false;
+      }
       switch (printScope) {
         case "LATE_SCANNED":
           return item.punctualityStatus === "LATE_SCANNED";
@@ -444,6 +461,16 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
           <div className="space-y-0.5">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
               <UserMinus className="w-3.5 h-3.5 shrink-0" />
+              {item.punctualityLabel}
+            </span>
+            <div className="text-[11px] text-slate-500">{item.punctualityDetail}</div>
+          </div>
+        );
+      case "QUARANTINE_EXEMPT":
+        return (
+          <div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-200 text-red-700 border border-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
               {item.punctualityLabel}
             </span>
             <div className="text-[11px] text-slate-500">{item.punctualityDetail}</div>
@@ -1248,7 +1275,15 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                             )}
                           </td>
                           <td className="py-2.5 px-4">
-                            <div className="font-bold text-slate-800">{item.dormStatusLabel}</div>
+                            <div
+                              className={
+                                item.dormStatus === "QUARANTINE"
+                                  ? "inline-block px-2 py-0.5 rounded-md bg-emerald-200 text-red-700 border border-emerald-400 font-extrabold text-xs"
+                                  : "font-bold text-slate-800"
+                              }
+                            >
+                              {item.dormStatusLabel}
+                            </div>
                             <div className="text-[11px] text-slate-500 mt-0.5">
                               {item.dormReason && item.dormReason !== item.dormStatusLabel
                                 ? item.dormReason

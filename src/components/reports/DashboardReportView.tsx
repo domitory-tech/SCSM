@@ -13,7 +13,8 @@ import {
   THAI_DAYS_SHORT,
   THAI_MONTHS,
   isGradeMatch,
-  normalizeGradeLevel
+  normalizeGradeLevel,
+  isDormPresentStatus
 } from "../../utils/dateUtils";
 import { matchStudentToDorm, getStudentsInDorm, countStudentsInDorm, isDormMatch, getDormType, getDormTypeLabel, getDormTypeBadgeStyle, formatDormShort } from "../../utils/dormUtils";
 import { formatStudentId } from "../../utils/studentUtils";
@@ -364,7 +365,7 @@ export const DashboardReportView: React.FC<DashboardReportViewProps> = ({
           const s = studentMap.get(formatStudentId(rec.studentId)) || studentMap.get(rec.studentId);
           if (!s) return;
 
-          if (rec.status && rec.status !== "PRESENT") {
+          if (rec.status && !isDormPresentStatus(rec.status)) {
             absentInDorm += 1;
             const st = rec.status in reasonCountMap ? rec.status : "OTHER";
             reasonCountMap[st] = (reasonCountMap[st] || 0) + 1;

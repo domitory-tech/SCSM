@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from "react";
 import { DailyAttendance, DailyReportData, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
-import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString, getPreviousDateString, isGradeMatch } from "../../utils/dateUtils";
+import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString, getPreviousDateString, isGradeMatch, isDormPresentStatus } from "../../utils/dateUtils";
 import { formatStudentId } from "../../utils/studentUtils";
 import { isDormMatch, isPlaceholderTeacherName, matchStudentToDorm } from "../../utils/dormUtils";
 import {
@@ -271,7 +271,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                 const rSid = formatStudentId(r.studentId);
                 return rSid === stdSid || r.studentId === std.studentId;
               });
-              if (stdRec && stdRec.status !== "PRESENT") {
+              if (stdRec && !isDormPresentStatus(stdRec.status)) {
                 outInGrade++;
                 absentCounter++;
                 let statusLabel = stdRec.status === "ROUND_HOME" ? "รอบกลับบ้าน" : "กลับบ้าน";

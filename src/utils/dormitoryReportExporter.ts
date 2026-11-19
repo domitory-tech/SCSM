@@ -457,6 +457,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
       <div class="flex items-center justify-between flex-wrap gap-2 text-[10px] text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
         <span class="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
         <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
+        <span><strong style="color:#b91c1c; background-color:#a7f3d0; padding:1px 4px; border-radius:3px; border:1px solid #34d399;">กต</strong> = อยู่หอพัก (กักตัว)</span>
         <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
         <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
         <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>

@@ -148,7 +148,13 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
           <td class="p-2 border border-slate-300">${item.dormName}</td>
           <td class="p-2 text-center border border-slate-300 font-bold">${s.dormRoom || "101"}</td>
           <td class="p-2 text-center border border-slate-300 font-bold">
-            <span class="${isOut ? "text-rose-700 font-extrabold" : "text-emerald-700"}">
+            <span class="${
+              item.currentStatus.status === "QUARANTINE"
+                ? "inline-block px-2 py-0.5 rounded-md bg-emerald-200 text-red-700 border border-emerald-400 font-extrabold"
+                : isOut
+                ? "text-rose-700 font-extrabold"
+                : "text-emerald-700"
+            }">
               ${item.currentStatus.label}
             </span>
           </td>
@@ -501,9 +507,13 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
         <div class="flex items-center gap-2">
           <span class="text-xs font-bold text-slate-600">สถานะปัจจุบัน:</span>
           <span class="px-3 py-1 rounded-lg text-xs font-extrabold ${
-            currentStatus.isOut ? "bg-rose-100 text-rose-800 border border-rose-200" : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+            currentStatus.status === "QUARANTINE"
+              ? "bg-emerald-200 text-red-700 border border-emerald-400"
+              : currentStatus.isOut
+              ? "bg-rose-100 text-rose-800 border border-rose-200"
+              : "bg-emerald-100 text-emerald-800 border border-emerald-200"
           }">
-            ${currentStatus.isOut ? `ออกหอพัก (${currentStatus.label})` : "อยู่ในหอพัก (ปกติ)"}
+            ${currentStatus.isOut ? `ออกหอพัก (${currentStatus.label})` : currentStatus.status === "QUARANTINE" ? "อยู่หอพัก (กักตัว)" : "อยู่ในหอพัก (ปกติ)"}
           </span>
           ${currentStatus.reason ? `<span class="text-xs text-rose-700 font-medium">• เหตุผล: ${currentStatus.reason}</span>` : ""}
         </div>

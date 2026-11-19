@@ -6,7 +6,8 @@ import {
   formatThaiMonthYear,
   getDaysInMonth,
   THAI_DAYS_SHORT,
-  THAI_MONTHS
+  THAI_MONTHS,
+  isDormPresentStatus
 } from "../../utils/dateUtils";
 import {
   exportAllMonthlyReportsHtml,
@@ -45,6 +46,13 @@ const ATTENDANCE_CODE_MAP: Record<string, { code: string; label: string; colorCl
     colorClass: "text-emerald-700 font-bold",
     bgClass: "bg-emerald-50/60",
     hexColor: "#059669"
+  },
+  QUARANTINE: {
+    code: "กต",
+    label: "อยู่หอพัก (กักตัว)",
+    colorClass: "text-red-700 font-black",
+    bgClass: "bg-emerald-200",
+    hexColor: "#b91c1c"
   },
   ROUND_HOME: {
     code: "รบ",
@@ -311,7 +319,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                 };
                 outDaysCount++;
                 dayStats[d].out++;
-              } else if (record && record.status && record.status !== "PRESENT") {
+              } else if (record && record.status && !isDormPresentStatus(record.status)) {
                 const conf = ATTENDANCE_CODE_MAP[record.status] || ATTENDANCE_CODE_MAP.OTHER;
                 attendanceMap[std.studentId][d] = {
                   status: record.status,
@@ -321,6 +329,14 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                 };
                 outDaysCount++;
                 dayStats[d].out++;
+              } else if (record && record.status === "QUARANTINE") {
+                attendanceMap[std.studentId][d] = {
+                  status: "QUARANTINE",
+                  label: ATTENDANCE_CODE_MAP.QUARANTINE.label,
+                  code: ATTENDANCE_CODE_MAP.QUARANTINE.code,
+                  color: ATTENDANCE_CODE_MAP.QUARANTINE.colorClass
+                };
+                dayStats[d].present++;
               } else if (dormAtt.status === "CHECKED" || (record && record.status === "PRESENT")) {
                 attendanceMap[std.studentId][d] = {
                   status: "PRESENT",
@@ -561,6 +577,10 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
             <span>อยู่หอพัก</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <span className="px-1.5 py-0.5 rounded-md bg-emerald-200 text-red-700 font-black text-[10px] border border-emerald-400">กต</span>
+            <span>อยู่หอพัก (กักตัว)</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <span className="px-1.5 py-0.5 rounded-md bg-yellow-200 text-amber-950 font-black text-[10px] border border-yellow-300">รบ</span>
             <span>รอบกลับบ้าน</span>
           </div>
@@ -707,6 +727,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                                 const att = roomData.attendanceMap[student.studentId]?.[d];
                                 const code = att?.code || "-";
                                 const isCheckmark = code === "✓";
+                                const isQuarantine = code === "กต";
                                 const isRoundHome = code === "รบ";
                                 const isSemesterBreak = code === "ปภ";
 
@@ -719,6 +740,8 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                                         ? "bg-yellow-200 text-amber-950 font-black text-[10px]"
                                         : isSemesterBreak
                                         ? "bg-neutral-800 text-white font-extrabold text-[10px]"
+                                        : isQuarantine
+                                        ? "bg-emerald-200 text-red-700 font-black text-[10px]"
                                         : isCheckmark
                                         ? "text-emerald-600 font-black text-xs"
                                         : code !== "-"
@@ -799,6 +822,9 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                     <span className="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
                     <span className="font-semibold">
                       <strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก
+                    </span>
+                    <span className="font-semibold">
+                      <strong className="bg-emerald-200 text-red-700 font-black px-1 py-0.5 rounded border border-emerald-400">กต</strong> = อยู่หอพัก (กักตัว)
                     </span>
                     <span className="font-semibold">
                       <strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน

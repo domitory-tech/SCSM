@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { DailyAttendance, Dormitory, Notice, Student, StudentAttendanceRecord, UserProfile, SystemSettings } from "../../types";
-import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString, isDormAttendancePaused } from "../../utils/dateUtils";
+import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, getTodayDateString, isDormAttendancePaused, isDormPresentStatus } from "../../utils/dateUtils";
 import { formatStudentId } from "../../utils/studentUtils";
 import { fetchAttendance } from "../../services/api";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
@@ -374,8 +374,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       let copiedCount = 0;
 
       prevRecords.forEach((r) => {
-        // If student was NOT present (i.e. HOME, ROUND_HOME, CAMP, SICK, SKILL_COMP, EXCHANGE, WALK_STUDY, OTHER)
-        if (r.status !== "PRESENT") {
+        // If student was NOT present (excluding PRESENT and QUARANTINE)
+        if (!isDormPresentStatus(r.status)) {
           outStatusesMap.set(r.studentId, {
             status: r.status,
             reason:
@@ -593,8 +593,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
   }, [students, classRoomFilter, searchQuery]);
 
   // Calculate summary stats for current view
-  const presentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => r.status === "PRESENT").length;
-  const absentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => r.status !== "PRESENT").length;
+  const presentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => isDormPresentStatus(r.status)).length;
+  const absentCount = (Object.values(recordsMap) as StudentAttendanceRecord[]).filter((r) => !isDormPresentStatus(r.status)).length;
 
 
 
@@ -1117,7 +1117,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                 filteredStudents.map((student) => {
                   const sSid = formatStudentId(student.studentId);
                   const rec = recordsMap[sSid] || recordsMap[student.studentId] || { studentId: sSid, status: "PRESENT" };
-                  const isPresent = rec.status === "PRESENT";
+                  const isPresent = isDormPresentStatus(rec.status);
 
                   return (
                     <tr
@@ -1167,6 +1167,8 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                               ? "bg-slate-100 border-slate-300 text-slate-700 focus:ring-2 focus:ring-slate-400"
                               : rec.status === "PRESENT"
                               ? "bg-emerald-50 border-emerald-300 text-emerald-800 focus:ring-2 focus:ring-emerald-500"
+                              : rec.status === "QUARANTINE"
+                              ? "bg-emerald-200 border-emerald-500 text-red-700 font-extrabold focus:ring-2 focus:ring-emerald-500"
                               : rec.status === "HOME"
                               ? "bg-amber-50 border-amber-300 text-amber-800 focus:ring-2 focus:ring-amber-500"
                               : rec.status === "CAMP"
@@ -1188,6 +1190,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
                         >
                           <option value="ROUND_HOME" className="bg-white text-gray-800 font-medium">รอบกลับบ้าน</option>
                           <option value="PRESENT" className="bg-white text-gray-800 font-medium">อยู่หอพัก</option>
+                          <option value="QUARANTINE" className="bg-emerald-200 text-red-700 font-bold">อยู่หอพัก (กักตัว)</option>
                           <option value="HOME" className="bg-white text-gray-800 font-medium">กลับบ้าน</option>
                           <option value="CAMP" className="bg-white text-gray-800 font-medium">เข้าค่าย</option>
                           <option value="SICK" className="bg-white text-gray-800 font-medium">ป่วย</option>

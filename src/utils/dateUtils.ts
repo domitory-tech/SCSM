@@ -590,5 +590,14 @@ export function calculateDaysCount(start: string, end: string): number {
   return Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
 }
 
+/**
+ * Returns true if the student's attendance status counts as normally in the dormitory
+ * ("PRESENT" = อยู่หอพัก, "QUARANTINE" = อยู่หอพัก (กักตัว)).
+ */
+export function isDormPresentStatus(status?: string | null): boolean {
+  return status === "PRESENT" || status === "QUARANTINE";
+}
+
+
 
 

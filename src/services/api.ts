@@ -27,7 +27,7 @@ import {
   SystemSettings,
   UserProfile
 } from "../types";
-import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck, findNextSpecialStatus } from "../utils/dateUtils";
+import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck, findNextSpecialStatus, isDormPresentStatus } from "../utils/dateUtils";
 import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
 import { formatStudentId, generateDefault5DigitStudentId, formatGrade } from "../utils/studentUtils";
 
@@ -1868,8 +1868,8 @@ export async function fetchDailyReport(date?: string): Promise<DailyReportData> 
               const rSid = formatStudentId(r.studentId);
               return rSid === stdSid || r.studentId === std.studentId;
             });
-            // ตรวจสอบตามความเป็นจริงของการเช็คยอด: หากสถานะไม่ใช่ PRESENT (รวมถึง SEMESTER_BREAK) ถือว่าออกหอพัก
-            if (stdRec && stdRec.status !== "PRESENT") {
+            // ตรวจสอบตามความเป็นจริงของการเช็คยอด: หากสถานะไม่ใช่ PRESENT หรือ QUARANTINE ถือว่าออกหอพัก
+            if (stdRec && !isDormPresentStatus(stdRec.status)) {
               outInGrade++;
               absentCounter++;
               let statusLabel = stdRec.status === "ROUND_HOME" ? "รอบกลับบ้าน" : "กลับบ้าน";

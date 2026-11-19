@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { DailyAttendance, Dormitory, Student } from "../../types";
 import { countStudentsInDorm } from "../../utils/dormUtils";
-import { isExcludedFromHomeOut } from "../../utils/dateUtils";
+import { isExcludedFromHomeOut, isDormPresentStatus } from "../../utils/dateUtils";
 
 interface ReasonAnalyticsCardProps {
   liveReasonCounts: Record<string, number>;
@@ -288,7 +288,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
         if (att && att.status === "CHECKED" && att.records) {
           if (att.isHomeBreak) return 0;
           return att.records.filter((r) => {
-            if (!r.status || r.status === "PRESENT") return false;
+            if (!r.status || isDormPresentStatus(r.status)) return false;
             if (isExcludedFromHomeOut(r.status, r.reason, r.note)) return false;
             return true;
           }).length;

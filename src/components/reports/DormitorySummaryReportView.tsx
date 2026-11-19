@@ -10,7 +10,8 @@ import {
   getTodayDateString,
   getYesterdayDateString,
   isGradeMatch,
-  normalizeGradeLevel
+  normalizeGradeLevel,
+  isDormPresentStatus
 } from "../../utils/dateUtils";
 import { getStudentsInDorm, isDormMatch, getDormTeachers, isTeacherCheckedBy, getPositionBadgeStyle, getPositionDotColor } from "../../utils/dormUtils";
 import { formatStudentId } from "../../utils/studentUtils";
@@ -415,7 +416,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
       };
     } else if (attendanceForDate?.records && Array.isArray(attendanceForDate.records)) {
       attendanceForDate.records.forEach((rec) => {
-        if (rec.status && rec.status !== "PRESENT") {
+        if (rec.status && !isDormPresentStatus(rec.status)) {
           const recSid = formatStudentId(rec.studentId);
           const s = dormStudents.find((st) => formatStudentId(st.studentId) === recSid || st.studentId === rec.studentId);
           const fullName = s ? `${s.title}${s.firstName} ${s.lastName}` : rec.studentName || rec.studentId;
@@ -1166,6 +1167,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
             <div className="flex items-center justify-between flex-wrap gap-2 text-[10.5px] text-slate-700 bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/80">
               <span className="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
               <span className="font-semibold"><strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก</span>
+              <span className="font-semibold"><strong className="bg-emerald-200 text-red-700 font-black px-1 py-0.5 rounded border border-emerald-400">กต</strong> = อยู่หอพัก (กักตัว)</span>
               <span className="font-semibold"><strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน</span>
               <span className="font-semibold"><strong className="text-orange-700 font-black">กบ</strong> = กลับบ้าน</span>
               <span className="font-semibold"><strong className="text-blue-700 font-black">ค</strong> = เข้าค่าย</span>
@@ -1287,6 +1289,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
           <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-700 flex items-center justify-between flex-wrap gap-2">
             <span className="font-extrabold text-slate-900">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
             <span className="font-semibold"><strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก</span>
+            <span className="font-semibold"><strong className="bg-emerald-200 text-red-700 font-black px-1 py-0.5 rounded border border-emerald-400">กต</strong> = อยู่หอพัก (กักตัว)</span>
             <span className="font-semibold"><strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน</span>
             <span className="font-semibold"><strong className="text-orange-700 font-black">กบ</strong> = กลับบ้าน</span>
             <span className="font-semibold"><strong className="text-blue-700 font-black">ค</strong> = เข้าค่าย</span>

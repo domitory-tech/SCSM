@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { AttendanceStatus, DailyAttendance, Dormitory, Student } from "../types";
 import { formatStudentId } from "./studentUtils";
-import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, normalizeGradeLevel } from "./dateUtils";
+import { formatThaiFullDate, formatThaiMediumDate, getPreviousDateString, normalizeGradeLevel, isDormPresentStatus } from "./dateUtils";
 import { isDormMatch, matchStudentToDorm } from "./dormUtils";
 
 export interface RawScannerRow {
@@ -54,6 +54,7 @@ export type PunctualityStatus =
   | "LATE_SCANNED" // สแกนหลังเวลาที่กำหนด -> สาย(เวลาที่เกินมา)
   | "LATE_NOT_SCANNED" // ไม่สแกน -> สาย(ไม่สแกน)
   | "SCANNED_NO_TIME" // สแกนแล้วแต่ในไฟล์ไม่มีข้อมูลเวลา
+  | "QUARANTINE_EXEMPT" // อยู่หอพัก (กักตัว) ไม่นับสายกรณีไม่สแกนหรือสแกนสาย
   | "OUT_OF_DORM"; // ออกหอพักตามระบบ
 
 export interface StudentComparisonItem {
@@ -90,6 +91,7 @@ export interface UnmatchedScannerRecord {
 
 export const ATTENDANCE_STATUS_THAI: Record<string, string> = {
   PRESENT: "อยู่หอพัก",
+  QUARANTINE: "อยู่หอพัก (กักตัว)",
   HOME: "กลับบ้าน",
   ROUND_HOME: "รอบกลับบ้าน",
   CAMP: "เข้าค่าย",
@@ -692,6 +694,7 @@ function evaluatePunctuality(params: {
   hasScanned: boolean;
   isDormOut: boolean;
   dormChecked: boolean;
+  dormStatus?: string;
   earliestTime: string;
   startTime: string;
   endTime: string;
@@ -702,7 +705,7 @@ function evaluatePunctuality(params: {
   overMinutes: number;
   earlyMinutes: number;
 } {
-  const { hasScanned, isDormOut, dormChecked, earliestTime, startTime, endTime } = params;
+  const { hasScanned, isDormOut, dormChecked, dormStatus, earliestTime, startTime, endTime } = params;
 
   const startSec = timeStringToSeconds(startTime) ?? 6 * 3600;
   const endSec = timeStringToSeconds(endTime) ?? 7 * 3600;
@@ -713,6 +716,15 @@ function evaluatePunctuality(params: {
         punctualityStatus: "OUT_OF_DORM",
         punctualityLabel: "ออกหอพัก (ไม่สแกน)",
         punctualityDetail: "มีสถานะออกหอพักตามระบบเช็คยอด",
+        overMinutes: 0,
+        earlyMinutes: 0
+      };
+    }
+    if (dormStatus === "QUARANTINE") {
+      return {
+        punctualityStatus: "QUARANTINE_EXEMPT",
+        punctualityLabel: "อยู่หอพัก (กักตัว) · ไม่สแกน (ยกเว้น)",
+        punctualityDetail: "สถานะอยู่หอพัก (กักตัว) ไม่นับรวมในสรุปรายงานนักเรียนลงหอพักสาย",
         overMinutes: 0,
         earlyMinutes: 0
       };
@@ -760,10 +772,19 @@ function evaluatePunctuality(params: {
     };
   }
 
-  // scanSec > endSec -> Late!
+  // scanSec > endSec -> Late (except QUARANTINE which is exempt from late report)
   const overSec = scanSec - endSec;
   const overMinutes = Math.max(1, Math.ceil(overSec / 60));
   const overText = formatThaiDuration(overSec);
+  if (!isDormOut && dormStatus === "QUARANTINE") {
+    return {
+      punctualityStatus: "QUARANTINE_EXEMPT",
+      punctualityLabel: `อยู่หอพัก (กักตัว) · สแกน ${earliestTime} น. (ยกเว้น)`,
+      punctualityDetail: `สแกนเวลา ${earliestTime} น. (สถานะอยู่หอพัก (กักตัว) ไม่นับรวมในสรุปรายงานนักเรียนลงหอพักสาย)`,
+      overMinutes: 0,
+      earlyMinutes: 0
+    };
+  }
   return {
     punctualityStatus: "LATE_SCANNED",
     punctualityLabel: `สาย (เกิน ${overText})`,
@@ -1057,7 +1078,7 @@ export function compareFingerprintWithDorm(params: {
     }
 
     const dormStatusLabel = ATTENDANCE_STATUS_THAI[dormStatus] || dormStatus;
-    const isDormOut = isDormChecked && dormStatus !== "PRESENT";
+    const isDormOut = isDormChecked && !isDormPresentStatus(dormStatus);
 
     const stKey = st.id || formattedId;
     const scannerInfo = matchedScannerByStudentKey.get(stKey);
@@ -1101,6 +1122,7 @@ export function compareFingerprintWithDorm(params: {
       hasScanned,
       isDormOut,
       dormChecked: isDormChecked,
+      dormStatus,
       earliestTime: scannerInfo?.earliestTime || "",
       startTime,
       endTime
@@ -1220,8 +1242,19 @@ export function exportFingerprintComparisonExcel(params: {
     "รายละเอียดเวลา": item.punctualityDetail
   });
 
-  const lateNotScannedList = items.filter((i) => !i.isDormOut && i.punctualityStatus === "LATE_NOT_SCANNED");
-  const lateScannedList = items.filter((i) => !i.isDormOut && i.punctualityStatus === "LATE_SCANNED");
+  const isQuarantineExempt = (i: StudentComparisonItem) =>
+    i.dormStatus === "QUARANTINE" &&
+    (!i.hasScanned ||
+      i.punctualityStatus === "LATE_SCANNED" ||
+      i.punctualityStatus === "LATE_NOT_SCANNED" ||
+      i.punctualityStatus === "QUARANTINE_EXEMPT");
+
+  const lateNotScannedList = items.filter(
+    (i) => !i.isDormOut && !isQuarantineExempt(i) && i.punctualityStatus === "LATE_NOT_SCANNED"
+  );
+  const lateScannedList = items.filter(
+    (i) => !i.isDormOut && !isQuarantineExempt(i) && i.punctualityStatus === "LATE_SCANNED"
+  );
   const earlyList = items.filter((i) => !i.isDormOut && i.punctualityStatus === "EARLY");
   const outList = items.filter((i) => i.isDormOut);
   const conflictList = items.filter((i) => i.category === "OUT_BUT_SCANNED");
@@ -1249,6 +1282,7 @@ export function exportFingerprintComparisonExcel(params: {
   const flaggedList = items.filter(
     (i) =>
       !i.isDormOut &&
+      !isQuarantineExempt(i) &&
       (i.punctualityStatus === "EARLY" ||
         i.punctualityStatus === "LATE_SCANNED" ||
         i.punctualityStatus === "LATE_NOT_SCANNED")

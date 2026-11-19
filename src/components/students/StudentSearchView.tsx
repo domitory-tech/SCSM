@@ -14,7 +14,8 @@ import {
   getTodayDateString,
   detectStudentGender,
   formatGradeRoomShort,
-  isGradeMatch
+  isGradeMatch,
+  isDormPresentStatus
 } from "../../utils/dateUtils";
 import { matchStudentToDorm, findDormForStudent, getDormTypeLabel } from "../../utils/dormUtils";
 import {
@@ -98,6 +99,13 @@ export const ATTENDANCE_STATUS_MAP: Record<
     border: "border-emerald-200",
     isOut: false
   },
+  QUARANTINE: {
+    label: "อยู่หอพัก (กักตัว)",
+    bg: "bg-emerald-200 text-red-700",
+    text: "text-red-700",
+    border: "border-emerald-400",
+    isOut: false
+  },
   ROUND_HOME: {
     label: "รอบกลับบ้าน",
     bg: "bg-purple-50 text-purple-700",
@@ -177,7 +185,7 @@ export const getStatusMeta = (status?: string) => {
       bg: "bg-slate-100 text-slate-700",
       text: "text-slate-700",
       border: "border-slate-200",
-      isOut: status !== "PRESENT"
+      isOut: !isDormPresentStatus(status)
     };
   }
   return ATTENDANCE_STATUS_MAP[status];
@@ -357,7 +365,7 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
           const stdKey = formatStudentId(rec.studentId);
 
           const meta = getStatusMeta(rec.status);
-          const isLeave = rec.status !== "PRESENT";
+          const isLeave = !isDormPresentStatus(rec.status);
 
           // Record latest status if not recorded yet
           if (!studentLatestStatusMap.has(stdKey)) {
@@ -1350,12 +1358,20 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                     <div className="text-right shrink-0">
                       <span
                         className={`inline-flex items-center gap-1.5 text-[11px] font-black px-2.5 py-1 rounded-xl border ${
-                          isOut ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          item.currentStatus.status === "QUARANTINE"
+                            ? "bg-emerald-200 text-red-700 border-emerald-400"
+                            : isOut
+                            ? "bg-rose-50 text-rose-700 border-rose-200"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
                         }`}
                       >
                         <span
                           className={`w-2 h-2 rounded-full ${
-                            isOut ? "bg-rose-500 animate-pulse" : "bg-emerald-500"
+                            item.currentStatus.status === "QUARANTINE"
+                              ? "bg-red-600"
+                              : isOut
+                              ? "bg-rose-500 animate-pulse"
+                              : "bg-emerald-500"
                           }`}
                         />
                         <span>{item.currentStatus.label}</span>
@@ -1547,12 +1563,20 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                       <td className="py-3 px-4 text-center">
                         <span
                           className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-black border ${
-                            isOut ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            item.currentStatus.status === "QUARANTINE"
+                              ? "bg-emerald-200 text-red-700 border-emerald-400"
+                              : isOut
+                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                              : "bg-emerald-50 text-emerald-700 border-emerald-200"
                           }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              isOut ? "bg-rose-500" : "bg-emerald-500"
+                              item.currentStatus.status === "QUARANTINE"
+                                ? "bg-red-600"
+                                : isOut
+                                ? "bg-rose-500"
+                                : "bg-emerald-500"
                             }`}
                           />
                           <span>{item.currentStatus.label}</span>
@@ -1863,7 +1887,13 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                             <td className="p-2 border border-slate-200">{item.dormName}</td>
                             <td className="p-2 border border-slate-200 font-bold">{s.dormRoom || "101"}</td>
                             <td className="p-2 text-center border border-slate-200 font-bold">
-                              <span className={item.currentStatus.isOut ? "text-rose-700" : "text-emerald-700"}>
+                              <span className={
+                                item.currentStatus.status === "QUARANTINE"
+                                  ? "inline-block px-2 py-0.5 rounded-md bg-emerald-200 text-red-700 border border-emerald-400 font-black"
+                                  : item.currentStatus.isOut
+                                  ? "text-rose-700"
+                                  : "text-emerald-700"
+                              }>
                                 {item.currentStatus.label}
                               </span>
                             </td>
@@ -1969,13 +1999,23 @@ export const StudentSearchView: React.FC<StudentSearchViewProps> = ({
                   <div className="flex items-center gap-2.5">
                     <span
                       className={`w-3.5 h-3.5 rounded-full ${
-                        selectedStudentForDetail.currentStatus.isOut ? "bg-rose-500 animate-pulse" : "bg-emerald-500"
+                        selectedStudentForDetail.currentStatus.status === "QUARANTINE"
+                          ? "bg-red-600"
+                          : selectedStudentForDetail.currentStatus.isOut
+                          ? "bg-rose-500 animate-pulse"
+                          : "bg-emerald-500"
                       }`}
                     />
                     <div>
-                      <div className="text-sm font-black text-slate-900">
+                      <div className={`text-sm font-black ${
+                        selectedStudentForDetail.currentStatus.status === "QUARANTINE"
+                          ? "inline-block px-2.5 py-0.5 rounded-lg bg-emerald-200 text-red-700 border border-emerald-400"
+                          : "text-slate-900"
+                      }`}>
                         {selectedStudentForDetail.currentStatus.isOut
                           ? `ออกหอพัก (${selectedStudentForDetail.currentStatus.label})`
+                          : selectedStudentForDetail.currentStatus.status === "QUARANTINE"
+                          ? "อยู่หอพัก (กักตัว)"
                           : "อยู่ในหอพัก (ปกติ)"}
                       </div>
                       {selectedStudentForDetail.currentStatus.reason && (
