@@ -48,11 +48,11 @@ const ATTENDANCE_CODE_MAP: Record<string, { code: string; label: string; colorCl
     hexColor: "#059669"
   },
   QUARANTINE: {
-    code: "กต",
+    code: "✓",
     label: "อยู่หอพัก (กักตัว)",
-    colorClass: "text-red-700 font-black",
-    bgClass: "bg-emerald-200",
-    hexColor: "#b91c1c"
+    colorClass: "text-red-600 font-black",
+    bgClass: "bg-red-50/60",
+    hexColor: "#dc2626"
   },
   ROUND_HOME: {
     code: "รบ",
@@ -577,7 +577,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
             <span>อยู่หอพัก</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
-            <span className="px-1.5 py-0.5 rounded-md bg-emerald-200 text-red-700 font-black text-[10px] border border-emerald-400">กต</span>
+            <span className="w-5 h-5 rounded-md bg-red-100 text-red-600 font-black flex items-center justify-center text-xs">✓</span>
             <span>อยู่หอพัก (กักตัว)</span>
           </div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
@@ -726,8 +726,8 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                               {daysArray.map((d) => {
                                 const att = roomData.attendanceMap[student.studentId]?.[d];
                                 const code = att?.code || "-";
-                                const isCheckmark = code === "✓";
-                                const isQuarantine = code === "กต";
+                                const isQuarantine = att?.status === "QUARANTINE";
+                                const isCheckmark = !isQuarantine && code === "✓";
                                 const isRoundHome = code === "รบ";
                                 const isSemesterBreak = code === "ปภ";
 
@@ -741,7 +741,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                                         : isSemesterBreak
                                         ? "bg-neutral-800 text-white font-extrabold text-[10px]"
                                         : isQuarantine
-                                        ? "bg-emerald-200 text-red-700 font-black text-[10px]"
+                                        ? "text-red-600 font-black text-xs"
                                         : isCheckmark
                                         ? "text-emerald-600 font-black text-xs"
                                         : code !== "-"
@@ -824,7 +824,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                       <strong className="text-emerald-600 font-black text-xs">✓</strong> = อยู่หอพัก
                     </span>
                     <span className="font-semibold">
-                      <strong className="bg-emerald-200 text-red-700 font-black px-1 py-0.5 rounded border border-emerald-400">กต</strong> = อยู่หอพัก (กักตัว)
+                      <strong className="text-red-600 font-black text-xs">✓</strong> = อยู่หอพัก (กักตัว)
                     </span>
                     <span className="font-semibold">
                       <strong className="text-amber-950 font-black bg-yellow-200 px-1 py-0.5 rounded border border-yellow-300">รบ</strong> = รอบกลับบ้าน

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DailyAttendance, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import {
   compareFingerprintWithDorm,
@@ -58,6 +58,22 @@ type ResultTabKey =
   | "UNCHECKED"
   | "UNMATCHED";
 
+const getComparisonItemKey = (item: StudentComparisonItem): string =>
+  item.student.id || item.formattedId;
+
+const isQuarantineExemptItem = (item: StudentComparisonItem): boolean =>
+  item.dormStatus === "QUARANTINE" &&
+  (!item.hasScanned ||
+    item.punctualityStatus === "LATE_SCANNED" ||
+    item.punctualityStatus === "LATE_NOT_SCANNED" ||
+    item.punctualityStatus === "QUARANTINE_EXEMPT");
+
+const isDefaultLateReportItem = (item: StudentComparisonItem): boolean =>
+  !item.isDormOut &&
+  !isQuarantineExemptItem(item) &&
+  (item.punctualityStatus === "LATE_SCANNED" ||
+    item.punctualityStatus === "LATE_NOT_SCANNED");
+
 export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
   students,
   dorms,
@@ -91,6 +107,10 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
   const [dormFilter, setDormFilter] = useState<string>("ALL");
   const [gradeFilter, setGradeFilter] = useState<string>("ALL");
   const [activeResultTab, setActiveResultTab] = useState<ResultTabKey>("ALL");
+
+  // Student Checkbox Selection for Print Report
+  const [selectedStudentKeys, setSelectedStudentKeys] = useState<Set<string>>(() => new Set());
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   // Print Preview Modal State
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState<boolean>(false);
@@ -293,6 +313,77 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
 
   const filteredUnmatched = comparison.unmatchedScannerRows;
 
+  // Initialize default checked students (late students) whenever comparison results change
+  useEffect(() => {
+    const next = new Set<string>();
+    comparison.items.forEach((item) => {
+      if (isDefaultLateReportItem(item)) {
+        next.add(getComparisonItemKey(item));
+      }
+    });
+    setSelectedStudentKeys(next);
+  }, [comparison.items]);
+
+  const visibleItemKeys = useMemo(
+    () => filteredItems.map((item) => getComparisonItemKey(item)),
+    [filteredItems]
+  );
+
+  const visibleSelectedCount = useMemo(
+    () => visibleItemKeys.filter((key) => selectedStudentKeys.has(key)).length,
+    [visibleItemKeys, selectedStudentKeys]
+  );
+
+  const allVisibleSelected =
+    visibleItemKeys.length > 0 && visibleSelectedCount === visibleItemKeys.length;
+  const someVisibleSelected =
+    visibleSelectedCount > 0 && visibleSelectedCount < visibleItemKeys.length;
+
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected]);
+
+  const handleToggleStudentSelection = (key: string) => {
+    setSelectedStudentKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisible = () => {
+    if (visibleItemKeys.length === 0) return;
+    setSelectedStudentKeys((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleItemKeys.forEach((key) => next.delete(key));
+      } else {
+        visibleItemKeys.forEach((key) => next.add(key));
+      }
+      return next;
+    });
+  };
+
+  const handleSelectDefaultLate = () => {
+    const next = new Set<string>();
+    comparison.items.forEach((item) => {
+      if (isDefaultLateReportItem(item)) {
+        next.add(getComparisonItemKey(item));
+      }
+    });
+    setSelectedStudentKeys(next);
+  };
+
+  const handleClearAllSelection = () => {
+    setSelectedStudentKeys(new Set());
+  };
+
   const dormFilterLabel = useMemo(() => {
     if (dormFilter === "ALL") return "ทุกหอพัก";
     return dorms.find((d) => d.id === dormFilter)?.name || "ทุกหอพัก";
@@ -302,19 +393,56 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
     return gradeFilter === "ALL" ? "ทุกระดับชั้น" : gradeFilter;
   }, [gradeFilter]);
 
-  // Items shown inside the Late Dormitory Print Report (sorted by Dorm 1 -> Dorm 6)
-  const printItems = useMemo(() => {
-    const filtered = comparison.items.filter((item) => {
-      if (item.isDormOut) return false;
-      if (
-        item.dormStatus === "QUARANTINE" &&
-        (!item.hasScanned ||
-          item.punctualityStatus === "LATE_SCANNED" ||
-          item.punctualityStatus === "LATE_NOT_SCANNED" ||
-          item.punctualityStatus === "QUARANTINE_EXEMPT")
-      ) {
-        return false;
+  // All selected students from comparison table (sorted by Dorm 1 -> Dorm 6)
+  const selectedComparisonItems = useMemo(() => {
+    const selected = comparison.items.filter(
+      (item) => selectedStudentKeys.has(getComparisonItemKey(item)) && !isQuarantineExemptItem(item)
+    );
+    return [...selected].sort((a, b) => {
+      const numA = parseInt(extractDormNumber(a.dorm?.name || a.dormName) || "999", 10);
+      const numB = parseInt(extractDormNumber(b.dorm?.name || b.dormName) || "999", 10);
+      if (numA !== numB) return numA - numB;
+      const dormCmp = a.dormName.localeCompare(b.dormName, "th", { numeric: true });
+      if (dormCmp !== 0) return dormCmp;
+      const gradeCmp = a.gradeRoom.localeCompare(b.gradeRoom, "th", { numeric: true });
+      if (gradeCmp !== 0) return gradeCmp;
+      return a.formattedId.localeCompare(b.formattedId);
+    });
+  }, [comparison.items, selectedStudentKeys]);
+
+  const selectedScopeCounts = useMemo(() => {
+    let lateScanned = 0;
+    let lateNotScanned = 0;
+    let flagged = 0;
+    selectedComparisonItems.forEach((item) => {
+      if (item.isDormOut) return;
+      if (item.punctualityStatus === "LATE_SCANNED") {
+        lateScanned += 1;
+        flagged += 1;
+      } else if (item.punctualityStatus === "LATE_NOT_SCANNED") {
+        lateNotScanned += 1;
+        flagged += 1;
+      } else if (item.punctualityStatus === "EARLY") {
+        flagged += 1;
       }
+    });
+    return {
+      selectedTotal: selectedComparisonItems.length,
+      lateAll: lateScanned + lateNotScanned,
+      lateScanned,
+      lateNotScanned,
+      flagged
+    };
+  }, [selectedComparisonItems]);
+
+  // Items shown inside the Late Dormitory Print Report (filtered by selected checkboxes + scope, sorted by Dorm 1 -> Dorm 6)
+  const printItems = useMemo(() => {
+    if (printScope === "SELECTED") {
+      return selectedComparisonItems;
+    }
+
+    return selectedComparisonItems.filter((item) => {
+      if (item.isDormOut) return false;
       switch (printScope) {
         case "LATE_SCANNED":
           return item.punctualityStatus === "LATE_SCANNED";
@@ -334,18 +462,7 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
           );
       }
     });
-
-    return [...filtered].sort((a, b) => {
-      const numA = parseInt(extractDormNumber(a.dorm?.name || a.dormName) || "999", 10);
-      const numB = parseInt(extractDormNumber(b.dorm?.name || b.dormName) || "999", 10);
-      if (numA !== numB) return numA - numB;
-      const dormCmp = a.dormName.localeCompare(b.dormName, "th", { numeric: true });
-      if (dormCmp !== 0) return dormCmp;
-      const gradeCmp = a.gradeRoom.localeCompare(b.gradeRoom, "th", { numeric: true });
-      if (gradeCmp !== 0) return gradeCmp;
-      return a.formattedId.localeCompare(b.formattedId);
-    });
-  }, [comparison.items, printScope]);
+  }, [selectedComparisonItems, printScope]);
 
   const printDormSummary = useMemo(
     () => buildLateDormSummaryByDorm(printItems, dorms),
@@ -370,10 +487,33 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
     const defaultDate = effectiveFileScanDate || todayStr;
     setPrintReportDate(defaultDate);
 
-    if (activeResultTab === "LATE_SCANNED") {
+    const hasNonLateSelected = selectedComparisonItems.some(
+      (item) =>
+        item.isDormOut ||
+        (item.punctualityStatus !== "LATE_SCANNED" &&
+          item.punctualityStatus !== "LATE_NOT_SCANNED")
+    );
+
+    if (
+      activeResultTab === "LATE_SCANNED" &&
+      selectedScopeCounts.lateScanned > 0 &&
+      !hasNonLateSelected
+    ) {
       setPrintScope("LATE_SCANNED");
-    } else if (activeResultTab === "LATE_NOT_SCANNED") {
+    } else if (
+      activeResultTab === "LATE_NOT_SCANNED" &&
+      selectedScopeCounts.lateNotScanned > 0 &&
+      !hasNonLateSelected
+    ) {
       setPrintScope("LATE_NOT_SCANNED");
+    } else if (
+      hasNonLateSelected ||
+      activeResultTab === "EARLY" ||
+      activeResultTab === "OUT_ALL" ||
+      activeResultTab === "OUT_BUT_SCANNED" ||
+      activeResultTab === "UNCHECKED"
+    ) {
+      setPrintScope("SELECTED");
     } else {
       setPrintScope("LATE_ALL");
     }
@@ -381,6 +521,10 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
   };
 
   const handleExecutePrint = () => {
+    if (printItems.length === 0) {
+      setPrintError("กรุณาเลือกรายชื่อนักเรียนอย่างน้อย 1 คนจากตารางเปรียบเทียบก่อนสั่งพิมพ์");
+      return;
+    }
     try {
       setPrintError("");
       printLateDormReport({
@@ -1139,15 +1283,59 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                   </button>
                 </div>
 
-                {/* Actions: Print */}
+                {/* Actions: Selection + Print */}
                 <div className="flex flex-wrap items-center gap-2 print:hidden shrink-0">
+                  {activeResultTab !== "UNMATCHED" && comparison.items.length > 0 && (
+                    <>
+                      <span className="text-xs font-bold text-slate-600 tabular-nums px-1">
+                        เลือกพิมพ์{" "}
+                        <strong className="text-purple-700">
+                          {selectedScopeCounts.selectedTotal}
+                        </strong>{" "}
+                        คน
+                      </span>
+                      {filteredItems.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleToggleSelectAllVisible}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          {allVisibleSelected ? "ยกเลิกหน้านี้" : "เลือกทั้งหมดหน้านี้"}
+                        </button>
+                      )}
+                      {selectedScopeCounts.selectedTotal > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllSelection}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-slate-600 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          ล้างที่เลือก
+                        </button>
+                      )}
+                      {selectedScopeCounts.selectedTotal !== comparison.counts.lateTotalCount &&
+                        comparison.counts.lateTotalCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSelectDefaultLate}
+                            className="px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap tabular-nums"
+                          >
+                            เลือกเฉพาะสาย ({comparison.counts.lateTotalCount})
+                          </button>
+                        )}
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={handleOpenPrintPreview}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap tabular-nums"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>พิมพ์รายงาน</span>
+                    <span>
+                      พิมพ์รายงาน
+                      {selectedScopeCounts.selectedTotal > 0
+                        ? ` (${selectedScopeCounts.selectedTotal})`
+                        : ""}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -1229,6 +1417,21 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold text-slate-700">
+                        <th className="py-3 pl-4 pr-2 w-10 text-center print:hidden">
+                          <input
+                            ref={selectAllCheckboxRef}
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={handleToggleSelectAllVisible}
+                            aria-label="เลือกนักเรียนทั้งหมดในตารางนี้"
+                            title={
+                              allVisibleSelected
+                                ? "ยกเลิกเลือกทั้งหมดในหน้านี้"
+                                : "เลือกทั้งหมดในหน้านี้"
+                            }
+                            className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer accent-purple-600 align-middle"
+                          />
+                        </th>
                         <th className="py-3 px-4 w-12 text-center">#</th>
                         <th className="py-3 px-4">รหัสนักเรียน</th>
                         <th className="py-3 px-4">ชื่อ - นามสกุล</th>
@@ -1240,8 +1443,31 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
-                      {filteredItems.map((item, idx) => (
-                        <tr key={item.student.id || item.formattedId} className="hover:bg-slate-50/80">
+                      {filteredItems.map((item, idx) => {
+                        const itemKey = getComparisonItemKey(item);
+                        const isSelected = selectedStudentKeys.has(itemKey);
+                        return (
+                        <tr
+                          key={itemKey}
+                          className={`transition-colors ${
+                            isSelected
+                              ? "bg-purple-50/35 hover:bg-purple-50/60"
+                              : "hover:bg-slate-50/80"
+                          }`}
+                        >
+                          <td
+                            onClick={() => handleToggleStudentSelection(itemKey)}
+                            className="py-2.5 pl-4 pr-2 text-center cursor-pointer print:hidden"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleStudentSelection(itemKey)}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`เลือก ${item.fullName} สำหรับพิมพ์รายงาน`}
+                              className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer accent-purple-600 align-middle"
+                            />
+                          </td>
                           <td className="py-2.5 px-4 text-center font-mono tabular-nums text-slate-500">
                             {idx + 1}
                           </td>
@@ -1311,7 +1537,8 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                             {renderPunctualityStatus(item)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -1396,7 +1623,12 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                 <button
                   type="button"
                   onClick={handleExecutePrint}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-extrabold rounded-xl transition-all shadow-md cursor-pointer"
+                  disabled={printItems.length === 0}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-extrabold rounded-xl transition-all shadow-md ${
+                    printItems.length === 0
+                      ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                      : "bg-purple-600 hover:bg-purple-500 text-white cursor-pointer"
+                  }`}
                 >
                   <Printer className="w-4 h-4" />
                   <span>สั่งพิมพ์ / PDF</span>
@@ -1417,7 +1649,18 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
             {/* Secondary Print Settings Strip: Scope + Header Date */}
             <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-600 mr-1">รายชื่อในรายงาน:</span>
+                <span className="text-xs font-bold text-slate-600 mr-1">รายชื่อในรายงาน (จากที่เลือก):</span>
+                <button
+                  type="button"
+                  onClick={() => setPrintScope("SELECTED")}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer tabular-nums ${
+                    printScope === "SELECTED"
+                      ? "bg-purple-700 text-white"
+                      : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  ตามที่ติ๊กเลือก ({selectedScopeCounts.selectedTotal})
+                </button>
                 <button
                   type="button"
                   onClick={() => setPrintScope("LATE_ALL")}
@@ -1427,7 +1670,7 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                       : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  ลงหอพักสายทั้งหมด ({comparison.counts.lateTotalCount})
+                  ลงหอพักสายทั้งหมด ({selectedScopeCounts.lateAll})
                 </button>
                 <button
                   type="button"
@@ -1438,7 +1681,7 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                       : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  สาย (สแกนหลังเวลา) ({comparison.counts.lateScannedCount})
+                  สาย (สแกนหลังเวลา) ({selectedScopeCounts.lateScanned})
                 </button>
                 <button
                   type="button"
@@ -1449,7 +1692,7 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                       : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  สาย (ไม่สแกน) ({comparison.counts.lateNotScannedCount})
+                  สาย (ไม่สแกน) ({selectedScopeCounts.lateNotScanned})
                 </button>
                 <button
                   type="button"
@@ -1460,7 +1703,7 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                       : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  ก่อนเวลา &amp; สายทั้งหมด ({comparison.counts.flaggedCount})
+                  ก่อนเวลา &amp; สายทั้งหมด ({selectedScopeCounts.flagged})
                 </button>
               </div>
 
@@ -1587,9 +1830,23 @@ export const FingerprintCompareView: React.FC<FingerprintCompareViewProps> = ({
                         <tr>
                           <td
                             colSpan={7}
-                            className="border border-slate-400 px-4 py-8 text-center text-slate-500 font-semibold"
+                            className="border border-slate-400 px-4 py-8 text-center text-slate-500 font-semibold space-y-2"
                           >
-                            ไม่พบรายชื่อนักเรียนลงหอพักสายตามเงื่อนไขที่เลือก
+                            <div>
+                              {selectedScopeCounts.selectedTotal === 0
+                                ? "ยังไม่ได้เลือกรายชื่อนักเรียนจากตารางเปรียบเทียบ"
+                                : "ไม่พบรายชื่อนักเรียนลงหอพักสายตามเงื่อนไขที่เลือก"}
+                            </div>
+                            {selectedScopeCounts.selectedTotal === 0 &&
+                              comparison.counts.lateTotalCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleSelectDefaultLate}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                  เลือกนักเรียนลงหอพักสายทั้งหมด ({comparison.counts.lateTotalCount} คน)
+                                </button>
+                              )}
                           </td>
                         </tr>
                       ) : (

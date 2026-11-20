@@ -47,7 +47,8 @@ export function exportAllMonthlyReportsHtml(
           const daysCellsHtml = daysArray.map((d) => {
             const att = roomData.attendanceMap[student.studentId]?.[d];
             const code = att?.code || "-";
-            const isCheckmark = code === "✓";
+            const isQuarantine = att?.status === "QUARANTINE";
+            const isCheckmark = !isQuarantine && code === "✓";
             const isRoundHome = code === "รบ";
 
             let bgStyleCell = "";
@@ -55,11 +56,10 @@ export function exportAllMonthlyReportsHtml(
             if (isRoundHome) {
               bgStyleCell = "background-color: #fef08a;";
               colorStyle = "color: #78350f; font-weight: 800; font-size: 10px;";
+            } else if (isQuarantine) {
+              colorStyle = "color: #dc2626; font-weight: 800; font-size: 12px;";
             } else if (isCheckmark) {
               colorStyle = "color: #059669; font-weight: 800; font-size: 12px;";
-            } else if (code === "กต") {
-              bgStyleCell = "background-color: #a7f3d0;";
-              colorStyle = "color: #b91c1c; font-weight: 800; font-size: 10px;";
             } else if (code === "กบ") {
               colorStyle = "color: #c2410c; font-weight: 800; font-size: 10px;";
             } else if (code === "ค") {
@@ -177,7 +177,7 @@ export function exportAllMonthlyReportsHtml(
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px; font-size:9.5px; color:#334155; background-color:#f8fafc; padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1;">
             <span style="font-weight:800; color:#0f172a;">คำอธิบายสัญลักษณ์และอักษรย่อ:</span>
             <span><strong style="color:#059669; font-size:11px;">✓</strong> = อยู่หอพัก</span>
-            <span><strong style="color:#b91c1c; background-color:#a7f3d0; padding:1px 4px; border-radius:3px; border:1px solid #34d399;">กต</strong> = อยู่หอพัก (กักตัว)</span>
+            <span><strong style="color:#dc2626; font-size:11px;">✓</strong> = อยู่หอพัก (กักตัว)</span>
             <span><strong style="color:#78350f; background-color:#fef08a; padding:1px 4px; border-radius:3px; border:1px solid #fde047;">รบ</strong> = รอบกลับบ้าน</span>
             <span><strong style="color:#c2410c;">กบ</strong> = กลับบ้าน</span>
             <span><strong style="color:#1d4ed8;">ค</strong> = เข้าค่าย</span>
@@ -433,7 +433,7 @@ export function exportMonthlyReportToExcel(
         const att = roomData.attendanceMap[student.studentId]?.[d];
         if (!att || att.status === "NONE") {
           row.push("-");
-        } else if (att.status === "PRESENT") {
+        } else if (att.status === "PRESENT" || att.status === "QUARANTINE") {
           row.push("✓");
         } else {
           row.push(att.code); // รบ, กบ, ป, ท, ลป, อ
@@ -473,7 +473,7 @@ export function exportMonthlyReportToExcel(
     // Legend Row
     rows.push([]);
     rows.push(["คำอธิบายสัญลักษณ์และอักษรย่อ:"]);
-    rows.push(["✓", "อยู่หอพัก", "กต", "อยู่หอพัก (กักตัว)", "รบ", "รอบกลับบ้าน", "กบ", "กลับบ้าน", "ค", "เข้าค่าย", "ป", "ป่วย", "ท", "แข่งทักษะ", "ลป", "แลกเปลี่ยน", "ดร", "เดินเรียน", "ปภ", "ปิดภาคเรียน", "ยห", "ยังไม่เข้าหอพัก", "อ", "อื่นๆ"]);
+    rows.push(["✓", "อยู่หอพัก", "✓ (สีแดง)", "อยู่หอพัก (กักตัว)", "รบ", "รอบกลับบ้าน", "กบ", "กลับบ้าน", "ค", "เข้าค่าย", "ป", "ป่วย", "ท", "แข่งทักษะ", "ลป", "แลกเปลี่ยน", "ดร", "เดินเรียน", "ปภ", "ปิดภาคเรียน", "ยห", "ยังไม่เข้าหอพัก", "อ", "อื่นๆ"]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
 

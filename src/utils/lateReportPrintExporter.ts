@@ -8,7 +8,8 @@ export type LateReportPrintScope =
   | "LATE_ALL"
   | "LATE_SCANNED"
   | "LATE_NOT_SCANNED"
-  | "ALL_FLAGGED";
+  | "ALL_FLAGGED"
+  | "SELECTED";
 
 export interface LateDormPrintData {
   items: StudentComparisonItem[];
