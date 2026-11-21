@@ -11,6 +11,9 @@ import {
 import {
   db,
   auth,
+  ensureAuthReady,
+  classifyFirestoreError,
+  setFirestoreAccessIssue,
   commitChunkedSetDocs,
   commitChunkedDeleteDocs,
   cleanFirestoreData,
@@ -124,7 +127,7 @@ export function invalidateFirestoreReadCache(collectionName?: string): void {
 
 async function readCollectionCached(
   collectionName: string,
-  timeoutMs: number = 3500
+  timeoutMs: number = 10000
 ): Promise<Array<{ id: string; data: Record<string, any> }>> {
   const cached = recentCollectionReads.get(collectionName);
   if (cached && Date.now() - cached.timestamp < READ_DEDUPE_TTL_MS) {
@@ -138,10 +141,17 @@ async function readCollectionCached(
 
   const promise = (async () => {
     try {
+      await ensureAuthReady();
       const snap = await withTimeout(getDocs(collection(db, collectionName)), timeoutMs);
       const items = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
       recentCollectionReads.set(collectionName, { timestamp: Date.now(), items });
+      if (collectionName !== "users") {
+        setFirestoreAccessIssue(null);
+      }
       return items;
+    } catch (err) {
+      classifyFirestoreError(err, collectionName, collectionName === "users");
+      throw err;
     } finally {
       inFlightCollectionReads.delete(collectionName);
     }
@@ -201,7 +211,7 @@ function mergeCloudWithUnsyncedLocal<T extends { id: string }>(
 export async function fetchDorms(): Promise<Dormitory[]> {
   const localDorms = getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
   try {
-    const docs = await readCollectionCached("dorms", 3500);
+    const docs = await readCollectionCached("dorms", 10000);
     if (docs.length > 0) {
       const cloudDorms = docs.map((d) => ({ id: d.id, ...d.data } as Dormitory));
       const merged = mergeCloudWithUnsyncedLocal(cloudDorms, localDorms);
@@ -274,7 +284,7 @@ export async function fetchStudents(params?: {
 }): Promise<Student[]> {
   const localStudents = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
   try {
-    const docs = await readCollectionCached("students", 3500);
+    const docs = await readCollectionCached("students", 10000);
     let students: Student[] = [];
 
     if (docs.length > 0) {
@@ -521,7 +531,7 @@ export async function fetchUsers(): Promise<UserProfile[]> {
   };
 
   try {
-    const docs = await readCollectionCached("users", 2500);
+    const docs = await readCollectionCached("users", 10000);
     if (docs.length > 0) {
       // Cache password hashes strictly in internal hash store, never exposed in returned UserProfile objects
       docs.forEach((d) => {
@@ -553,7 +563,8 @@ export async function verifyUserPasswordById(userId: string, enteredPassword: st
 
   if (!storedHash) {
     try {
-      const snap = await withTimeout(getDoc(doc(db, "users", userId)), 2500);
+      await ensureAuthReady();
+      const snap = await withTimeout(getDoc(doc(db, "users", userId)), 6000);
       if (snap.exists()) {
         const data = snap.data() as Record<string, any>;
         if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
@@ -1306,30 +1317,60 @@ export async function restoreDatabase(rawData: any) {
 
 export async function syncLiveFirebaseDatabase() {
   try {
-    const [dormsSnap, studentsSnap, usersSnap, noticesSnap, attSnap, sysSnap] = await Promise.all([
-      getDocs(collection(db, "dorms")),
-      getDocs(collection(db, "students")),
-      getDocs(collection(db, "users")),
-      getDocs(collection(db, "notices")),
-      getDocs(collection(db, "attendance")),
-      getDoc(doc(db, "system_settings", "config"))
+    await ensureAuthReady();
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+      setFirestoreAccessIssue({
+        code: "AUTH_REQUIRED",
+        message: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อซิงค์ข้อมูลจากฐานข้อมูลกลาง Firestore",
+        hostname: typeof window !== "undefined" ? window.location.hostname : ""
+      });
+      return {
+        success: false,
+        message: "ยังไม่ได้ยืนยันตัวตนด้วย Google Auth — กรุณากด 'เข้าสู่ระบบ / ยืนยันสิทธิ์ด้วย Google' เพื่อเชื่อมต่อฐานข้อมูล Firestore",
+        counts: {
+          dorms: (getLocalCache<any[]>(CACHE_KEYS.DORMS) || []).length,
+          students: (getLocalCache<any[]>(CACHE_KEYS.STUDENTS) || []).length,
+          users: (getLocalCache<any[]>(CACHE_KEYS.USERS) || []).length,
+          notices: (getLocalCache<any[]>(CACHE_KEYS.NOTICES) || []).length,
+          attendance: (getLocalCache<any[]>(CACHE_KEYS.ATTENDANCE) || []).length
+        }
+      };
+    }
+
+    const [dormsSnap, studentsSnap, noticesSnap, attSnap, sysSnap] = await Promise.all([
+      withTimeout(getDocs(collection(db, "dorms")), 15000),
+      withTimeout(getDocs(collection(db, "students")), 15000),
+      withTimeout(getDocs(collection(db, "notices")), 15000),
+      withTimeout(getDocs(collection(db, "attendance")), 15000),
+      withTimeout(getDoc(doc(db, "system_settings", "config")), 10000)
     ]);
+
+    let users: UserProfile[] = [];
+    try {
+      const usersSnap = await withTimeout(getDocs(collection(db, "users")), 10000);
+      users = usersSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() }));
+      setLocalCache(CACHE_KEYS.USERS, users);
+    } catch (userErr) {
+      // Non-admin Google accounts are restricted from listing /users
+      users = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+    }
 
     const dorms = dormsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const students = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const users = usersSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() }));
     const notices = noticesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const attendance = attSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     setLocalCache(CACHE_KEYS.DORMS, dorms);
     setLocalCache(CACHE_KEYS.STUDENTS, students);
-    setLocalCache(CACHE_KEYS.USERS, users);
     setLocalCache(CACHE_KEYS.NOTICES, notices);
     setLocalCache(CACHE_KEYS.ATTENDANCE, attendance);
 
     if (sysSnap.exists()) {
       setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, sysSnap.data());
     }
+
+    invalidateFirestoreReadCache();
+    setFirestoreAccessIssue(null);
 
     return {
       success: true,
@@ -1344,6 +1385,7 @@ export async function syncLiveFirebaseDatabase() {
     };
   } catch (e: any) {
     console.warn("Sync live database failed:", e);
+    classifyFirestoreError(e, "sync", false);
     return {
       success: false,
       message: `เกิดข้อผิดพลาดในการซิงค์ข้อมูลจากฐานข้อมูลกลาง: ${e?.message || e}`,
@@ -1771,7 +1813,7 @@ export async function savePrimaryDatabase() {
 export async function fetchNotices(date?: string): Promise<Notice[]> {
   const localNotices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
   try {
-    const docs = await readCollectionCached("notices", 3500);
+    const docs = await readCollectionCached("notices", 10000);
     if (docs.length > 0) {
       const cloudNotices = docs.map((d) => ({ id: d.id, ...d.data } as Notice));
       let notices = mergeCloudWithUnsyncedLocal(cloudNotices, localNotices);
@@ -2342,15 +2384,19 @@ export async function bulkSetHomeBreakAllDorms(
 // ----------------------------------------------------------------------
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   try {
-    const snap = await withTimeout(getDoc(doc(db, "system_settings", "config")), 3500);
+    await ensureAuthReady();
+    const snap = await withTimeout(getDoc(doc(db, "system_settings", "config")), 10000);
     if (snap.exists()) {
       const settings = snap.data() as SystemSettings;
       setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settings);
+      setFirestoreAccessIssue(null);
       return settings;
     }
+    setFirestoreAccessIssue(null);
     return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
   } catch (err: any) {
     console.warn("Primary database fetchSystemSettings offline fallback:", err?.message || err);
+    classifyFirestoreError(err, "system_settings/config", false);
     return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
   }
 }

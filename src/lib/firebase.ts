@@ -6,7 +6,12 @@ import {
   getDocFromServer,
   writeBatch
 } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  User
+} from "firebase/auth";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase App
@@ -20,8 +25,191 @@ export const db = customDbId && customDbId !== "(default)"
 
 export const auth = getAuth(app);
 
+export const FIREBASE_PROJECT_ID = (firebaseConfig as any).projectId || "";
+export const FIREBASE_DATABASE_ID = customDbId;
+
+export async function ensureAuthReady(): Promise<void> {
+  try {
+    if (typeof (auth as any).authStateReady === "function") {
+      await (auth as any).authStateReady();
+    }
+  } catch {
+    // Ignore auth readiness edge errors
+  }
+}
+
+export type FirestoreAccessIssueCode =
+  | "AUTH_REQUIRED"
+  | "UNAUTHORIZED_DOMAIN"
+  | "PERMISSION_DENIED"
+  | "POPUP_BLOCKED"
+  | "OFFLINE";
+
+export interface FirestoreAccessIssue {
+  code: FirestoreAccessIssueCode;
+  message: string;
+  hostname?: string;
+  path?: string;
+}
+
+let currentAccessIssue: FirestoreAccessIssue | null = null;
+const accessIssueListeners = new Set<(issue: FirestoreAccessIssue | null) => void>();
+
+export function getFirestoreAccessIssue(): FirestoreAccessIssue | null {
+  return currentAccessIssue;
+}
+
+export function setFirestoreAccessIssue(issue: FirestoreAccessIssue | null): void {
+  const same =
+    currentAccessIssue?.code === issue?.code &&
+    currentAccessIssue?.message === issue?.message &&
+    currentAccessIssue?.hostname === issue?.hostname;
+  if (same) return;
+  currentAccessIssue = issue;
+  accessIssueListeners.forEach((listener) => {
+    try {
+      listener(currentAccessIssue);
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+export function subscribeFirestoreAccessIssue(
+  listener: (issue: FirestoreAccessIssue | null) => void
+): () => void {
+  accessIssueListeners.add(listener);
+  listener(currentAccessIssue);
+  return () => {
+    accessIssueListeners.delete(listener);
+  };
+}
+
+export function getCurrentHostname(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.hostname || "";
+}
+
+export function classifyFirestoreError(
+  error: unknown,
+  path: string | null = null,
+  isRestrictedUserCollection: boolean = false
+): void {
+  const errCode = String((error as any)?.code || "").toLowerCase();
+  const errMsg = error instanceof Error ? error.message : String(error || "");
+  const lowerMsg = errMsg.toLowerCase();
+  const hostname = getCurrentHostname();
+
+  const isPermDenied =
+    errCode.includes("permission-denied") ||
+    errCode.includes("unauthenticated") ||
+    lowerMsg.includes("missing or insufficient permissions") ||
+    lowerMsg.includes("permission_denied") ||
+    lowerMsg.includes("permission-denied");
+
+  if (isPermDenied) {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+      setFirestoreAccessIssue({
+        code: "AUTH_REQUIRED",
+        message: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อเชื่อมต่อและโหลดข้อมูลจากฐานข้อมูล Firestore",
+        hostname,
+        path: path || undefined
+      });
+      return;
+    }
+
+    // Non-admin users are intentionally blocked from listing the /users collection (PII protection);
+    // do not treat that as a global Firestore connection failure.
+    if (isRestrictedUserCollection) {
+      return;
+    }
+
+    setFirestoreAccessIssue({
+      code: "PERMISSION_DENIED",
+      message: `บัญชี ${auth.currentUser.email || ""} ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้ (${path || "firestore"})`,
+      hostname,
+      path: path || undefined
+    });
+    return;
+  }
+
+  if (
+    errCode.includes("unavailable") ||
+    lowerMsg.includes("the client is offline") ||
+    lowerMsg.includes("timeout after") ||
+    lowerMsg.includes("network")
+  ) {
+    setFirestoreAccessIssue({
+      code: "OFFLINE",
+      message: "ไม่สามารถเชื่อมต่อฐานข้อมูล Firestore ได้ชั่วคราว กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่",
+      hostname,
+      path: path || undefined
+    });
+  }
+}
+
+export async function signInWithGoogleAndRefresh(): Promise<User> {
+  const hostname = getCurrentHostname();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+
+  try {
+    const result = await signInWithPopup(auth, provider);
+    if (!result.user?.emailVerified) {
+      const err: any = new Error("บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล");
+      err.code = "auth/email-not-verified";
+      throw err;
+    }
+    setFirestoreAccessIssue(null);
+    return result.user;
+  } catch (err: any) {
+    const code = String(err?.code || "");
+    if (code === "auth/unauthorized-domain") {
+      const msg = `โดเมน "${hostname}" ยังไม่ได้รับอนุญาตใน Firebase Authentication (ต้องเพิ่มโดเมนนี้ใน Firebase Console -> Authentication -> Settings -> Authorized domains)`;
+      setFirestoreAccessIssue({
+        code: "UNAUTHORIZED_DOMAIN",
+        message: msg,
+        hostname
+      });
+      const wrapped: any = new Error(msg);
+      wrapped.code = code;
+      throw wrapped;
+    }
+    if (code === "auth/popup-blocked") {
+      const msg = "เบราว์เซอร์บล็อกหน้าต่างเข้าสู่ระบบ Google กรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้แล้วลองใหม่อีกครั้ง";
+      setFirestoreAccessIssue({
+        code: "POPUP_BLOCKED",
+        message: msg,
+        hostname
+      });
+      const wrapped: any = new Error(msg);
+      wrapped.code = code;
+      throw wrapped;
+    }
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+      const wrapped: any = new Error("ยกเลิกการเข้าสู่ระบบด้วย Google กรุณาลองใหม่อีกครั้ง");
+      wrapped.code = code;
+      throw wrapped;
+    }
+    if (code === "auth/operation-not-allowed") {
+      const msg = "ยังไม่ได้เปิดใช้งาน Google Sign-In ใน Firebase Authentication (Authentication -> Sign-in method)";
+      const wrapped: any = new Error(msg);
+      wrapped.code = code;
+      throw wrapped;
+    }
+    if (code === "auth/network-request-failed") {
+      const msg = "เชื่อมต่อระบบยืนยันตัวตน Google ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต";
+      const wrapped: any = new Error(msg);
+      wrapped.code = code;
+      throw wrapped;
+    }
+    throw err;
+  }
+}
+
 async function testConnection() {
   try {
+    await ensureAuthReady();
     await getDocFromServer(doc(db, "test", "connection"));
   } catch (error) {
     if (error instanceof Error && error.message.includes("the client is offline")) {
@@ -81,6 +269,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   const serialized = JSON.stringify(errInfo);
   console.error("Firestore Error: ", serialized);
+  classifyFirestoreError(error, path, path === "users");
   if (shouldThrow) {
     throw new Error(serialized);
   }
@@ -100,7 +289,7 @@ export interface CloudConnectionStatus {
 
 export type FirebaseConnectionStatus = CloudConnectionStatus;
 
-export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 10000): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Timeout after ${timeoutMs}ms`));
@@ -121,12 +310,14 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): P
 export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> {
   const startTime = Date.now();
   try {
+    await ensureAuthReady();
     const testDocRef = doc(db, "system_settings", "config");
     const pingTask = getDoc(testDocRef);
 
-    await withTimeout(pingTask, 4000);
+    await withTimeout(pingTask, 8000);
 
     const latency = Date.now() - startTime;
+    setFirestoreAccessIssue(null);
     return {
       isConnected: true,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
@@ -135,6 +326,7 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
     };
   } catch (err: any) {
     console.warn("Cloud database ping attempt failed:", err?.message || err);
+    classifyFirestoreError(err, "system_settings/config", false);
     return {
       isConnected: false,
       lastChecked: new Date().toLocaleTimeString("th-TH"),

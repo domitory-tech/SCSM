@@ -21,6 +21,17 @@ import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusM
 import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { sanitizeUserForClient, stripDangerousKeys } from "./utils/security";
+import { AlertTriangle, Check, Copy, Database, LogIn, RefreshCw, X } from "lucide-react";
+import {
+  auth,
+  subscribeFirestoreAccessIssue,
+  signInWithGoogleAndRefresh,
+  getCurrentHostname,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_DATABASE_ID,
+  FirestoreAccessIssue
+} from "./lib/firebase";
+import { invalidateFirestoreReadCache } from "./services/api";
 import {
   useAddDormMutation,
   useAddStudentMutation,
@@ -120,6 +131,58 @@ function MainAppContent() {
 
   // System Maintenance Auto Popup State (Shown 1 time per day)
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState<boolean>(false);
+
+  // Firestore Access Issue Banner State (only visible when Firestore access is actively blocked)
+  const [accessIssue, setAccessIssue] = useState<FirestoreAccessIssue | null>(null);
+  const [dismissedIssueKey, setDismissedIssueKey] = useState<string | null>(null);
+  const [isConnectingCloud, setIsConnectingCloud] = useState<boolean>(false);
+  const [cloudConnectError, setCloudConnectError] = useState<string | null>(null);
+  const [copiedDomainHost, setCopiedDomainHost] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    const unsubIssue = subscribeFirestoreAccessIssue((issue) => {
+      setAccessIssue(issue);
+      if (!issue) {
+        setCloudConnectError(null);
+      }
+    });
+
+    let lastUid: string | null | undefined = undefined;
+    const unsubAuth = auth.onAuthStateChanged((fbUser) => {
+      const nextUid = fbUser?.emailVerified ? fbUser.uid : null;
+      if ((lastUid !== undefined && lastUid !== nextUid) || (lastUid === undefined && nextUid !== null)) {
+        invalidateFirestoreReadCache();
+        queryClient.invalidateQueries();
+      }
+      lastUid = nextUid;
+    });
+
+    return () => {
+      unsubIssue();
+      unsubAuth();
+    };
+  }, []);
+
+  const handleConnectFirestoreGoogle = async () => {
+    setIsConnectingCloud(true);
+    setCloudConnectError(null);
+    try {
+      await signInWithGoogleAndRefresh();
+      invalidateFirestoreReadCache();
+      await queryClient.invalidateQueries();
+      setDismissedIssueKey(null);
+    } catch (err: any) {
+      setCloudConnectError(err?.message || "ไม่สามารถเชื่อมต่อบัญชี Google ได้");
+    } finally {
+      setIsConnectingCloud(false);
+    }
+  };
+
+  const handleRetryFirestoreSync = async () => {
+    setCloudConnectError(null);
+    invalidateFirestoreReadCache();
+    await queryClient.invalidateQueries();
+  };
 
   // Active check state
   const [selectedDormId, setSelectedDormId] = useState<string>("dorm-1");
@@ -342,6 +405,128 @@ function MainAppContent() {
         {/* Right Side Column: Main Content Area + Bottom Footer */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#f2f4f9]">
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-6">
+          {accessIssue &&
+            dismissedIssueKey !== `${accessIssue.code}:${accessIssue.hostname || ""}` && (
+              <div className="mb-5 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-4 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      {accessIssue.code === "UNAUTHORIZED_DOMAIN" ? (
+                        <AlertTriangle className="w-5 h-5" />
+                      ) : (
+                        <Database className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-extrabold text-amber-950">
+                          {accessIssue.code === "UNAUTHORIZED_DOMAIN"
+                            ? "โดเมนนี้ยังไม่ได้รับอนุญาตให้เชื่อมต่อ Firebase Authentication"
+                            : accessIssue.code === "AUTH_REQUIRED"
+                            ? "ยังไม่ได้เชื่อมต่อฐานข้อมูล Firestore (ต้องยืนยันตัวตนด้วย Google)"
+                            : accessIssue.code === "PERMISSION_DENIED"
+                            ? "บัญชี Google ปัจจุบันไม่มีสิทธิ์อ่าน/เขียนข้อมูลบางส่วนบน Firestore"
+                            : "ไม่สามารถเชื่อมต่อฐานข้อมูล Firestore ได้ชั่วคราว"}
+                        </h3>
+                        {getCurrentHostname() && (
+                          <span className="text-[11px] font-mono bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
+                            {getCurrentHostname()}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-amber-900 leading-relaxed">
+                        {cloudConnectError || accessIssue.message}
+                      </p>
+
+                      {accessIssue.code === "UNAUTHORIZED_DOMAIN" && (
+                        <div className="mt-2 p-3 rounded-xl bg-white border border-amber-200 text-xs text-slate-700 space-y-1.5">
+                          <div className="font-bold text-slate-900">
+                            วิธีแก้ไขเพื่อให้ระบบบน GitHub Pages เรียกใช้ฐานข้อมูล Firestore ได้:
+                          </div>
+                          <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
+                            <li>
+                              เปิด Firebase Console โปรเจกต์{" "}
+                              <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-indigo-700">
+                                {FIREBASE_PROJECT_ID}
+                              </code>{" "}
+                              (ฐานข้อมูล{" "}
+                              <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-700">
+                                {FIREBASE_DATABASE_ID}
+                              </code>
+                              )
+                            </li>
+                            <li>
+                              ไปที่เมนู <strong>Authentication &rarr; Settings &rarr; Authorized domains &rarr; Add domain</strong>
+                            </li>
+                            <li className="flex flex-wrap items-center gap-1.5">
+                              <span>เพิ่มโดเมน:</span>
+                              <code className="bg-amber-100 text-amber-950 px-2 py-0.5 rounded font-mono font-bold">
+                                {accessIssue.hostname || getCurrentHostname()}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const host = accessIssue.hostname || getCurrentHostname();
+                                  if (host && navigator.clipboard) {
+                                    navigator.clipboard.writeText(host);
+                                    setCopiedDomainHost(true);
+                                    setTimeout(() => setCopiedDomainHost(false), 2000);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold cursor-pointer"
+                              >
+                                {copiedDomainHost ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedDomainHost ? "คัดลอกแล้ว" : "คัดลอกโดเมน"}</span>
+                              </button>
+                            </li>
+                          </ol>
+                        </div>
+                      )}
+
+                      {accessIssue.code === "AUTH_REQUIRED" && (
+                        <p className="text-[11px] text-amber-800">
+                          ฐานข้อมูลกลางปกป้องข้อมูลนักเรียนด้วยการยืนยันตัวตน Google (หากเปิดบน GitHub Pages หรืออุปกรณ์ใหม่ กรุณากดเชื่อมต่อ Google หรือหากพบแจ้งเตือน Unauthorized Domain ให้เพิ่มโดเมนของ GitHub Pages ใน Firebase Console)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleConnectFirestoreGoogle}
+                      disabled={isConnectingCloud}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>
+                        {isConnectingCloud
+                          ? "กำลังเชื่อมต่อ Google..."
+                          : "เชื่อมต่อฐานข้อมูล Firestore (Google)"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRetryFirestoreSync}
+                      className="px-3 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>ลองโหลดใหม่</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDismissedIssueKey(`${accessIssue.code}:${accessIssue.hostname || ""}`)
+                      }
+                      aria-label="ปิดการแจ้งเตือนนี้"
+                      className="p-2 rounded-xl bg-white/80 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           {effectiveTab === "dashboard" && (
             <DashboardView
               reportData={reportData}

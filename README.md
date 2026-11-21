@@ -49,6 +49,13 @@ npm run dev
 1. **`base: './'` ใน `vite.config.ts`**: กำหนดให้ Build ไฟล์ Assets ด้วย Relative Path ทำให้โหลดไฟล์ JS/CSS ได้ถูกต้องบนทุก Subpath ของ GitHub Pages
 2. **`public/404.html`**: รองรับ Single Page Application (SPA) Routing ป้องกันปัญหา 404 เมื่อ Refresh หน้าเว็บ
 3. ใน GitHub Repository ไปที่ **Settings** -> **Pages** -> เลือก Source เป็น **`GitHub Actions`**
+4. **ตั้งค่า Firebase Authorized Domains (สำคัญสำหรับการใช้งานฐานข้อมูล Firestore บน GitHub Pages)**:
+   - เปิด [Firebase Console](https://console.firebase.google.com/) แล้วเลือกโปรเจกต์ `gen-lang-client-0460310471`
+   - ไปที่เมนู **Authentication** -> **Settings** -> **Authorized domains** -> **Add domain**
+   - เพิ่มโดเมน GitHub Pages ของคุณ (เช่น `<username>.github.io`)
+5. **การเชื่อมต่อฐานข้อมูล Firestore ครั้งแรกบน GitHub Pages**:
+   - กฎความปลอดภัยของ Firestore (`firestore.rules`) กำหนดให้ต้องยืนยันตัวตนด้วย **Google Sign-In** (เช่น บัญชีผู้ดูแลหลัก `domitory@pcccr.ac.th` หรือบัญชี Google ที่ยืนยันอีเมลแล้ว)
+   - เมื่อเปิดเว็บผ่านลิงก์ `github.io` ให้คลิกปุ่ม **"เชื่อมต่อฐานข้อมูล Firestore (Google)"** หรือเข้าสู่ระบบด้วยปุ่ม **"ยืนยันตัวตนด้วย Google"** เพื่อให้ระบบโหลดและซิงค์ข้อมูลจาก Firestore ได้ทันที
 
 ---
 

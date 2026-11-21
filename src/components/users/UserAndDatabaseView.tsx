@@ -6,8 +6,13 @@ import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getToda
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
 import { isValidPasswordStrength, sanitizeSafeImageUrl } from "../../utils/security";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
-import { auth } from "../../lib/firebase";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  auth,
+  signInWithGoogleAndRefresh,
+  getCurrentHostname,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_DATABASE_ID
+} from "../../lib/firebase";
 import {
   fetchUsers,
   addUser,
@@ -26,6 +31,7 @@ import {
   verifyAuthorizedAdminOrStaffPassword,
   getDisplayedDatabaseSnapshot,
   uploadCurrentDisplayedDatabaseToCloud,
+  invalidateFirestoreReadCache,
   DeleteSampleDataOptions
 } from "../../services/api";
 import {
@@ -668,14 +674,11 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
 
   const handleGoogleSignInForDb = async () => {
     setUploadCloudError(null);
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
-    const result = await signInWithPopup(auth, provider);
-    if (!result.user?.emailVerified) {
-      throw new Error("บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล");
-    }
-    setFirebaseAuthEmail(result.user.email || "");
-    return result.user;
+    const fbUser = await signInWithGoogleAndRefresh();
+    setFirebaseAuthEmail(fbUser.email || "");
+    invalidateFirestoreReadCache();
+    await queryClient.invalidateQueries();
+    return fbUser;
   };
 
   const handleUploadDisplayedDatabase = async () => {
@@ -687,8 +690,11 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
         await handleGoogleSignInForDb();
       }
     } catch (authErr: any) {
+      const hostname = getCurrentHostname();
       const errMsg =
-        authErr?.code === "auth/popup-closed-by-user"
+        authErr?.code === "auth/unauthorized-domain"
+          ? `โดเมน "${hostname}" ยังไม่ได้รับอนุญาตใน Firebase Authentication — กรุณาไปที่ Firebase Console โปรเจกต์ ${FIREBASE_PROJECT_ID} -> Authentication -> Settings -> Authorized domains แล้วเพิ่ม "${hostname}"`
+          : authErr?.code === "auth/popup-closed-by-user"
           ? "ยกเลิกการเข้าสู่ระบบด้วย Google กรุณากดอัพโหลดและเลือกบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
           : authErr?.message || "ไม่สามารถยืนยันตัวตนด้วยบัญชี Google ได้";
       setUploadCloudError(errMsg);
@@ -711,6 +717,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
         uploadedCounts: res.uploadedCounts,
         verifiedCloudCounts: res.verifiedCloudCounts
       });
+      invalidateFirestoreReadCache();
+      await queryClient.invalidateQueries();
       showNotification("success", res.message);
       if (onDataReset) onDataReset();
       await loadUsersList();
@@ -730,6 +738,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     setIsInitializingDefaultDb(true);
     try {
       const res = await syncLiveFirebaseDatabase();
+      invalidateFirestoreReadCache();
+      await queryClient.invalidateQueries();
       showNotification(res.success ? "success" : "error", res.message || "ซิงค์ข้อมูลจากฐานข้อมูลกลางสำเร็จ");
       if (onDataReset) onDataReset();
       loadUsersList();
@@ -2781,7 +2791,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                             try {
                               await handleGoogleSignInForDb();
                             } catch (e: any) {
-                              showNotification("error", e?.message || "เปลี่ยนบัญชี Google ไม่สำเร็จ");
+                              const msg = e?.message || "เปลี่ยนบัญชี Google ไม่สำเร็จ";
+                              setUploadCloudError(msg);
+                              showNotification("error", msg);
                             }
                           }}
                           className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
@@ -3887,9 +3899,12 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                       คุณสามารถดาวน์โหลดหรือส่งออกแอปพลิเคชันนี้ผ่านเมนู <strong className="text-amber-300">Settings</strong> ของ AI Studio หรือใช้คำสั่ง Git เพื่อเชื่อมต่อไปยัง GitHub Repository ของคุณ
                     </p>
                     <div className="p-3 bg-black/40 rounded-xl border border-white/10 text-[11px] text-slate-300 space-y-1 font-mono">
-                      <div className="text-emerald-400 font-bold">✓ Included Files for GitHub:</div>
-                      <div>• /src (React Component Architecture)</div>
-                      <div>• package.json & Vite Config</div>
+                      <div className="text-emerald-400 font-bold">✓ Included Files for GitHub & Firebase:</div>
+                      <div>• /src & firebase-applet-config.json (Project: {FIREBASE_PROJECT_ID})</div>
+                      <div>• Firebase Database ID: {FIREBASE_DATABASE_ID}</div>
+                      <div className="text-amber-300 font-sans pt-1">
+                        * สำคัญสำหรับ GitHub Pages: ต้องเพิ่มโดเมน <code className="bg-black/60 px-1 rounded">&lt;username&gt;.github.io</code> ใน Firebase Authentication &rarr; Settings &rarr; Authorized domains
+                      </div>
                     </div>
                   </div>
 
@@ -4617,13 +4632,12 @@ git push -u origin main`);
               <div className="bg-emerald-950/60 p-4 rounded-xl border border-emerald-500/30 space-y-2">
                 <div className="font-bold text-emerald-300 text-sm flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span>วิธีแก้ปัญหา "หน้าขาว (Blank Screen)" เมื่อเปิดเว็บบน GitHub Pages</span>
+                  <span>วิธีแก้ปัญหา "หน้าขาว" และ "เชื่อมต่อฐานข้อมูล Firestore ไม่ได้" บน GitHub Pages</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed text-[11px]">
-                  สาเหตุที่หน้าแรกไม่แสดงผลบน GitHub Pages เกิดจาก Path ของไฟล์ JS/CSS ไม่ตรงกับ Subpath ของ Repository และต้องเลือก Source ใน Settings ของ GitHub<br />
-                  <strong className="text-amber-300">✓ 1. ระบบได้ตั้งค่า <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">base: './'</code> ใน <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">vite.config.ts</code> และเพิ่มไฟล์ <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">public/404.html</code>, <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">.nojekyll</code>, และ <code className="bg-black/50 px-1 py-0.5 rounded text-amber-300">package-lock.json</code> ให้เรียบร้อยแล้ว</strong><br />
-                  <strong className="text-emerald-300">✓ 2. ปรับแต่งไฟล์ <code className="bg-black/50 px-1 py-0.5 rounded text-amber-300">.github/workflows/deploy.yml</code> เป็น Node 22 และใช้ <code className="bg-black/50 px-1 py-0.5 rounded text-white">npm install</code> แล้ว</strong><br />
-                  <strong className="text-amber-200">⚙️ 3. ขั้นตอนสำคัญบน GitHub:</strong> เข้าไปที่หน้า Repository บน GitHub -&gt; เลือกเมนู <strong className="text-white">Settings -&gt; Pages</strong> -&gt; ในส่วน <strong className="text-white">Source</strong> ให้เปลี่ยนเป็น <strong className="text-amber-300">"GitHub Actions"</strong> จากนั้นเมื่อ Push โค้ดขึ้นไป GitHub Actions จะทำการ Build และ Deploy หน้าเว็บให้อัตโนมัติโดยไม่มีข้อผิดพลาด!
+                  <strong className="text-amber-300">✓ 1. การแสดงผลหน้าเว็บ:</strong> ตั้งค่า <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">base: './'</code> ใน <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">vite.config.ts</code> และเพิ่มไฟล์ <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">public/404.html</code>, <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">.nojekyll</code> แล้ว<br />
+                  <strong className="text-emerald-300">✓ 2. GitHub Actions:</strong> ตั้งค่า Repository <strong className="text-white">Settings &rarr; Pages &rarr; Source</strong> เป็น <strong className="text-amber-300">"GitHub Actions"</strong><br />
+                  <strong className="text-rose-300">🔥 3. ตั้งค่า Firebase Authorized Domains (สำคัญมากเพื่อให้ใช้ Firestore บน GitHub Pages ได้):</strong> เปิด <strong className="text-white">Firebase Console</strong> โปรเจกต์ <code className="bg-black/50 px-1.5 py-0.5 rounded text-amber-300">{FIREBASE_PROJECT_ID}</code> &rarr; <strong className="text-white">Authentication &rarr; Settings &rarr; Authorized domains &rarr; Add domain</strong> แล้วเพิ่มโดเมน GitHub Pages ของคุณ เช่น <code className="bg-black/50 px-1.5 py-0.5 rounded text-emerald-300">username.github.io</code> จากนั้นเมื่อเปิดเว็บ GitHub Pages ครั้งแรก ให้กดเข้าสู่ระบบด้วย Google (<code className="bg-black/50 px-1 rounded text-white">domitory@pcccr.ac.th</code>) เพื่อปลดล็อกการอ่าน/เขียนฐานข้อมูลกลาง Firestore
                 </p>
               </div>
 

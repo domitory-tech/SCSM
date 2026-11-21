@@ -36,6 +36,7 @@ jobs:
       - name: Build
         run: |
           npm run build
+          rm -f dist/server.cjs dist/server.cjs.map
           touch dist/.nojekyll
           if [ -f public/404.html ]; then cp public/404.html dist/404.html; else cp dist/index.html dist/404.html; fi
 

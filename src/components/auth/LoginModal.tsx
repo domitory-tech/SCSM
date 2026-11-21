@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { UserProfile, SystemSettings } from "../../types";
-import { fetchUsers, verifyUserPasswordById, setupFirstTimePassword } from "../../services/api";
+import { fetchUsers, verifyUserPasswordById, setupFirstTimePassword, invalidateFirestoreReadCache } from "../../services/api";
 import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 import { getDirectImageUrl } from "../../utils/dateUtils";
 import { isValidPasswordStrength, sanitizeUserForClient } from "../../utils/security";
-import { auth } from "../../lib/firebase";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  auth,
+  ensureAuthReady,
+  signInWithGoogleAndRefresh,
+  getCurrentHostname,
+  FIREBASE_PROJECT_ID
+} from "../../lib/firebase";
 import {
   ShieldCheck,
   User,
@@ -45,6 +51,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   standalone = false,
   systemSettings
 }) => {
+  const queryClient = useQueryClient();
   const [selectedLevel, setSelectedLevel] = useState<1 | 2 | 3 | 4>(1);
   const [password, setPassword] = useState("");
   const [confirmInitialPassword, setConfirmInitialPassword] = useState("");
@@ -52,14 +59,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [usersList, setUsersList] = useState<UserProfile[]>(DEFAULT_SYSTEM_USERS);
   const [selectedUserId, setSelectedUserId] = useState<string>("user-admin");
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [unauthorizedDomainHost, setUnauthorizedDomainHost] = useState<string | null>(null);
+  const [firebaseUserEmail, setFirebaseUserEmail] = useState<string>(() => auth.currentUser?.emailVerified ? (auth.currentUser.email || "") : "");
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
+    const unsub = auth.onAuthStateChanged((fbUser) => {
+      setFirebaseUserEmail(fbUser?.emailVerified && fbUser.email ? fbUser.email : "");
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     if (isOpen || standalone) {
+      let cancelled = false;
       setIsLoadingUsers(true);
-      fetchUsers()
+      ensureAuthReady()
+        .then(() => fetchUsers())
         .then((users) => {
+          if (cancelled) return;
           if (users && users.length > 0) {
             setUsersList(users);
             const firstUser = users.find((u) => u.roleLevel === selectedLevel) || users[0];
@@ -73,10 +92,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           console.warn("fetchUsers background sync:", err);
         })
         .finally(() => {
-          setIsLoadingUsers(false);
+          if (!cancelled) setIsLoadingUsers(false);
         });
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [isOpen, standalone]);
+  }, [isOpen, standalone, firebaseUserEmail]);
 
   if (!isOpen && !standalone) return null;
 
@@ -155,20 +177,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleGoogleVerifySession = async () => {
     setIsSubmitting(true);
     setLoginError(null);
+    setUnauthorizedDomainHost(null);
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      if (!result.user?.emailVerified) {
-        setLoginError("บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล");
-        return;
+      const fbUser = await signInWithGoogleAndRefresh();
+      invalidateFirestoreReadCache();
+      await queryClient.invalidateQueries();
+      const freshUsers = await fetchUsers().catch(() => usersList);
+      if (freshUsers && freshUsers.length > 0) {
+        setUsersList(freshUsers);
       }
 
-      const verifiedEmail = (result.user.email || "").trim().toLowerCase();
+      const verifiedEmail = (fbUser.email || "").trim().toLowerCase();
       if (verifiedEmail === "domitory@pcccr.ac.th") {
-        const existingAdmin = usersList.find((u) => u.roleLevel === 1);
+        const existingAdmin = freshUsers.find((u) => u.roleLevel === 1);
         const adminProfile: UserProfile = sanitizeUserForClient({
-          id: existingAdmin?.id || `google-${result.user.uid}`,
-          name: existingAdmin?.name || result.user.displayName || "ผู้ดูแลระบบหลัก",
+          id: existingAdmin?.id || `google-${fbUser.uid}`,
+          name: existingAdmin?.name || fbUser.displayName || "ผู้ดูแลระบบหลัก",
           phone: existingAdmin?.phone || "",
           role: "SYSTEM_ADMIN",
           roleLevel: 1,
@@ -177,7 +201,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           roleLabel: existingAdmin?.roleLabel || "ผู้ดูแลระบบหลัก (Google Verified Admin)",
           dormId: existingAdmin?.dormId || "",
           allowedDormIds: existingAdmin?.allowedDormIds || [],
-          avatarUrl: existingAdmin?.avatarUrl || getDirectImageUrl(result.user.photoURL || "")
+          avatarUrl: existingAdmin?.avatarUrl || getDirectImageUrl(fbUser.photoURL || "")
         });
         onLogin(adminProfile);
         if (!standalone) onClose();
@@ -185,21 +209,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
 
       const fallbackVisitor: UserProfile =
-        usersList.find((u) => u.roleLevel === 4) ||
+        freshUsers.find((u) => u.roleLevel === 4) ||
         sanitizeUserForClient({
-          id: `google-${result.user.uid}`,
-          name: result.user.displayName || result.user.email || "ผู้เยี่ยมชมระบบ",
+          id: `google-${fbUser.uid}`,
+          name: fbUser.displayName || fbUser.email || "ผู้เยี่ยมชมระบบ",
           role: "GUEST",
           roleLevel: 4,
           roleCategory: "GUEST",
           roleCategoryName: "ผู้เยี่ยมชม",
           roleLabel: "ผู้เยี่ยมชมที่ยืนยันตัวตนแล้ว",
-          avatarUrl: getDirectImageUrl(result.user.photoURL || "")
+          avatarUrl: getDirectImageUrl(fbUser.photoURL || "")
         });
       onLogin(sanitizeUserForClient(fallbackVisitor));
       if (!standalone) onClose();
     } catch (err: any) {
-      setLoginError("การยืนยันบัญชี Google ถูกยกเลิกหรือไม่สำเร็จ");
+      if (err?.code === "auth/unauthorized-domain") {
+        setUnauthorizedDomainHost(getCurrentHostname());
+      }
+      setLoginError(err?.message || "การยืนยันบัญชี Google ถูกยกเลิกหรือไม่สำเร็จ");
     } finally {
       setIsSubmitting(false);
     }
@@ -313,19 +340,53 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       )}
 
       {/* Account Selector Header */}
-      <div className="px-6 pt-4 pb-2.5 border-b border-slate-100 flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-[#A05AFF]">
-          เลือกบัญชีผู้ใช้งานในระบบ ({usersList.length} บัญชี)
-        </span>
-        <button
-          type="button"
-          onClick={handleGoogleVerifySession}
-          disabled={isSubmitting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-        >
-          <Shield className="w-3.5 h-3.5 text-emerald-600" />
-          <span>เข้าสู่ระบบ / ยืนยันสิทธิ์ด้วย Google</span>
-        </button>
+      <div className="px-6 pt-4 pb-2.5 border-b border-slate-100 space-y-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs font-bold text-[#A05AFF]">
+            เลือกบัญชีผู้ใช้งานในระบบ ({usersList.length} บัญชี)
+          </span>
+          <button
+            type="button"
+            onClick={handleGoogleVerifySession}
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80 text-[11px] font-bold text-emerald-800 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Shield className="w-3.5 h-3.5 text-emerald-600" />
+            <span>
+              {firebaseUserEmail
+                ? `เชื่อมต่อ Google แล้ว (${firebaseUserEmail})`
+                : "เข้าสู่ระบบ / เชื่อมต่อฐานข้อมูลด้วย Google"}
+            </span>
+          </button>
+        </div>
+
+        {!firebaseUserEmail && (
+          <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 font-medium leading-relaxed">
+            หากเปิดใช้งานจาก <strong>GitHub Pages</strong> หรืออุปกรณ์ใหม่ กรุณากดปุ่ม{" "}
+            <strong>"เข้าสู่ระบบ / เชื่อมต่อฐานข้อมูลด้วย Google"</strong> ด้านบนเพื่อดึงข้อมูลล่าสุดจาก Firestore
+          </div>
+        )}
+
+        {unauthorizedDomainHost && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-900 space-y-1.5">
+            <div className="font-extrabold flex items-center gap-1.5 text-rose-800">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>ต้องเพิ่มโดเมน GitHub Pages ใน Firebase Console ก่อนจึงจะล็อกอิน Google ได้</span>
+            </div>
+            <ol className="list-decimal list-inside space-y-0.5 text-rose-800">
+              <li>
+                เปิด Firebase Console โปรเจกต์ <code className="bg-white px-1 rounded border border-rose-200 font-bold">{FIREBASE_PROJECT_ID}</code>
+              </li>
+              <li>
+                ไปที่ <strong>Authentication &gt; Settings &gt; Authorized domains</strong>
+              </li>
+              <li>
+                กด <strong>Add domain</strong> แล้วเพิ่มโดเมน{" "}
+                <code className="bg-white px-1.5 py-0.5 rounded border border-rose-300 font-bold text-rose-950">{unauthorizedDomainHost}</code>
+              </li>
+            </ol>
+          </div>
+        )}
       </div>
 
       {/* Content Body */}

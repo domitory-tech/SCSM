@@ -38,7 +38,10 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isEmailVerified() && request.auth.token.email.lower() == 'domitory@pcccr.ac.th';
+      return isEmailVerified() &&
+        'email' in request.auth.token &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() == 'domitory@pcccr.ac.th';
     }
 
     function isAdmin() {
