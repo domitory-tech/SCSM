@@ -3,12 +3,8 @@ import {
   getFirestore,
   doc,
   getDoc,
-  setDoc,
-  getDocs,
-  collection,
-  deleteDoc,
-  writeBatch,
-  onSnapshot
+  getDocFromServer,
+  writeBatch
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -23,6 +19,19 @@ export const db = customDbId && customDbId !== "(default)"
   : getFirestore(app);
 
 export const auth = getAuth(app);
+
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, "test", "connection"));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("the client is offline")) {
+      console.error("Please check your Firebase configuration.");
+    }
+  }
+}
+if (typeof window !== "undefined") {
+  testConnection();
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -42,25 +51,39 @@ export interface DatabaseErrorInfo {
     email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: Array<{
+      providerId?: string | null;
+      email?: string | null;
+    }>;
   };
 }
 
 export type FirestoreErrorInfo = DatabaseErrorInfo;
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow: boolean = false) {
   const currentUser = auth.currentUser;
   const errInfo: DatabaseErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: currentUser?.uid,
-      email: currentUser?.email,
-      emailVerified: currentUser?.emailVerified,
-      isAnonymous: currentUser?.isAnonymous,
+      userId: currentUser?.uid ?? null,
+      email: currentUser?.email ?? null,
+      emailVerified: currentUser?.emailVerified ?? null,
+      isAnonymous: currentUser?.isAnonymous ?? null,
+      tenantId: currentUser?.tenantId ?? null,
+      providerInfo: currentUser?.providerData?.map((provider) => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
     },
     operationType,
     path
   };
-  console.warn("Database Error:", JSON.stringify(errInfo));
+  const serialized = JSON.stringify(errInfo);
+  console.error("Firestore Error: ", serialized);
+  if (shouldThrow) {
+    throw new Error(serialized);
+  }
   return errInfo;
 }
 
@@ -121,20 +144,20 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
   }
 }
 
-// Recursively remove undefined values from objects and arrays before persistence
+// Recursively remove undefined/null object fields before persistence
 export function cleanFirestoreData<T>(obj: T): T {
   if (obj === null || obj === undefined) {
     return null as any;
   }
   if (Array.isArray(obj)) {
     return obj
-      .filter((item) => item !== undefined)
+      .filter((item) => item !== undefined && item !== null)
       .map((item) => cleanFirestoreData(item)) as any;
   }
   if (typeof obj === "object" && !(obj instanceof Date)) {
     const cleaned: Record<string, any> = {};
     for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         cleaned[key] = cleanFirestoreData(value);
       }
     }
@@ -162,7 +185,11 @@ export async function commitChunkedSetDocs(
       batch.set(docRef, cleaned, { merge: true });
       count++;
     });
-    await batch.commit();
+    try {
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, collectionName, true);
+    }
   }
   return count;
 }

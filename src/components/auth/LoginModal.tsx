@@ -153,10 +153,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   const handleGoogleVerifySession = async () => {
-    if (!activeUserToLogin) {
-      setLoginError("กรุณาเลือกบัญชีผู้ใช้งานที่ต้องการยืนยันสิทธิ์ก่อน");
-      return;
-    }
     setIsSubmitting(true);
     setLoginError(null);
     try {
@@ -166,8 +162,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setLoginError("บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล");
         return;
       }
-      // If account has password configured, also require password unless user verifies identity;
-      // Google sign-in activates verified cloud session and logs into lowest/matched verified profile cleanly.
+
+      const verifiedEmail = (result.user.email || "").trim().toLowerCase();
+      if (verifiedEmail === "domitory@pcccr.ac.th") {
+        const existingAdmin = usersList.find((u) => u.roleLevel === 1);
+        const adminProfile: UserProfile = sanitizeUserForClient({
+          id: existingAdmin?.id || `google-${result.user.uid}`,
+          name: existingAdmin?.name || result.user.displayName || "ผู้ดูแลระบบหลัก",
+          phone: existingAdmin?.phone || "",
+          role: "SYSTEM_ADMIN",
+          roleLevel: 1,
+          roleCategory: "ADMIN",
+          roleCategoryName: "ผู้ดูแล",
+          roleLabel: existingAdmin?.roleLabel || "ผู้ดูแลระบบหลัก (Google Verified Admin)",
+          dormId: existingAdmin?.dormId || "",
+          allowedDormIds: existingAdmin?.allowedDormIds || [],
+          avatarUrl: existingAdmin?.avatarUrl || getDirectImageUrl(result.user.photoURL || "")
+        });
+        onLogin(adminProfile);
+        if (!standalone) onClose();
+        return;
+      }
+
       const fallbackVisitor: UserProfile =
         usersList.find((u) => u.roleLevel === 4) ||
         sanitizeUserForClient({
@@ -308,7 +324,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
         >
           <Shield className="w-3.5 h-3.5 text-emerald-600" />
-          <span>เข้าสู่ระบบผู้เยี่ยมชมด้วย Google</span>
+          <span>เข้าสู่ระบบ / ยืนยันสิทธิ์ด้วย Google</span>
         </button>
       </div>
 

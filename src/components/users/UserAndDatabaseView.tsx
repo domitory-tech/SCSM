@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition, RoleNavigationPermissions } from "../../types";
+import { UserProfile, UserRole, Dormitory, Student, Notice, DailyAttendance, SystemSettings, DormPosition, RoleNavigationPermissions } from "../../types";
 import { NavigationPermissionsTab } from "./NavigationPermissionsTab";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
 import { isValidPasswordStrength, sanitizeSafeImageUrl } from "../../utils/security";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
+import { auth } from "../../lib/firebase";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import {
   fetchUsers,
   addUser,
@@ -19,10 +21,11 @@ import {
   restoreDatabase,
   exportAttendanceAndNoticesDatabase,
   restoreAttendanceAndNoticesDatabase,
-  savePrimaryDatabase,
   syncLiveFirebaseDatabase,
   deleteSampleData,
   verifyAuthorizedAdminOrStaffPassword,
+  getDisplayedDatabaseSnapshot,
+  uploadCurrentDisplayedDatabaseToCloud,
   DeleteSampleDataOptions
 } from "../../services/api";
 import {
@@ -90,6 +93,10 @@ import { uploadImageToGoogleDrive } from "../../services/googleDrive";
 interface UserAndDatabaseViewProps {
   currentUser: UserProfile | null;
   dorms: Dormitory[];
+  students?: Student[];
+  notices?: Notice[];
+  attendanceRecords?: DailyAttendance[];
+  usersList?: UserProfile[];
   systemSettings?: SystemSettings;
   onUpdateSystemSettings?: (settings: SystemSettings) => void;
   onDataReset?: () => void;
@@ -137,6 +144,10 @@ const PRESET_AVATARS_META = [
 export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   currentUser,
   dorms,
+  students = [],
+  notices = [],
+  attendanceRecords = [],
+  usersList,
   systemSettings = DEFAULT_SYSTEM_SETTINGS,
   onUpdateSystemSettings,
   onDataReset,
@@ -605,9 +616,115 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     }
   };
 
-  // Central database sync & GitHub modal states
+  // Central database sync & upload states
   const [isInitializingDefaultDb, setIsInitializingDefaultDb] = useState<boolean>(false);
+  const [isUploadingCurrentDb, setIsUploadingCurrentDb] = useState<boolean>(false);
+  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string>(() => auth.currentUser?.email || "");
+  const [uploadCloudResult, setUploadCloudResult] = useState<{
+    message: string;
+    uploadedCounts: {
+      dorms: number;
+      students: number;
+      users: number;
+      notices: number;
+      attendance: number;
+      attendanceDates: number;
+    };
+    verifiedCloudCounts: {
+      dorms: number;
+      students: number;
+      users: number;
+      notices: number;
+      attendance: number;
+    };
+  } | null>(null);
+  const [uploadCloudError, setUploadCloudError] = useState<string | null>(null);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((fbUser) => {
+      setFirebaseAuthEmail(fbUser?.emailVerified && fbUser.email ? fbUser.email : "");
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const displayedSnapshot = React.useMemo(
+    () =>
+      getDisplayedDatabaseSnapshot({
+        dorms,
+        students,
+        users: usersList && usersList.length > 0 ? usersList : undefined,
+        notices,
+        attendance: attendanceRecords,
+        systemSettings: settingsForm
+      }),
+    [dorms, students, usersList, notices, attendanceRecords, settingsForm]
+  );
+
+  const displayedAttendanceDatesCount = React.useMemo(
+    () => new Set(displayedSnapshot.attendance.map((a) => a.date).filter(Boolean)).size,
+    [displayedSnapshot.attendance]
+  );
+
+  const handleGoogleSignInForDb = async () => {
+    setUploadCloudError(null);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    const result = await signInWithPopup(auth, provider);
+    if (!result.user?.emailVerified) {
+      throw new Error("บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล");
+    }
+    setFirebaseAuthEmail(result.user.email || "");
+    return result.user;
+  };
+
+  const handleUploadDisplayedDatabase = async () => {
+    setUploadCloudError(null);
+    setUploadCloudResult(null);
+
+    try {
+      if (!auth.currentUser || !auth.currentUser.emailVerified) {
+        await handleGoogleSignInForDb();
+      }
+    } catch (authErr: any) {
+      const errMsg =
+        authErr?.code === "auth/popup-closed-by-user"
+          ? "ยกเลิกการเข้าสู่ระบบด้วย Google กรุณากดอัพโหลดและเลือกบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : authErr?.message || "ไม่สามารถยืนยันตัวตนด้วยบัญชี Google ได้";
+      setUploadCloudError(errMsg);
+      showNotification("error", errMsg);
+      return;
+    }
+
+    setIsUploadingCurrentDb(true);
+    try {
+      const res = await uploadCurrentDisplayedDatabaseToCloud({
+        dorms,
+        students,
+        users: usersList && usersList.length > 0 ? usersList : users,
+        notices,
+        attendance: attendanceRecords,
+        systemSettings: settingsForm
+      });
+      setUploadCloudResult({
+        message: res.message,
+        uploadedCounts: res.uploadedCounts,
+        verifiedCloudCounts: res.verifiedCloudCounts
+      });
+      showNotification("success", res.message);
+      if (onDataReset) onDataReset();
+      await loadUsersList();
+    } catch (err: any) {
+      const rawMsg = String(err?.message || err || "");
+      const friendlyMsg = rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+        ? "ไม่มีสิทธิ์เขียนลงฐานข้อมูล กรุณาเข้าสู่ระบบ Google ด้วยบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+        : rawMsg || "เกิดข้อผิดพลาดในการอัพโหลดฐานข้อมูลลง Firestore";
+      setUploadCloudError(friendlyMsg);
+      showNotification("error", friendlyMsg);
+    } finally {
+      setIsUploadingCurrentDb(false);
+    }
+  };
 
   const handleInitializeDefaultDb = async () => {
     setIsInitializingDefaultDb(true);
@@ -2612,38 +2729,128 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                {/* Primary Database Sync Status */}
-                <div className="p-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 space-y-3 md:col-span-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-start sm:items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                      <Database className="w-5 h-5" />
+                {/* Upload Currently Displayed Dataset to Primary Cloud Database (Firestore) */}
+                <div className="p-5 rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/60 space-y-4 md:col-span-3 shadow-xs">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <CloudUpload className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-gray-900 text-sm md:text-base flex flex-wrap items-center gap-2">
+                          <span>อัพโหลดฐานข้อมูลชุดที่แสดงอยู่ตอนนี้ลงฐานข้อมูลกลาง (Firestore)</span>
+                          {firebaseAuthEmail ? (
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
+                              ✓ Google Auth: {firebaseAuthEmail}
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-900 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300">
+                              ต้องยืนยันสิทธิ์ Google (domitory@pcccr.ac.th) เพื่อเขียนข้อมูล
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-xs text-gray-600 mt-1">
+                          อัพโหลดข้อมูลทั้งหมดที่แสดงอยู่ในระบบตอนนี้เข้าสู่ Firestore โดยเรียงลำดับความสมบูรณ์ของข้อมูลหอพัก บัญชีผู้ใช้ นักเรียน เรื่องแจ้งอบรม และบันทึกการเช็คยอดนักเรียนทั้งหมด
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-gray-900 text-sm flex flex-wrap items-center gap-2">
-                        <span>ฐานข้อมูลกลางระบบ (Primary Cloud Database)</span>
-                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
-                          ✓ ระบบซิงค์ฐานข้อมูลพร้อมใช้งาน
-                        </span>
-                      </h4>
-                      <p className="text-xs text-gray-600 mt-1">
-                        ระบบเชื่อมต่อฐานข้อมูลกลางสำหรับโปรเจกต์ <strong>Student Counting System</strong> พร้อมระบบสำรองและซิงค์ข้อมูลอัตโนมัติ
-                      </p>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleUploadDisplayedDatabase}
+                        disabled={isUploadingCurrentDb}
+                        className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-60 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md"
+                      >
+                        {isUploadingCurrentDb ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>กำลังอัพโหลดลง Firestore...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CloudUpload className="w-4 h-4" />
+                            <span>อัพโหลดชุดข้อมูลปัจจุบันลงฐานข้อมูล</span>
+                          </>
+                        )}
+                      </button>
+                      {firebaseAuthEmail && firebaseAuthEmail.toLowerCase() !== "domitory@pcccr.ac.th" && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await handleGoogleSignInForDb();
+                            } catch (e: any) {
+                              showNotification("error", e?.message || "เปลี่ยนบัญชี Google ไม่สำเร็จ");
+                            }
+                          }}
+                          className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                        >
+                          สลับบัญชี Google
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await savePrimaryDatabase();
-                        showNotification("success", "บันทึกและซิงค์ข้อมูลหลักสำเร็จเรียบร้อยแล้ว");
-                      } catch (e: any) {
-                        showNotification("error", e.message || "ไม่สามารถบันทึกฐานข้อมูลหลักได้");
-                      }
-                    }}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 shadow-xs"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    <span>ซิงค์ข้อมูลหลัก</span>
-                  </button>
+
+                  {/* Currently Displayed Dataset Summary Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                    <div className="p-3 rounded-xl bg-purple-50 border-2 border-purple-200">
+                      <div className="text-[11px] font-bold text-purple-800">ข้อมูลเช็คยอดนักเรียน</div>
+                      <div className="text-lg font-black text-purple-900 mt-0.5">
+                        {displayedSnapshot.attendance.length} <span className="text-xs font-bold">รายการ</span>
+                      </div>
+                      <div className="text-[10px] font-semibold text-purple-700">
+                        ครอบคลุม {displayedAttendanceDatesCount} วัน
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[11px] font-bold text-slate-500">รายชื่อนักเรียน</div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {displayedSnapshot.students.length} <span className="text-xs font-bold">คน</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">ทุกหอพัก</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[11px] font-bold text-slate-500">หอพักนักเรียน</div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {displayedSnapshot.dorms.length} <span className="text-xs font-bold">แห่ง</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">โครงสร้างหอพัก</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[11px] font-bold text-slate-500">เรื่องแจ้งอบรม</div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {displayedSnapshot.notices.length} <span className="text-xs font-bold">เรื่อง</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">ประกาศประจำวัน</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[11px] font-bold text-slate-500">บัญชีผู้ใช้งาน</div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {displayedSnapshot.users.length} <span className="text-xs font-bold">บัญชี</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">สิทธิ์การเข้าถึง</div>
+                    </div>
+                  </div>
+
+                  {uploadCloudError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{uploadCloudError}</span>
+                    </div>
+                  )}
+
+                  {uploadCloudResult && (
+                    <div className="p-3.5 rounded-xl bg-emerald-100/70 border border-emerald-300 text-xs text-emerald-950 space-y-1">
+                      <div className="font-extrabold flex items-center gap-1.5 text-emerald-900">
+                        <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{uploadCloudResult.message}</span>
+                      </div>
+                      <div className="text-[11px] text-emerald-800 font-semibold">
+                        ตรวจสอบยอดบน Firestore จริงแล้ว: เช็คยอดนักเรียน {uploadCloudResult.verifiedCloudCounts.attendance} รายการ • นักเรียน {uploadCloudResult.verifiedCloudCounts.students} คน • หอพัก {uploadCloudResult.verifiedCloudCounts.dorms} แห่ง • เรื่องแจ้งอบรม {uploadCloudResult.verifiedCloudCounts.notices} เรื่อง • ผู้ใช้ {uploadCloudResult.verifiedCloudCounts.users} บัญชี
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               {/* Backup Export */}

@@ -64,7 +64,7 @@
         "dormId": { "type": "string", "maxLength": 128 },
         "dormPosition": { "type": "string", "maxLength": 80 },
         "allowedDormIds": { "type": "array" },
-        "avatarUrl": { "type": "string", "maxLength": 4096 },
+        "avatarUrl": { "type": "string", "maxLength": 32768 },
         "passwordHash": { "type": "string", "maxLength": 512 },
         "hasPassword": { "type": "boolean" }
       },
@@ -110,7 +110,7 @@
         "schoolNameEn": { "type": "string", "maxLength": 200 },
         "schoolAcronymTh": { "type": "string", "maxLength": 40 },
         "schoolAcronymEn": { "type": "string", "maxLength": 40 },
-        "schoolLogoUrl": { "type": "string", "maxLength": 16384 },
+        "schoolLogoUrl": { "type": "string", "maxLength": 65536 },
         "systemNameTh": { "type": "string", "maxLength": 200 },
         "systemNameEn": { "type": "string", "maxLength": 200 },
         "systemTitleTh": { "type": "string", "maxLength": 200 },

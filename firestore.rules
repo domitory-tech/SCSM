@@ -37,8 +37,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isBootstrappedAdmin() {
+      return isEmailVerified() && request.auth.token.email == 'domitory@pcccr.ac.th';
+    }
+
     function isAdmin() {
       return isEmailVerified() && (
+        isBootstrappedAdmin() ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (
           exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -105,7 +110,7 @@ service cloud.firestore {
         (!('grade' in data) || (data.grade is string && data.grade.size() <= 20)) &&
         (!('room' in data) || (data.room is number && data.room >= 0 && data.room <= 100)) &&
         (!('dormRoom' in data) || (data.dormRoom is string && data.dormRoom.size() <= 40)) &&
-        (!('dormBed' in data) || (data.dormBed is string && data.dormBed.size() <= 20)) &&
+        (!('dormBed' in data) || ((data.dormBed is string && data.dormBed.size() <= 20) || data.dormBed is number)) &&
         (!('bed' in data) || ((data.bed is string && data.bed.size() <= 20) || data.bed is number)) &&
         (!('gender' in data) || data.gender in ['male', 'female']);
     }
@@ -129,7 +134,7 @@ service cloud.firestore {
         (!('dormId' in data) || (data.dormId is string && data.dormId.size() <= 128)) &&
         (!('dormPosition' in data) || (data.dormPosition is string && data.dormPosition.size() <= 80)) &&
         (!('allowedDormIds' in data) || (data.allowedDormIds is list && data.allowedDormIds.size() <= 20 && (data.allowedDormIds.size() == 0 || data.allowedDormIds[0] is string))) &&
-        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 4096)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 32768)) &&
         (!('passwordHash' in data) || (data.passwordHash is string && data.passwordHash.size() <= 512)) &&
         (!('hasPassword' in data) || data.hasPassword is bool);
     }
@@ -173,9 +178,15 @@ service cloud.firestore {
         ]) &&
         (!('schoolNameTh' in data) || (data.schoolNameTh is string && data.schoolNameTh.size() <= 200)) &&
         (!('schoolNameEn' in data) || (data.schoolNameEn is string && data.schoolNameEn.size() <= 200)) &&
-        (!('schoolLogoUrl' in data) || (data.schoolLogoUrl is string && data.schoolLogoUrl.size() <= 16384)) &&
+        (!('schoolAcronymTh' in data) || (data.schoolAcronymTh is string && data.schoolAcronymTh.size() <= 40)) &&
+        (!('schoolAcronymEn' in data) || (data.schoolAcronymEn is string && data.schoolAcronymEn.size() <= 40)) &&
+        (!('schoolLogoUrl' in data) || (data.schoolLogoUrl is string && data.schoolLogoUrl.size() <= 65536)) &&
         (!('systemNameTh' in data) || (data.systemNameTh is string && data.systemNameTh.size() <= 200)) &&
         (!('systemNameEn' in data) || (data.systemNameEn is string && data.systemNameEn.size() <= 200)) &&
+        (!('systemTitleTh' in data) || (data.systemTitleTh is string && data.systemTitleTh.size() <= 200)) &&
+        (!('systemTitleEn' in data) || (data.systemTitleEn is string && data.systemTitleEn.size() <= 200)) &&
+        (!('systemIcon' in data) || (data.systemIcon is string && data.systemIcon.size() <= 40)) &&
+        (!('lastUpdatedDate' in data) || (data.lastUpdatedDate is string && data.lastUpdatedDate.size() <= 80)) &&
         (!('maintenanceTitle' in data) || (data.maintenanceTitle is string && data.maintenanceTitle.size() <= 200)) &&
         (!('maintenanceMessage' in data) || (data.maintenanceMessage is string && data.maintenanceMessage.size() <= 1000)) &&
         (!('showMaintenancePopup' in data) || data.showMaintenancePopup is bool) &&
@@ -183,6 +194,9 @@ service cloud.firestore {
         (!('isAttendancePaused' in data) || data.isAttendancePaused is bool) &&
         (!('pausedDormIds' in data) || (data.pausedDormIds is list && data.pausedDormIds.size() <= 50 && (data.pausedDormIds.size() == 0 || data.pausedDormIds[0] is string))) &&
         (!('attendancePauseReason' in data) || (data.attendancePauseReason is string && data.attendancePauseReason.size() <= 300)) &&
+        (!('attendancePausedAt' in data) || (data.attendancePausedAt is string && data.attendancePausedAt.size() <= 64)) &&
+        (!('attendancePausedBy' in data) || (data.attendancePausedBy is string && data.attendancePausedBy.size() <= 120)) &&
+        (!('navigationPermissions' in data) || data.navigationPermissions is map) &&
         (!('guestRequiresLogin' in data) || data.guestRequiresLogin is bool);
     }
 
@@ -231,7 +245,7 @@ service cloud.firestore {
       allow get: if isValidId(dormId) && isEmailVerified();
       allow list: if isEmailVerified();
       allow create: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
+      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && incoming().id == existing().id && isStaffOrAdmin();
       allow delete: if isValidId(dormId) && isAdmin();
     }
 
@@ -240,7 +254,8 @@ service cloud.firestore {
       allow list: if isEmailVerified();
       allow create: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin() &&
         exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
-      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin();
+      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && incoming().id == existing().id && isStaffOrAdmin() &&
+        exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
       allow delete: if isValidId(studentId) && isStaffOrAdmin();
     }
 
@@ -248,7 +263,7 @@ service cloud.firestore {
       allow get: if isValidId(noticeId) && isEmailVerified();
       allow list: if isEmailVerified();
       allow create: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
+      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && incoming().id == existing().id && isStaffOrAdmin();
       allow delete: if isValidId(noticeId) && isStaffOrAdmin();
     }
 
@@ -263,6 +278,7 @@ service cloud.firestore {
       allow update: if isValidId(attendanceId) &&
         isEmailVerified() &&
         isValidDailyAttendance(incoming()) &&
+        incoming().id == existing().id &&
         incoming().date == existing().date &&
         incoming().dormId == existing().dormId &&
         (

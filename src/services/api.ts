@@ -10,9 +10,12 @@ import {
 } from "firebase/firestore";
 import {
   db,
+  auth,
   commitChunkedSetDocs,
   commitChunkedDeleteDocs,
   cleanFirestoreData,
+  handleFirestoreError,
+  OperationType,
   withTimeout
 } from "../lib/firebase";
 import {
@@ -176,24 +179,40 @@ export function updateLocalCacheList<T extends { id: string }>(
   return updated;
 }
 
+function mergeCloudWithUnsyncedLocal<T extends { id: string }>(
+  cloudItems: T[],
+  localItems: T[]
+): T[] {
+  if (!localItems || localItems.length === 0) return cloudItems;
+  if (!cloudItems || cloudItems.length === 0) return localItems;
+  const map = new Map<string, T>();
+  localItems.forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  cloudItems.forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
 // ----------------------------------------------------------------------
 // Dormitories API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchDorms(): Promise<Dormitory[]> {
+  const localDorms = getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
   try {
     const docs = await readCollectionCached("dorms", 3500);
     if (docs.length > 0) {
-      const dorms = docs.map((d) => ({ id: d.id, ...d.data } as Dormitory));
-      const sorted = dorms.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      const cloudDorms = docs.map((d) => ({ id: d.id, ...d.data } as Dormitory));
+      const merged = mergeCloudWithUnsyncedLocal(cloudDorms, localDorms);
+      const sorted = merged.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setLocalCache(CACHE_KEYS.DORMS, sorted);
       return sorted;
     }
-    // If empty in primary database, return empty array (do NOT seed mock data)
-    setLocalCache(CACHE_KEYS.DORMS, []);
-    return [];
+    return localDorms;
   } catch (err: any) {
     console.warn("Primary database fetchDorms offline fallback:", err?.message || err);
-    return getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
+    return localDorms;
   }
 }
 
@@ -253,12 +272,13 @@ export async function fetchStudents(params?: {
   grade?: string;
   room?: number;
 }): Promise<Student[]> {
+  const localStudents = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
   try {
     const docs = await readCollectionCached("students", 3500);
     let students: Student[] = [];
 
     if (docs.length > 0) {
-      students = docs.map((d) => {
+      const cloudStudents = docs.map((d) => {
         const raw = d.data;
         const bedVal = (raw.dormBed !== undefined && raw.dormBed !== null && String(raw.dormBed).trim() !== "")
           ? String(raw.dormBed).trim()
@@ -272,11 +292,21 @@ export async function fetchStudents(params?: {
           bed: bedVal
         } as Student;
       });
+      students = mergeCloudWithUnsyncedLocal(cloudStudents, localStudents);
       setLocalCache(CACHE_KEYS.STUDENTS, students);
     } else {
-      // If collection is empty in primary database, return empty array (do NOT seed mock data)
-      setLocalCache(CACHE_KEYS.STUDENTS, []);
-      students = [];
+      students = localStudents.map((s) => {
+        const bedVal = (s.dormBed !== undefined && s.dormBed !== null && String(s.dormBed).trim() !== "")
+          ? String(s.dormBed).trim()
+          : ((s as any).bed !== undefined && (s as any).bed !== null ? String((s as any).bed).trim() : "");
+        return {
+          ...s,
+          studentId: formatStudentId(s.studentId),
+          grade: formatGrade(s.grade),
+          dormBed: bedVal,
+          bed: bedVal
+        };
+      });
     }
 
     if (params?.dormId) {
@@ -291,7 +321,7 @@ export async function fetchStudents(params?: {
     return students.sort((a, b) => (a.no || 0) - (b.no || 0));
   } catch (err: any) {
     console.warn("Primary database fetchStudents offline fallback:", err?.message || err);
-    let students = (getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || []).map((s) => {
+    let students = localStudents.map((s) => {
       const bedVal = (s.dormBed !== undefined && s.dormBed !== null && String(s.dormBed).trim() !== "")
         ? String(s.dormBed).trim()
         : ((s as any).bed !== undefined && (s as any).bed !== null ? String((s as any).bed).trim() : "");
@@ -1210,41 +1240,56 @@ export async function restoreDatabase(rawData: any) {
   }
   let restoredCount = 0;
 
-  if (Array.isArray(data.dorms) && data.dorms.length > 0) {
-    setLocalCache(CACHE_KEYS.DORMS, data.dorms);
+  const rawDorms = Array.isArray(data.dorms)
+    ? data.dorms
+    : Array.isArray(data.dormitories)
+    ? data.dormitories
+    : [];
+  if (rawDorms.length > 0) {
+    const cleanDorms = rawDorms.map(sanitizeDormForCloud);
+    setLocalCache(CACHE_KEYS.DORMS, cleanDorms);
     try {
-      restoredCount += await commitChunkedSetDocs("dorms", data.dorms);
+      restoredCount += await commitChunkedSetDocs("dorms", cleanDorms);
     } catch (e) { console.warn("Restored dorms offline:", e); }
   }
   if (Array.isArray(data.students) && data.students.length > 0) {
-    setLocalCache(CACHE_KEYS.STUDENTS, data.students);
+    const cleanStudents = data.students.map((s: any, idx: number) => sanitizeStudentForCloud(s, idx));
+    setLocalCache(CACHE_KEYS.STUDENTS, cleanStudents);
     try {
-      restoredCount += await commitChunkedSetDocs("students", data.students);
+      restoredCount += await commitChunkedSetDocs("students", cleanStudents);
     } catch (e) { console.warn("Restored students offline:", e); }
   }
   if (Array.isArray(data.users) && data.users.length > 0) {
-    const safeUsers = data.users.map(sanitizeUserForClient);
-    setLocalCache(CACHE_KEYS.USERS, safeUsers);
+    const hashMap = getAuthHashMap();
+    const cleanUsers = data.users.map((u: any) => sanitizeUserForCloud(u, hashMap));
+    setLocalCache(CACHE_KEYS.USERS, cleanUsers.map(sanitizeUserForClient));
     try {
-      restoredCount += await commitChunkedSetDocs("users", safeUsers);
+      restoredCount += await commitChunkedSetDocs("users", cleanUsers);
     } catch (e) { console.warn("Restored users offline:", e); }
   }
   if (Array.isArray(data.notices) && data.notices.length > 0) {
-    setLocalCache(CACHE_KEYS.NOTICES, data.notices);
+    const cleanNotices = data.notices
+      .map((n: any) => sanitizeNoticeForCloud(n))
+      .filter((n: Notice | null): n is Notice => n !== null);
+    setLocalCache(CACHE_KEYS.NOTICES, cleanNotices);
     try {
-      restoredCount += await commitChunkedSetDocs("notices", data.notices);
+      restoredCount += await commitChunkedSetDocs("notices", cleanNotices);
     } catch (e) { console.warn("Restored notices offline:", e); }
   }
   if (Array.isArray(data.attendance) && data.attendance.length > 0) {
-    setLocalCache(CACHE_KEYS.ATTENDANCE, data.attendance);
+    const cleanAttendance = data.attendance
+      .map((a: any) => sanitizeAttendanceForCloud(a))
+      .filter((a: DailyAttendance | null): a is DailyAttendance => a !== null);
+    setLocalCache(CACHE_KEYS.ATTENDANCE, cleanAttendance);
     try {
-      restoredCount += await commitChunkedSetDocs("attendance", data.attendance);
+      restoredCount += await commitChunkedSetDocs("attendance", cleanAttendance);
     } catch (e) { console.warn("Restored attendance offline:", e); }
   }
   if (data.systemSettings && typeof data.systemSettings === "object") {
-    setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, data.systemSettings);
+    const cleanSettings = sanitizeSettingsForCloud(data.systemSettings);
+    setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, cleanSettings);
     try {
-      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(data.systemSettings), { merge: true });
+      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(cleanSettings), { merge: true });
     } catch (e) { console.warn("Restored settings offline:", e); }
   }
 
@@ -1308,6 +1353,387 @@ export async function syncLiveFirebaseDatabase() {
 
 export const initializeDefaultFirebaseDatabase = syncLiveFirebaseDatabase;
 
+function sanitizeIdForRule(rawId: any, fallbackPrefix: string): string {
+  const cleaned = String(rawId || "").trim().replace(/[^a-zA-Z0-9_\-]/g, "_");
+  if (cleaned.length > 0 && cleaned.length <= 128) return cleaned;
+  return `${fallbackPrefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function sanitizeDormForCloud(d: any): Dormitory {
+  const id = sanitizeIdForRule(d?.id, "dorm");
+  const typeVal: "male" | "female" | "mixed" =
+    d?.type === "female" || d?.type === "mixed" ? d.type : "male";
+  const out: Dormitory = {
+    id,
+    name: String(d?.name || id).trim().slice(0, 120) || id,
+    type: typeVal,
+    teacherName: String(d?.teacherName || "").trim().slice(0, 160),
+    teacherPhone: String(d?.teacherPhone || "").trim().slice(0, 40),
+    capacity: Number.isFinite(Number(d?.capacity)) ? Math.max(0, Math.min(5000, Math.floor(Number(d.capacity)))) : 80
+  };
+  if (d?.gender === "male" || d?.gender === "female" || d?.gender === "mixed") {
+    out.gender = d.gender;
+  }
+  if (Array.isArray(d?.teachers)) {
+    out.teachers = d.teachers.slice(0, 30).map((t: any) => ({
+      ...(t?.id ? { id: String(t.id).slice(0, 128) } : {}),
+      name: String(t?.name || "").trim().slice(0, 120),
+      ...(t?.phone ? { phone: String(t.phone).trim().slice(0, 40) } : {}),
+      ...(t?.position ? { position: String(t.position).trim().slice(0, 80) } : {}),
+      isHead: Boolean(t?.isHead)
+    }));
+  }
+  if (d?.assignedTeacherId) {
+    out.assignedTeacherId = String(d.assignedTeacherId).trim().slice(0, 128);
+  }
+  return out;
+}
+
+function sanitizeStudentForCloud(s: any, idx: number): Student {
+  const id = sanitizeIdForRule(s?.id, "std");
+  const sidRaw = formatStudentId(s?.studentId).replace(/\D/g, "");
+  const studentId = sidRaw.length === 5 ? sidRaw : sidRaw.padStart(5, "0").slice(-5);
+  const bedVal = (s?.dormBed !== undefined && s?.dormBed !== null && String(s.dormBed).trim() !== "")
+    ? String(s.dormBed).trim().slice(0, 20)
+    : ((s?.bed !== undefined && s?.bed !== null) ? String(s.bed).trim().slice(0, 20) : "");
+  const out: Student = {
+    id,
+    studentId: /^[0-9]{5}$/.test(studentId) ? studentId : generateDefault5DigitStudentId(idx + 1),
+    no: Number.isFinite(Number(s?.no)) ? Math.max(0, Math.min(2000, Math.floor(Number(s.no)))) : idx + 1,
+    title: String(s?.title || "").trim().slice(0, 40),
+    firstName: String(s?.firstName || "-").trim().slice(0, 100) || "-",
+    lastName: String(s?.lastName || "-").trim().slice(0, 100) || "-",
+    grade: formatGrade(s?.grade).slice(0, 20),
+    room: Number.isFinite(Number(s?.room)) ? Math.max(0, Math.min(100, Math.floor(Number(s.room)))) : 1,
+    dormId: sanitizeIdForRule(s?.dormId || "dorm-1", "dorm"),
+    dormRoom: String(s?.dormRoom || "101").trim().slice(0, 40),
+    gender: s?.gender === "female" ? "female" : "male"
+  };
+  if (s?.nickname) out.nickname = String(s.nickname).trim().slice(0, 60);
+  if (bedVal) {
+    out.dormBed = bedVal;
+    out.bed = bedVal;
+  }
+  return out;
+}
+
+function sanitizeUserForCloud(u: any, hashMap: Record<string, string>): Record<string, any> {
+  const id = sanitizeIdForRule(u?.id, "user");
+  const allowedRoles = ["ADMIN_OFFICER", "HEAD_TEACHER", "DORM_TEACHER", "DEPUTY_DIRECTOR", "SYSTEM_ADMIN", "GUEST"];
+  const role = allowedRoles.includes(u?.role) ? u.role : "DORM_TEACHER";
+  const roleLevel = [1, 2, 3, 4].includes(Number(u?.roleLevel)) ? Number(u.roleLevel) : 3;
+  const allowedCats = ["ADMIN", "STAFF", "DORM_TEACHER", "GUEST"];
+  const roleCategory = allowedCats.includes(u?.roleCategory)
+    ? u.roleCategory
+    : roleLevel === 1 ? "ADMIN" : roleLevel === 2 ? "STAFF" : roleLevel === 4 ? "GUEST" : "DORM_TEACHER";
+
+  const payload: Record<string, any> = {
+    id,
+    name: String(u?.name || id).trim().slice(0, 120) || id,
+    role,
+    roleLevel,
+    roleCategory,
+    hasPassword: Boolean(u?.hasPassword || hashMap[id] || u?.passwordHash)
+  };
+  if (u?.roleCategoryName) payload.roleCategoryName = String(u.roleCategoryName).trim().slice(0, 80);
+  if (u?.roleLabel) payload.roleLabel = String(u.roleLabel).trim().slice(0, 160);
+  if (u?.phone) payload.phone = String(u.phone).trim().slice(0, 40);
+  if (u?.dormId) payload.dormId = String(u.dormId).trim().slice(0, 128);
+  if (u?.dormPosition) payload.dormPosition = String(u.dormPosition).trim().slice(0, 80);
+  if (Array.isArray(u?.allowedDormIds)) {
+    payload.allowedDormIds = u.allowedDormIds
+      .filter((x: any) => typeof x === "string" && x.trim().length > 0)
+      .slice(0, 20);
+  }
+  if (typeof u?.avatarUrl === "string" && u.avatarUrl.trim().length > 0 && u.avatarUrl.length <= 32768) {
+    payload.avatarUrl = u.avatarUrl;
+  }
+  const hashCandidate =
+    (typeof u?.passwordHash === "string" && u.passwordHash.startsWith("pbkdf2_sha256$") && u.passwordHash.length <= 512)
+      ? u.passwordHash
+      : (typeof hashMap[id] === "string" && hashMap[id].startsWith("pbkdf2_sha256$") && hashMap[id].length <= 512
+          ? hashMap[id]
+          : undefined);
+  if (hashCandidate) {
+    payload.passwordHash = hashCandidate;
+    payload.hasPassword = true;
+  }
+  return payload;
+}
+
+function sanitizeNoticeForCloud(n: any): Notice | null {
+  const dateStr = String(n?.date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const title = String(n?.title || "").trim().slice(0, 300);
+  if (!title) return null;
+  const id = sanitizeIdForRule(n?.id, "notice");
+  const out: Notice = {
+    id,
+    date: dateStr,
+    title,
+    topics: Array.isArray(n?.topics)
+      ? n.topics.filter((t: any) => typeof t === "string").map((t: string) => t.trim()).filter(Boolean).slice(0, 30)
+      : [],
+    createdBy: String(n?.createdBy || "เจ้าหน้าที่").trim().slice(0, 120),
+    createdAt: String(n?.createdAt || new Date().toISOString()).trim().slice(0, 64)
+  };
+  return out;
+}
+
+function sanitizeAttendanceForCloud(r: any): DailyAttendance | null {
+  const dateStr = String(r?.date || "").trim();
+  const dormId = sanitizeIdForRule(r?.dormId, "dorm");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !dormId) return null;
+  const rawId = String(r?.id || `${dateStr}_${dormId}`).trim();
+  const id = /^[a-zA-Z0-9_\-]+$/.test(rawId) && rawId.length <= 128
+    ? rawId
+    : sanitizeIdForRule(`${dateStr}_${dormId}`, "att");
+  const allowedStatus = ["CHECKED", "HOME_BREAK", "SEMESTER_BREAK", "PENDING"];
+  const status: DailyAttendance["status"] = allowedStatus.includes(r?.status) ? r.status : "CHECKED";
+  const records: StudentAttendanceRecord[] = Array.isArray(r?.records)
+    ? r.records.slice(0, 500).map((rec: any) => ({
+        studentId: formatStudentId(rec?.studentId),
+        ...(rec?.studentName ? { studentName: String(rec.studentName).trim().slice(0, 140) } : {}),
+        status: rec?.status || "PRESENT",
+        ...(rec?.reason ? { reason: String(rec.reason).trim().slice(0, 300) } : {}),
+        ...(rec?.note ? { note: String(rec.note).trim().slice(0, 300) } : {})
+      }))
+    : [];
+
+  const out: DailyAttendance = {
+    id,
+    date: dateStr,
+    dormId,
+    isHomeBreak: Boolean(r?.isHomeBreak),
+    status,
+    teacherOrientationNotes: Array.isArray(r?.teacherOrientationNotes)
+      ? r.teacherOrientationNotes
+          .filter((n: any) => typeof n === "string")
+          .map((n: string) => n.trim().slice(0, 300))
+          .filter(Boolean)
+          .slice(0, 30)
+      : [],
+    records
+  };
+  if (r?.checkedAt) out.checkedAt = String(r.checkedAt).trim().slice(0, 64);
+  if (r?.checkedBy) out.checkedBy = String(r.checkedBy).trim().slice(0, 120);
+  return out;
+}
+
+function sanitizeSettingsForCloud(s: any): SystemSettings {
+  const src = { ...DEFAULT_SYSTEM_SETTINGS, ...(s || {}) };
+  const allowedKeys = [
+    "schoolNameTh", "schoolNameEn", "schoolAcronymTh", "schoolAcronymEn",
+    "schoolLogoUrl", "systemNameTh", "systemNameEn", "systemTitleTh", "systemTitleEn",
+    "systemIcon", "lastUpdatedDate", "maintenanceTitle", "maintenanceMessage",
+    "showMaintenancePopup", "showMaintenanceBox", "isAttendancePaused", "pausedDormIds",
+    "attendancePauseReason", "attendancePausedAt", "attendancePausedBy",
+    "navigationPermissions", "guestRequiresLogin"
+  ] as const;
+  const out: Record<string, any> = {};
+  for (const key of allowedKeys) {
+    const val = (src as any)[key];
+    if (val !== undefined && val !== null) {
+      out[key] = val;
+    }
+  }
+  if (typeof out.schoolNameTh === "string") out.schoolNameTh = out.schoolNameTh.slice(0, 200);
+  if (typeof out.schoolNameEn === "string") out.schoolNameEn = out.schoolNameEn.slice(0, 200);
+  if (typeof out.schoolAcronymTh === "string") out.schoolAcronymTh = out.schoolAcronymTh.slice(0, 40);
+  if (typeof out.schoolAcronymEn === "string") out.schoolAcronymEn = out.schoolAcronymEn.slice(0, 40);
+  if (typeof out.schoolLogoUrl === "string") out.schoolLogoUrl = out.schoolLogoUrl.slice(0, 65536);
+  if (typeof out.systemNameTh === "string") out.systemNameTh = out.systemNameTh.slice(0, 200);
+  if (typeof out.systemNameEn === "string") out.systemNameEn = out.systemNameEn.slice(0, 200);
+  if (typeof out.systemTitleTh === "string") out.systemTitleTh = out.systemTitleTh.slice(0, 200);
+  if (typeof out.systemTitleEn === "string") out.systemTitleEn = out.systemTitleEn.slice(0, 200);
+  if (typeof out.systemIcon === "string") out.systemIcon = out.systemIcon.slice(0, 40);
+  if (typeof out.lastUpdatedDate === "string") out.lastUpdatedDate = out.lastUpdatedDate.slice(0, 80);
+  if (typeof out.maintenanceTitle === "string") out.maintenanceTitle = out.maintenanceTitle.slice(0, 200);
+  if (typeof out.maintenanceMessage === "string") out.maintenanceMessage = out.maintenanceMessage.slice(0, 1000);
+  if (typeof out.attendancePauseReason === "string") out.attendancePauseReason = out.attendancePauseReason.slice(0, 300);
+  if (typeof out.attendancePausedAt === "string") out.attendancePausedAt = out.attendancePausedAt.slice(0, 64);
+  if (typeof out.attendancePausedBy === "string") out.attendancePausedBy = out.attendancePausedBy.slice(0, 120);
+  if (Array.isArray(out.pausedDormIds)) {
+    out.pausedDormIds = out.pausedDormIds.filter((x: any) => typeof x === "string").slice(0, 50);
+  }
+  return out as SystemSettings;
+}
+
+export interface DisplayedDatabaseSnapshot {
+  dorms: Dormitory[];
+  students: Student[];
+  users: UserProfile[];
+  notices: Notice[];
+  attendance: DailyAttendance[];
+  systemSettings: SystemSettings;
+}
+
+export function getDisplayedDatabaseSnapshot(liveData?: {
+  dorms?: Dormitory[];
+  students?: Student[];
+  users?: UserProfile[];
+  notices?: Notice[];
+  attendance?: DailyAttendance[];
+  systemSettings?: SystemSettings;
+}): DisplayedDatabaseSnapshot {
+  const cachedDorms = getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
+  const cachedStudents = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
+  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+  const cachedNotices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
+  const cachedAttendance = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+  const cachedSettings = getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
+
+  const dorms = mergeCloudWithUnsyncedLocal(liveData?.dorms || [], cachedDorms);
+  const students = mergeCloudWithUnsyncedLocal(liveData?.students || [], cachedStudents);
+  const users = mergeCloudWithUnsyncedLocal(
+    liveData?.users || [],
+    cachedUsers.length > 0 ? cachedUsers : DEFAULT_SYSTEM_USERS
+  );
+  const notices = mergeCloudWithUnsyncedLocal(liveData?.notices || [], cachedNotices);
+  const attendance = mergeCloudWithUnsyncedLocal(liveData?.attendance || [], cachedAttendance);
+  const systemSettings = sanitizeSettingsForCloud(liveData?.systemSettings || cachedSettings);
+
+  return { dorms, students, users, notices, attendance, systemSettings };
+}
+
+export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
+  dorms?: Dormitory[];
+  students?: Student[];
+  users?: UserProfile[];
+  notices?: Notice[];
+  attendance?: DailyAttendance[];
+  systemSettings?: SystemSettings;
+}): Promise<{
+  success: boolean;
+  message: string;
+  uploadedCounts: {
+    dorms: number;
+    students: number;
+    users: number;
+    notices: number;
+    attendance: number;
+    attendanceDates: number;
+  };
+  verifiedCloudCounts: {
+    dorms: number;
+    students: number;
+    users: number;
+    notices: number;
+    attendance: number;
+  };
+}> {
+  if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    throw new Error("AUTH_REQUIRED: กรุณายืนยันตัวตนด้วยบัญชี Google (domitory@pcccr.ac.th) ก่อนอัพโหลดข้อมูลลงฐานข้อมูล");
+  }
+
+  const snapshot = getDisplayedDatabaseSnapshot(liveData);
+  const hashMap = getAuthHashMap();
+
+  const dormsMap = new Map<string, Dormitory>();
+  snapshot.dorms.forEach((d) => {
+    const clean = sanitizeDormForCloud(d);
+    dormsMap.set(clean.id, clean);
+  });
+
+  const studentsToUpload = snapshot.students.map((s, idx) => sanitizeStudentForCloud(s, idx));
+  const noticesToUpload = snapshot.notices
+    .map((n) => sanitizeNoticeForCloud(n))
+    .filter((n): n is Notice => n !== null);
+  const attendanceToUpload = snapshot.attendance
+    .map((a) => sanitizeAttendanceForCloud(a))
+    .filter((a): a is DailyAttendance => a !== null);
+
+  // Ensure every dormId referenced by students or attendance exists in dormsToUpload
+  // so Firestore rules `exists(/dorms/$(dormId))` checks always succeed
+  studentsToUpload.forEach((s) => {
+    if (!dormsMap.has(s.dormId)) {
+      dormsMap.set(s.dormId, sanitizeDormForCloud({ id: s.dormId, name: s.dormId, type: "male" }));
+    }
+  });
+  attendanceToUpload.forEach((a) => {
+    if (!dormsMap.has(a.dormId)) {
+      dormsMap.set(a.dormId, sanitizeDormForCloud({ id: a.dormId, name: a.dormId, type: "male" }));
+    }
+  });
+
+  const dormsToUpload = Array.from(dormsMap.values());
+  const usersToUpload = snapshot.users.map((u) => sanitizeUserForCloud(u, hashMap));
+  const settingsToUpload = sanitizeSettingsForCloud(snapshot.systemSettings);
+
+  // 1. Upload dorms FIRST (required by student and attendance exists() rules)
+  const dormCount = await commitChunkedSetDocs("dorms", dormsToUpload);
+  // 2. Upload users
+  const userCount = await commitChunkedSetDocs("users", usersToUpload);
+  // 3. Upload students
+  const studentCount = await commitChunkedSetDocs("students", studentsToUpload);
+  // 4. Upload notices
+  const noticeCount = await commitChunkedSetDocs("notices", noticesToUpload);
+  // 5. Upload attendance records (highlight!)
+  const attendanceCount = await commitChunkedSetDocs("attendance", attendanceToUpload);
+  // 6. Upload system settings & saved marker
+  try {
+    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settingsToUpload), { merge: true });
+    await setDoc(doc(db, "_system_status", "saved"), {
+      lastSavedAt: new Date().toISOString(),
+      status: "SAVED"
+    }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, "system_settings/config", true);
+  }
+
+  // Update local cache with sanitized dataset
+  setLocalCache(CACHE_KEYS.DORMS, dormsToUpload);
+  setLocalCache(CACHE_KEYS.STUDENTS, studentsToUpload);
+  setLocalCache(CACHE_KEYS.USERS, usersToUpload.map(sanitizeUserForClient));
+  setLocalCache(CACHE_KEYS.NOTICES, noticesToUpload);
+  setLocalCache(CACHE_KEYS.ATTENDANCE, attendanceToUpload);
+  setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settingsToUpload);
+  invalidateFirestoreReadCache();
+
+  // Verify live cloud counts directly from Firestore
+  let verifiedCloudCounts = {
+    dorms: dormCount,
+    students: studentCount,
+    users: userCount,
+    notices: noticeCount,
+    attendance: attendanceCount
+  };
+  try {
+    const [dSnap, sSnap, uSnap, nSnap, aSnap] = await Promise.all([
+      getDocs(collection(db, "dorms")),
+      getDocs(collection(db, "students")),
+      getDocs(collection(db, "users")),
+      getDocs(collection(db, "notices")),
+      getDocs(collection(db, "attendance"))
+    ]);
+    verifiedCloudCounts = {
+      dorms: dSnap.size,
+      students: sSnap.size,
+      users: uSnap.size,
+      notices: nSnap.size,
+      attendance: aSnap.size
+    };
+  } catch (err) {
+    console.warn("Verification count read warning:", err);
+  }
+
+  const attendanceDates = new Set(attendanceToUpload.map((a) => a.date)).size;
+
+  return {
+    success: true,
+    message: `อัพโหลดฐานข้อมูลชุดที่แสดงอยู่ตอนนี้ลง Firestore สำเร็จ! (เช็คยอดนักเรียน ${attendanceCount} รายการ / ${attendanceDates} วัน, นักเรียน ${studentCount} คน, หอพัก ${dormCount} แห่ง, เรื่องแจ้งอบรม ${noticeCount} เรื่อง, ผู้ใช้ ${userCount} บัญชี)`,
+    uploadedCounts: {
+      dorms: dormCount,
+      students: studentCount,
+      users: userCount,
+      notices: noticeCount,
+      attendance: attendanceCount,
+      attendanceDates
+    },
+    verifiedCloudCounts
+  };
+}
+
 export async function savePrimaryDatabase() {
   try {
     await setDoc(doc(db, "_system_status", "saved"), {
@@ -1324,10 +1750,12 @@ export async function savePrimaryDatabase() {
 // Notices API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchNotices(date?: string): Promise<Notice[]> {
+  const localNotices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
   try {
     const docs = await readCollectionCached("notices", 3500);
     if (docs.length > 0) {
-      let notices = docs.map((d) => ({ id: d.id, ...d.data } as Notice));
+      const cloudNotices = docs.map((d) => ({ id: d.id, ...d.data } as Notice));
+      let notices = mergeCloudWithUnsyncedLocal(cloudNotices, localNotices);
       setLocalCache(CACHE_KEYS.NOTICES, notices);
       if (date) notices = notices.filter((n) => n.date === date);
       return notices.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -1336,7 +1764,7 @@ export async function fetchNotices(date?: string): Promise<Notice[]> {
     console.warn("Primary database fetchNotices offline fallback:", err?.message || err);
   }
 
-  let notices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
+  let notices = localNotices;
   if (date) notices = notices.filter((n) => n.date === date);
   return notices.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
@@ -1620,17 +2048,20 @@ export async function syncAutoAttendanceCarryOver(allRecords: DailyAttendance[])
 export const syncSemesterBreakAutoAttendance = syncAutoAttendanceCarryOver;
 
 export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
+  const localRecords = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   let records: DailyAttendance[] = [];
   try {
     const docs = await readCollectionCached("attendance", 15000);
-    records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
-    setLocalCache(CACHE_KEYS.ATTENDANCE, records);
+    const cloudRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
+    records = mergeCloudWithUnsyncedLocal(cloudRecords, localRecords);
+    if (records.length > 0) {
+      setLocalCache(CACHE_KEYS.ATTENDANCE, records);
+    }
   } catch (err: any) {
     console.warn("Primary database fetchAllCheckedAttendanceDates offline fallback:", err?.message || err);
-    records = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+    records = localRecords;
   }
 
-  const todayStr = getTodayDateString();
   const datesSet = new Set<string>();
   records.forEach((data) => {
     if (!data || !data.date) return;
@@ -1648,14 +2079,18 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
 }
 
 export async function fetchAllAttendanceRecords(): Promise<DailyAttendance[]> {
+  const localRecords = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   let records: DailyAttendance[] = [];
   try {
     const docs = await readCollectionCached("attendance", 15000);
-    records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
-    setLocalCache(CACHE_KEYS.ATTENDANCE, records);
+    const cloudRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
+    records = mergeCloudWithUnsyncedLocal(cloudRecords, localRecords);
+    if (records.length > 0) {
+      setLocalCache(CACHE_KEYS.ATTENDANCE, records);
+    }
   } catch (err: any) {
     console.warn("Primary database fetchAllAttendanceRecords offline fallback:", err?.message || err);
-    records = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+    records = localRecords;
   }
   return records;
 }
@@ -1664,14 +2099,18 @@ export async function fetchAttendance(
   date: string,
   dormId?: string
 ): Promise<Record<string, DailyAttendance> | DailyAttendance> {
+  const localRecords = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   let allRecords: DailyAttendance[] = [];
   try {
     const docs = await readCollectionCached("attendance", 15000);
-    allRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
-    setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
+    const cloudRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
+    allRecords = mergeCloudWithUnsyncedLocal(cloudRecords, localRecords);
+    if (allRecords.length > 0) {
+      setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
+    }
   } catch (err: any) {
     console.warn("Primary database fetchAttendance offline fallback:", err?.message || err);
-    allRecords = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
+    allRecords = localRecords;
   }
 
   if (dormId) {

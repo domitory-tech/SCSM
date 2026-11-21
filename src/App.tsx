@@ -557,6 +557,10 @@ function MainAppContent() {
             <UserAndDatabaseView
               currentUser={currentUser}
               dorms={dorms}
+              students={students}
+              notices={notices}
+              attendanceRecords={allAttendanceRecords}
+              usersList={users}
               systemSettings={systemSettings}
               onUpdateSystemSettings={handleUpdateSystemSettings}
               onDataReset={() => {
