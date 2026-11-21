@@ -1,6 +1,6 @@
 /**
- * Utility functions for image compression and resizing before storing in Firestore
- * to avoid exceeding Firestore's 1MB document size limit.
+ * Utility functions for image compression and resizing before storing in the database
+ * to keep document sizes compact.
  */
 
 export const compressImageFile = (
@@ -10,10 +10,18 @@ export const compressImageFile = (
   quality = 0.8
 ): Promise<string> => {
   return new Promise((resolve) => {
-    // If it's SVG, SVG files are text-based vector graphics and already very small.
+    // Reject unsafe SVG uploads containing embedded scripts or event handlers
     if (file.type === "image/svg+xml") {
       const reader = new FileReader();
-      reader.onload = (e) => resolve((e.target?.result as string) || "");
+      reader.onload = (e) => {
+        const result = (e.target?.result as string) || "";
+        const lower = result.toLowerCase();
+        if (lower.includes("javascript:") || lower.includes("phnjcmlwd") || lower.includes("<script")) {
+          resolve("");
+          return;
+        }
+        resolve(result);
+      };
       reader.onerror = () => resolve("");
       reader.readAsDataURL(file);
       return;

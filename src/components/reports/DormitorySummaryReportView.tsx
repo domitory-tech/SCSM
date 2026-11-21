@@ -223,7 +223,7 @@ export const DormitorySummaryReportView: React.FC<DormitorySummaryReportViewProp
     }
   }, [accessibleDorms, selectedDormId]);
 
-  // Direct real-time fetch from Firestore for the selected date & dormitory
+  // Direct real-time fetch from primary cloud database for the selected date & dormitory
   const { data: directAttendanceData, isLoading: isLoadingDirectAttendance, refetch: refetchAttendance } = useAttendanceQuery(
     selectedDate,
     selectedDormId

@@ -1,8 +1,294 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global default-deny safety net
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // Global Primitives & Identity Helpers
+    // ------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isEmailVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleLevel == 1
+        )
+      );
+    }
+
+    function isStaffOrAdmin() {
+      return isAdmin() || (
+        isEmailVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleLevel in [1, 2]
+      );
+    }
+
+    function isDormTeacherFor(dormId) {
+      return isEmailVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleLevel == 3 &&
+        (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.dormId == dormId ||
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.allowedDormIds is list &&
+            dormId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.allowedDormIds
+          )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Validation Blueprints
+    // ------------------------------------------------------------------
+    function isValidDormitory(data) {
+      return data.keys().hasAll(['id', 'name']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'type', 'gender', 'teacherName',
+          'teacherPhone', 'capacity', 'teachers', 'assignedTeacherId'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        (!('type' in data) || data.type in ['male', 'female', 'mixed']) &&
+        (!('gender' in data) || data.gender in ['male', 'female', 'mixed']) &&
+        (!('teacherName' in data) || (data.teacherName is string && data.teacherName.size() <= 160)) &&
+        (!('teacherPhone' in data) || (data.teacherPhone is string && data.teacherPhone.size() <= 40)) &&
+        (!('capacity' in data) || (data.capacity is number && data.capacity >= 0 && data.capacity <= 5000)) &&
+        (!('teachers' in data) || (data.teachers is list && data.teachers.size() <= 30 && (data.teachers.size() == 0 || data.teachers[0] is map))) &&
+        (!('assignedTeacherId' in data) || (data.assignedTeacherId is string && data.assignedTeacherId.size() <= 128));
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['id', 'studentId', 'firstName', 'lastName', 'dormId']) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'no', 'title', 'firstName', 'lastName',
+          'nickname', 'grade', 'room', 'dormId', 'dormRoom', 'dormBed', 'bed', 'gender'
+        ]) &&
+        isValidId(data.id) &&
+        data.studentId is string && data.studentId.size() == 5 && data.studentId.matches('^[0-9]{5}$') &&
+        data.firstName is string && data.firstName.size() > 0 && data.firstName.size() <= 100 &&
+        data.lastName is string && data.lastName.size() > 0 && data.lastName.size() <= 100 &&
+        isValidId(data.dormId) &&
+        (!('no' in data) || (data.no is number && data.no >= 0 && data.no <= 2000)) &&
+        (!('title' in data) || (data.title is string && data.title.size() <= 40)) &&
+        (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 60)) &&
+        (!('grade' in data) || (data.grade is string && data.grade.size() <= 20)) &&
+        (!('room' in data) || (data.room is number && data.room >= 0 && data.room <= 100)) &&
+        (!('dormRoom' in data) || (data.dormRoom is string && data.dormRoom.size() <= 40)) &&
+        (!('dormBed' in data) || (data.dormBed is string && data.dormBed.size() <= 20)) &&
+        (!('bed' in data) || ((data.bed is string && data.bed.size() <= 20) || data.bed is number)) &&
+        (!('gender' in data) || data.gender in ['male', 'female']);
+    }
+
+    function isValidUserProfile(data) {
+      return !('password' in data) &&
+        data.keys().hasAll(['id', 'name', 'role']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'role', 'roleLevel', 'roleCategory', 'roleCategoryName',
+          'roleLabel', 'phone', 'dormId', 'dormPosition', 'allowedDormIds',
+          'avatarUrl', 'passwordHash', 'hasPassword'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.role in ['ADMIN_OFFICER', 'HEAD_TEACHER', 'DORM_TEACHER', 'DEPUTY_DIRECTOR', 'SYSTEM_ADMIN', 'GUEST'] &&
+        (!('roleLevel' in data) || data.roleLevel in [1, 2, 3, 4]) &&
+        (!('roleCategory' in data) || data.roleCategory in ['ADMIN', 'STAFF', 'DORM_TEACHER', 'GUEST']) &&
+        (!('roleCategoryName' in data) || (data.roleCategoryName is string && data.roleCategoryName.size() <= 80)) &&
+        (!('roleLabel' in data) || (data.roleLabel is string && data.roleLabel.size() <= 160)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('dormId' in data) || (data.dormId is string && data.dormId.size() <= 128)) &&
+        (!('dormPosition' in data) || (data.dormPosition is string && data.dormPosition.size() <= 80)) &&
+        (!('allowedDormIds' in data) || (data.allowedDormIds is list && data.allowedDormIds.size() <= 20 && (data.allowedDormIds.size() == 0 || data.allowedDormIds[0] is string))) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 4096)) &&
+        (!('passwordHash' in data) || (data.passwordHash is string && data.passwordHash.size() <= 512)) &&
+        (!('hasPassword' in data) || data.hasPassword is bool);
+    }
+
+    function isValidNotice(data) {
+      return data.keys().hasAll(['id', 'title', 'date']) &&
+        data.keys().hasOnly(['id', 'date', 'title', 'topics', 'createdBy', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidDateStr(data.date) &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+        (!('topics' in data) || (data.topics is list && data.topics.size() <= 30 && (data.topics.size() == 0 || data.topics[0] is string))) &&
+        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 120)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidDailyAttendance(data) {
+      return data.keys().hasAll(['id', 'date', 'dormId']) &&
+        data.keys().hasOnly([
+          'id', 'date', 'dormId', 'isHomeBreak', 'status',
+          'checkedAt', 'checkedBy', 'teacherOrientationNotes', 'records'
+        ]) &&
+        isValidId(data.id) &&
+        isValidDateStr(data.date) &&
+        isValidId(data.dormId) &&
+        (!('isHomeBreak' in data) || data.isHomeBreak is bool) &&
+        (!('status' in data) || data.status in ['CHECKED', 'HOME_BREAK', 'SEMESTER_BREAK', 'PENDING']) &&
+        (!('checkedAt' in data) || (data.checkedAt is string && data.checkedAt.size() <= 64)) &&
+        (!('checkedBy' in data) || (data.checkedBy is string && data.checkedBy.size() <= 120)) &&
+        (!('teacherOrientationNotes' in data) || (data.teacherOrientationNotes is list && data.teacherOrientationNotes.size() <= 30 && (data.teacherOrientationNotes.size() == 0 || data.teacherOrientationNotes[0] is string))) &&
+        (!('records' in data) || (data.records is list && data.records.size() <= 500 && (data.records.size() == 0 || data.records[0] is map)));
+    }
+
+    function isValidSystemSettings(data) {
+      return data.keys().hasOnly([
+          'schoolNameTh', 'schoolNameEn', 'schoolAcronymTh', 'schoolAcronymEn',
+          'schoolLogoUrl', 'systemNameTh', 'systemNameEn', 'systemTitleTh', 'systemTitleEn',
+          'systemIcon', 'lastUpdatedDate', 'maintenanceTitle', 'maintenanceMessage',
+          'showMaintenancePopup', 'showMaintenanceBox', 'isAttendancePaused', 'pausedDormIds',
+          'attendancePauseReason', 'attendancePausedAt', 'attendancePausedBy',
+          'navigationPermissions', 'guestRequiresLogin'
+        ]) &&
+        (!('schoolNameTh' in data) || (data.schoolNameTh is string && data.schoolNameTh.size() <= 200)) &&
+        (!('schoolNameEn' in data) || (data.schoolNameEn is string && data.schoolNameEn.size() <= 200)) &&
+        (!('schoolLogoUrl' in data) || (data.schoolLogoUrl is string && data.schoolLogoUrl.size() <= 16384)) &&
+        (!('systemNameTh' in data) || (data.systemNameTh is string && data.systemNameTh.size() <= 200)) &&
+        (!('systemNameEn' in data) || (data.systemNameEn is string && data.systemNameEn.size() <= 200)) &&
+        (!('maintenanceTitle' in data) || (data.maintenanceTitle is string && data.maintenanceTitle.size() <= 200)) &&
+        (!('maintenanceMessage' in data) || (data.maintenanceMessage is string && data.maintenanceMessage.size() <= 1000)) &&
+        (!('showMaintenancePopup' in data) || data.showMaintenancePopup is bool) &&
+        (!('showMaintenanceBox' in data) || data.showMaintenanceBox is bool) &&
+        (!('isAttendancePaused' in data) || data.isAttendancePaused is bool) &&
+        (!('pausedDormIds' in data) || (data.pausedDormIds is list && data.pausedDormIds.size() <= 50 && (data.pausedDormIds.size() == 0 || data.pausedDormIds[0] is string))) &&
+        (!('attendancePauseReason' in data) || (data.attendancePauseReason is string && data.attendancePauseReason.size() <= 300)) &&
+        (!('guestRequiresLogin' in data) || data.guestRequiresLogin is bool);
+    }
+
+    function isValidSystemStatus(data) {
+      return data.keys().hasOnly(['lastSavedAt', 'status']) &&
+        (!('lastSavedAt' in data) || (data.lastSavedAt is string && data.lastSavedAt.size() <= 64)) &&
+        (!('status' in data) || (data.status is string && data.status.size() <= 40));
+    }
+
+    // ------------------------------------------------------------------
+    // Collection Rules
+    // ------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list, write: if false;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserProfile(incoming()) &&
+        (
+          isAdmin() ||
+          (isOwner(userId) && incoming().role == 'GUEST' && incoming().roleLevel == 4 && incoming().roleCategory == 'GUEST')
+        );
+      allow update: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserProfile(incoming()) &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().id == existing().id &&
+            incoming().role == existing().role &&
+            incoming().roleLevel == existing().roleLevel &&
+            incoming().roleCategory == existing().roleCategory &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'passwordHash', 'hasPassword'])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /dorms/{dormId} {
+      allow get: if isValidId(dormId) && isEmailVerified();
+      allow list: if isEmailVerified();
+      allow create: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
+      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
+      allow delete: if isValidId(dormId) && isAdmin();
+    }
+
+    match /students/{studentId} {
+      allow get: if isValidId(studentId) && isEmailVerified();
+      allow list: if isEmailVerified();
+      allow create: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin() &&
+        exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
+      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin();
+      allow delete: if isValidId(studentId) && isStaffOrAdmin();
+    }
+
+    match /notices/{noticeId} {
+      allow get: if isValidId(noticeId) && isEmailVerified();
+      allow list: if isEmailVerified();
+      allow create: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
+      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
+      allow delete: if isValidId(noticeId) && isStaffOrAdmin();
+    }
+
+    match /attendance/{attendanceId} {
+      allow get: if isValidId(attendanceId) && isEmailVerified();
+      allow list: if isEmailVerified();
+      allow create: if isValidId(attendanceId) &&
+        isEmailVerified() &&
+        isValidDailyAttendance(incoming()) &&
+        exists(/databases/$(database)/documents/dorms/$(incoming().dormId)) &&
+        (isStaffOrAdmin() || isDormTeacherFor(incoming().dormId));
+      allow update: if isValidId(attendanceId) &&
+        isEmailVerified() &&
+        isValidDailyAttendance(incoming()) &&
+        incoming().date == existing().date &&
+        incoming().dormId == existing().dormId &&
+        (
+          isStaffOrAdmin() ||
+          (
+            isDormTeacherFor(existing().dormId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'isHomeBreak', 'status', 'checkedAt', 'checkedBy', 'teacherOrientationNotes', 'records'
+            ])
+          )
+        );
+      allow delete: if isValidId(attendanceId) && isAdmin();
+    }
+
+    match /system_settings/{configId} {
+      allow get: if isValidId(configId) && isEmailVerified();
+      allow list: if false;
+      allow create, update: if isValidId(configId) && configId == 'config' && isEmailVerified() && isValidSystemSettings(incoming()) && isAdmin();
+      allow delete: if false;
+    }
+
+    match /_system_status/{statusId} {
+      allow get: if isValidId(statusId) && isEmailVerified();
+      allow list: if false;
+      allow create, update: if isValidId(statusId) && statusId == 'saved' && isEmailVerified() && isValidSystemStatus(incoming()) && isStaffOrAdmin();
+      allow delete: if false;
     }
   }
 }

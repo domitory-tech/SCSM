@@ -2,14 +2,18 @@
   "entities": {
     "Dormitory": {
       "title": "Dormitory",
-      "description": "Information about student dormitories",
+      "description": "Information about student dormitories and assigned teachers",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "code": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "type": { "type": "string", "enum": ["male", "female", "mixed"] },
+        "gender": { "type": "string", "enum": ["male", "female", "mixed"] },
+        "teacherName": { "type": "string", "maxLength": 160 },
+        "teacherPhone": { "type": "string", "maxLength": 40 },
         "capacity": { "type": "number" },
-        "assignedTeacherId": { "type": "string" }
+        "teachers": { "type": "array" },
+        "assignedTeacherId": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "name"]
     },
@@ -18,7 +22,7 @@
       "description": "Student record in the dormitory system with 5-digit studentId",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "studentId": {
           "type": "string",
           "pattern": "^[0-9]{5}$",
@@ -27,55 +31,72 @@
           "description": "Unique 5-digit student identification number"
         },
         "no": { "type": "number" },
-        "prefix": { "type": "string" },
-        "firstName": { "type": "string" },
-        "lastName": { "type": "string" },
-        "nickname": { "type": "string" },
-        "dormId": { "type": "string" },
-        "dormRoom": { "type": "string" },
-        "dormBed": { "type": "string" },
-        "grade": { "type": "string" },
-        "room": { "type": "string" },
-        "status": { "type": "string" }
+        "title": { "type": "string", "maxLength": 40 },
+        "firstName": { "type": "string", "maxLength": 100 },
+        "lastName": { "type": "string", "maxLength": 100 },
+        "nickname": { "type": "string", "maxLength": 60 },
+        "grade": { "type": "string", "maxLength": 20 },
+        "room": { "type": "number" },
+        "dormId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dormRoom": { "type": "string", "maxLength": 40 },
+        "dormBed": { "type": "string", "maxLength": 20 },
+        "bed": { "type": "string", "maxLength": 20 },
+        "gender": { "type": "string", "enum": ["male", "female"] }
       },
       "required": ["id", "studentId", "firstName", "lastName", "dormId"]
     },
     "UserProfile": {
       "title": "UserProfile",
-      "description": "User account and teacher/admin profile",
+      "description": "User account and teacher/staff/admin profile (never stores plaintext passwords)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "username": { "type": "string" },
-        "name": { "type": "string" },
-        "role": { "type": "string" },
-        "avatarUrl": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN_OFFICER", "HEAD_TEACHER", "DORM_TEACHER", "DEPUTY_DIRECTOR", "SYSTEM_ADMIN", "GUEST"]
+        },
+        "roleLevel": { "type": "number", "enum": [1, 2, 3, 4] },
+        "roleCategory": { "type": "string", "enum": ["ADMIN", "STAFF", "DORM_TEACHER", "GUEST"] },
+        "roleCategoryName": { "type": "string", "maxLength": 80 },
+        "roleLabel": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "dormId": { "type": "string", "maxLength": 128 },
+        "dormPosition": { "type": "string", "maxLength": 80 },
+        "allowedDormIds": { "type": "array" },
+        "avatarUrl": { "type": "string", "maxLength": 4096 },
+        "passwordHash": { "type": "string", "maxLength": 512 },
+        "hasPassword": { "type": "boolean" }
       },
       "required": ["id", "name", "role"]
     },
     "Notice": {
       "title": "Notice",
-      "description": "Dormitory announcements and notices",
+      "description": "Dormitory announcements and orientation notices",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "content": { "type": "string" },
-        "date": { "type": "string" },
-        "author": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "title": { "type": "string", "maxLength": 300 },
+        "topics": { "type": "array" },
+        "createdBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "title", "content"]
+      "required": ["id", "title", "date"]
     },
     "DailyAttendance": {
       "title": "DailyAttendance",
       "description": "Daily student roll-call records for a dorm",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "date": { "type": "string" },
-        "dormId": { "type": "string" },
-        "status": { "type": "string" },
-        "checkedBy": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "dormId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isHomeBreak": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["CHECKED", "HOME_BREAK", "SEMESTER_BREAK", "PENDING"] },
+        "checkedAt": { "type": "string", "maxLength": 64 },
+        "checkedBy": { "type": "string", "maxLength": 120 },
+        "teacherOrientationNotes": { "type": "array" },
         "records": { "type": "array" }
       },
       "required": ["id", "date", "dormId"]
@@ -85,13 +106,37 @@
       "description": "Global school and system configurations",
       "type": "object",
       "properties": {
-        "schoolNameTh": { "type": "string" },
-        "systemNameTh": { "type": "string" },
-        "schoolLogoUrl": { "type": "string" },
+        "schoolNameTh": { "type": "string", "maxLength": 200 },
+        "schoolNameEn": { "type": "string", "maxLength": 200 },
+        "schoolAcronymTh": { "type": "string", "maxLength": 40 },
+        "schoolAcronymEn": { "type": "string", "maxLength": 40 },
+        "schoolLogoUrl": { "type": "string", "maxLength": 16384 },
+        "systemNameTh": { "type": "string", "maxLength": 200 },
+        "systemNameEn": { "type": "string", "maxLength": 200 },
+        "systemTitleTh": { "type": "string", "maxLength": 200 },
+        "systemTitleEn": { "type": "string", "maxLength": 200 },
+        "systemIcon": { "type": "string", "maxLength": 40 },
+        "lastUpdatedDate": { "type": "string", "maxLength": 80 },
+        "maintenanceTitle": { "type": "string", "maxLength": 200 },
+        "maintenanceMessage": { "type": "string", "maxLength": 1000 },
+        "showMaintenancePopup": { "type": "boolean" },
+        "showMaintenanceBox": { "type": "boolean" },
         "isAttendancePaused": { "type": "boolean" },
-        "attendancePauseReason": { "type": "string" },
+        "pausedDormIds": { "type": "array" },
+        "attendancePauseReason": { "type": "string", "maxLength": 300 },
+        "attendancePausedAt": { "type": "string", "maxLength": 64 },
+        "attendancePausedBy": { "type": "string", "maxLength": 120 },
         "navigationPermissions": { "type": "object" },
         "guestRequiresLogin": { "type": "boolean" }
+      }
+    },
+    "SystemStatus": {
+      "title": "SystemStatus",
+      "description": "Primary database sync status marker",
+      "type": "object",
+      "properties": {
+        "lastSavedAt": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 40 }
       }
     }
   },
@@ -119,6 +164,10 @@
     "/system_settings/config": {
       "schema": "SystemSettings",
       "description": "System configuration document"
+    },
+    "/_system_status/saved": {
+      "schema": "SystemStatus",
+      "description": "System sync marker document"
     }
   }
 }

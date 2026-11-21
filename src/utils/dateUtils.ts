@@ -1,4 +1,5 @@
 import { SystemSettings } from "../types";
+import { sanitizeSafeImageUrl } from "./security";
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "./permissionUtils";
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -248,22 +249,7 @@ export function formatThaiMediumDate(dateStr: string): string {
 }
 
 export function getDirectImageUrl(url: string): string {
-  if (!url) return "";
-  const trimmed = url.trim();
-
-  // Handle Google Drive share links
-  // Example: https://drive.google.com/file/d/1ABC123xyz/view?usp=sharing
-  // Example: https://drive.google.com/open?id=1ABC123xyz
-  // Example: https://drive.google.com/uc?id=1ABC123xyz
-  const fileIdMatch =
-    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-
-  if (fileIdMatch && fileIdMatch[1]) {
-    return `https://lh3.googleusercontent.com/d/${fileIdMatch[1]}`;
-  }
-
-  return trimmed;
+  return sanitizeSafeImageUrl(url);
 }
 
 export const THAI_MONTHS = [

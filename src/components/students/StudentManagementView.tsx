@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { Dormitory, Student, UserProfile } from "../../types";
 import { matchStudentToDorm, findDormForStudent, countStudentsInDorm, cleanBedValue, formatBedDisplay } from "../../utils/dormUtils";
 import { formatStudentId, isValid5DigitStudentId, formatGrade, isGradeMissingPrefix } from "../../utils/studentUtils";
-import { deleteSampleData } from "../../services/api";
+import { deleteSampleData, verifyAuthorizedAdminOrStaffPassword } from "../../services/api";
 
 // Helper parsers for sorting grade, room, and student number
 const parseGradeNum = (grade: string | undefined): number => {
@@ -174,13 +174,12 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
     }
   };
 
-  // Helper password validator
-  const verifyAdminOrStaffPassword = (enteredPassword: string): boolean => {
-    const validPasswords = ["123456"];
-    if (currentUser?.password) {
-      validPasswords.push(currentUser.password);
+  // Helper password validator (uses cryptographic hash verification for Level 1/2 accounts)
+  const verifyAdminOrStaffPassword = async (enteredPassword: string): Promise<boolean> => {
+    if (!currentUser || (currentUser.roleLevel !== 1 && currentUser.roleLevel !== 2)) {
+      return false;
     }
-    return validPasswords.includes(enteredPassword.trim()) || enteredPassword.trim() === "123456";
+    return verifyAuthorizedAdminOrStaffPassword(enteredPassword, currentUser);
   };
 
   // Handle Download Excel Template
@@ -766,8 +765,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       setClearAllPasswordError("กรุณากรอกรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
       return;
     }
-    if (!verifyAdminOrStaffPassword(clearAllPassword)) {
-      setClearAllPasswordError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
+    if (!(await verifyAdminOrStaffPassword(clearAllPassword))) {
+      setClearAllPasswordError("รหัสผ่านไม่ถูกต้อง หรือบัญชีไม่มีสิทธิ์ระดับเจ้าหน้าที่/ผู้ดูแลระบบ");
       return;
     }
 
@@ -797,8 +796,8 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
       setClearDormPasswordError("กรุณากรอกรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
       return;
     }
-    if (!verifyAdminOrStaffPassword(clearDormPassword)) {
-      setClearDormPasswordError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
+    if (!(await verifyAdminOrStaffPassword(clearDormPassword))) {
+      setClearDormPasswordError("รหัสผ่านไม่ถูกต้อง หรือบัญชีไม่มีสิทธิ์ระดับเจ้าหน้าที่/ผู้ดูแลระบบ");
       return;
     }
 
@@ -924,21 +923,37 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     const formattedSid = formatStudentId(newStudent.studentId);
-    if (!newStudent.firstName || !newStudent.lastName || !formattedSid) {
+    const trimmedFirst = (newStudent.firstName || "").trim();
+    const trimmedLast = (newStudent.lastName || "").trim();
+    if (!trimmedFirst || !trimmedLast || !formattedSid) {
       alert("กรุณากรอกรหัสนักเรียน ชื่อ และนามสกุลให้ครบถ้วน");
       return;
     }
-    if (formattedSid.length !== 5) {
+    if (formattedSid.length !== 5 || !isValid5DigitStudentId(formattedSid)) {
       alert("รหัสนักเรียนต้องเป็นตัวเลข 5 หลัก (เช่น 06120)");
+      return;
+    }
+    if (trimmedFirst.length > 80 || trimmedLast.length > 80) {
+      alert("ชื่อหรือนามสกุลยาวเกินไป (สูงสุด 80 ตัวอักษร)");
+      return;
+    }
+    const parsedRoom = Number(newStudent.room);
+    if (!Number.isInteger(parsedRoom) || parsedRoom < 1 || parsedRoom > 99) {
+      alert("หมายเลขห้องเรียนต้องอยู่ระหว่าง 1 ถึง 99");
       return;
     }
 
     try {
-      const bedValue = newStudent.dormBed !== undefined && newStudent.dormBed !== null ? String(newStudent.dormBed).trim() : "";
+      const bedValue = newStudent.dormBed !== undefined && newStudent.dormBed !== null ? String(newStudent.dormBed).trim().slice(0, 30) : "";
       const studentToSave = {
         ...newStudent,
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
+        nickname: (newStudent.nickname || "").trim().slice(0, 50),
         studentId: formattedSid,
+        room: parsedRoom,
         grade: formatGrade(newStudent.grade),
+        dormRoom: String(newStudent.dormRoom || "").trim().slice(0, 30),
         dormBed: bedValue,
         bed: bedValue
       };
@@ -2209,17 +2224,10 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                   return;
                 }
 
-                const validPasswords = ["123456"];
-                if (currentUser?.password) {
-                  validPasswords.push(currentUser.password);
-                }
-
-                const isPasswordValid =
-                  validPasswords.includes(deletePassword.trim()) ||
-                  deletePassword.trim() === "123456";
+                const isPasswordValid = await verifyAdminOrStaffPassword(deletePassword);
 
                 if (!isPasswordValid) {
-                  setDeletePasswordError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านเจ้าหน้าที่ หรือ ผู้ดูแลระบบ");
+                  setDeletePasswordError("รหัสผ่านไม่ถูกต้อง หรือบัญชีไม่มีสิทธิ์ระดับเจ้าหน้าที่/ผู้ดูแลระบบ");
                   return;
                 }
 
@@ -2261,7 +2269,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                     setDeletePassword(e.target.value);
                     setDeletePasswordError("");
                   }}
-                  placeholder="กรอกรหัสผ่านเพื่อยืนยันการลบ (เช่น 123456)..."
+                  placeholder="กรอกรหัสผ่านเพื่อยืนยันการลบ..."
                   className="w-full bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-rose-500 outline-none shadow-2xs"
                   autoFocus
                 />
@@ -2411,7 +2419,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                     setClearAllPassword(e.target.value);
                     setClearAllPasswordError("");
                   }}
-                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน (เช่น 123456)..."
+                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน..."
                   className="w-full bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-rose-500 outline-none shadow-2xs"
                   autoFocus
                 />
@@ -2499,7 +2507,7 @@ export const StudentManagementView: React.FC<StudentManagementViewProps> = ({
                     setClearDormPassword(e.target.value);
                     setClearDormPasswordError("");
                   }}
-                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน (เช่น 123456)..."
+                  placeholder="กรอกรหัสผ่านเพื่อยืนยัน..."
                   className="w-full bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-orange-500 outline-none shadow-2xs"
                   autoFocus
                 />

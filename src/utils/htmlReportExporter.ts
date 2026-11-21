@@ -3,6 +3,7 @@ import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
 import { DailyReportData } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
+import { escapeHtml, openSafeWindowUrl, sanitizeHtmlFragment } from "./security";
 
 /**
  * Exports an HTML element directly to a formatted PDF file using html-to-image & jsPDF.
@@ -135,12 +136,15 @@ export function printOrSaveElementAsPdf(
   const pageMargin = isLandscape ? "8mm 10mm" : "10mm 12mm";
   const containerMaxWidth = isLandscape ? "297mm" : "210mm";
 
+  const safeTitle = escapeHtml(documentTitle);
+  const safeContent = sanitizeHtmlFragment(element.innerHTML);
+
   const htmlContent = `<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${documentTitle}</title>
+  <title>${safeTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
@@ -269,7 +273,7 @@ export function printOrSaveElementAsPdf(
         PDF
       </div>
       <div>
-        <h1 class="text-white text-sm font-extrabold leading-tight">${documentTitle}</h1>
+        <h1 class="text-white text-sm font-extrabold leading-tight">${safeTitle}</h1>
         <p class="text-slate-400 text-xs font-medium">รูปแบบกระดาษ: ${isLandscape ? "A4 แนวนอน (Landscape)" : "A4 แนวตั้ง (Portrait)"} • ปรับแต่งสีและแบบอักษรสำหรับพิมพ์คมชัด</p>
       </div>
     </div>
@@ -298,7 +302,7 @@ export function printOrSaveElementAsPdf(
 
   <!-- Printable Content Canvas -->
   <div class="print-canvas">
-    ${element.innerHTML}
+    ${safeContent}
   </div>
 
   <script>
@@ -320,7 +324,7 @@ export function printOrSaveElementAsPdf(
   const url = URL.createObjectURL(blob);
 
   // 1. Try opening new window/tab for native print
-  const printWindow = window.open(url, "_blank");
+  const printWindow = openSafeWindowUrl(url);
   if (printWindow) {
     printWindow.focus();
   } else {
@@ -397,18 +401,21 @@ export function generateCombinedDailyReportHtml(
     return `
       <div class="sheet-page" id="sheet-${index + 1}">
         <div class="sheet-inner">
-          ${el.innerHTML}
+          ${sanitizeHtmlFragment(el.innerHTML)}
         </div>
       </div>
     `;
   }).join("\n");
+
+  const safeCombinedTitle = escapeHtml(fileName.replace(".html", ""));
+  const safeReportDateTitle = escapeHtml(reportDateTitle);
 
   const htmlContent = `<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileName.replace(".html", "")}</title>
+  <title>${safeCombinedTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -537,7 +544,7 @@ export function generateCombinedDailyReportHtml(
         3
       </div>
       <div>
-        <h1 class="text-white text-sm font-bold leading-tight">${reportDateTitle}</h1>
+        <h1 class="text-white text-sm font-bold leading-tight">${safeReportDateTitle}</h1>
         <p class="text-slate-400 text-xs font-normal">รวมรายงาน 3 ใบในไฟล์เดียว (ใบที่ 1, ใบที่ 2, ใบที่ 3 - แยกหน้าละ 1 ใบสำหรับพิมพ์ A4)</p>
       </div>
     </div>
@@ -596,7 +603,7 @@ export function openCombinedDailyReportInNewTab(
   const htmlContent = generateCombinedDailyReportHtml(sheetIds, fileName, reportDateTitle);
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const newTab = window.open(url, "_blank");
+  const newTab = openSafeWindowUrl(url);
   if (newTab) {
     newTab.focus();
     return newTab;

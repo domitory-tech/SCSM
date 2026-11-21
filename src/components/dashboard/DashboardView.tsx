@@ -176,7 +176,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [todayAttendance]);
 
-  // Fetch all historical attendance records from Firestore for statistical analytics
+  // Fetch all historical attendance records from primary cloud database for statistical analytics
   React.useEffect(() => {
     let isMounted = true;
     fetchAllAttendanceRecords().then((records) => {
@@ -355,7 +355,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   }, [effectiveDashboardDate]);
 
-  // Active attendance map: When viewing today, prioritize todayAttendance prop (realtime Firestore/cache sync) merged with historical map
+  // Active attendance map: When viewing today, prioritize todayAttendance prop (realtime cloud/cache sync) merged with historical map
   const activeAttendanceMap = React.useMemo(() => {
     const isToday = effectiveDashboardDate === getTodayDateString();
     if (isToday) {
@@ -1095,7 +1095,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       (activeAttendanceMap[d.id]?.records && activeAttendanceMap[d.id]?.records.length > 0)
   ).length;
 
-  // Aggregated Historical Attendance Statistics from Firestore
+  // Aggregated Historical Attendance Statistics from primary cloud database
   const historicalStats = React.useMemo(() => {
     const dateTotalOutMap: Record<string, number> = {};
     const dateDormOutMap: Record<string, Record<string, number>> = {};

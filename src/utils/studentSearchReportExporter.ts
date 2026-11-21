@@ -2,6 +2,7 @@ import { Dormitory, Student, SystemSettings, UserProfile, AttendanceStatus } fro
 import { formatThaiFullDate, formatThaiMediumDate, getTodayDateString, formatGradeRoomShort, detectStudentGender } from "./dateUtils";
 import { StudentLeaveEvent, SearchConditionMode } from "../components/students/StudentSearchView";
 import { formatStudentId } from "./studentUtils";
+import { escapeAttr, escapeHtml, openSafeWindowUrl, sanitizeSafeImageUrl } from "./security";
 
 export interface StudentSearchReportData {
   title: string;
@@ -64,8 +65,8 @@ export function triggerPrintWindow(htmlContent: string, fileName: string = "เ�
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   
-  // Method 1: Try window.open
-  const printWin = window.open(url, "_blank");
+  // Method 1: Try openSafeWindowUrl
+  const printWin = openSafeWindowUrl(url);
   if (printWin) {
     printWin.focus();
   } else {
@@ -125,9 +126,14 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
     orientation = "landscape"
   } = data;
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย";
-  const systemTitle = systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน";
-  const logoUrl = systemSettings?.schoolLogoUrl;
+  const safeTitle = escapeHtml(title);
+  const safeSchoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย");
+  const safeSystemTitle = escapeHtml(systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน");
+  const safeLogoUrl = sanitizeSafeImageUrl(systemSettings?.schoolLogoUrl);
+  const safeDormNameFilter = escapeHtml(dormName);
+  const safeGradeFilterLabel = escapeHtml(gradeFilter === "ALL" ? "ทุกระดับชั้น" : gradeFilter);
+  const safeCreatorName = escapeHtml(currentUser?.name || "เจ้าหน้าที่หอพัก");
+  const safeCreatorRole = escapeHtml(currentUser?.roleLabel || currentUser?.roleCategoryName || "ครูประจำหอพัก");
   const todayStr = getTodayDateString();
   const printTimeStr = new Date().toLocaleTimeString("th-TH");
 
@@ -135,18 +141,27 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
     .map((item, idx) => {
       const s = item.student;
       const isOut = item.currentStatus.isOut;
+      const safeFullName = `${escapeHtml(s.title || "")}${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}`;
+      const safeNick = s.nickname ? `<span class="text-slate-500 font-normal">(${escapeHtml(s.nickname)})</span>` : "";
+      const safeGradeRoom = escapeHtml(formatGradeRoomShort(s.grade, s.room));
+      const safeNo = s.no ? `<span class="text-slate-400 font-mono">(#${escapeHtml(s.no)})</span>` : "";
+      const safeItemDorm = escapeHtml(item.dormName);
+      const safeDormRoom = escapeHtml(s.dormRoom || "101");
+      const safeStatusLabel = escapeHtml(item.currentStatus.label);
+      const safeLatestLabel = escapeHtml(item.latestLeaveStatusLabel || "");
+      const safeLatestReason = item.latestLeaveReason ? `<div class="text-slate-500 mt-0.5">เหตุผล: ${escapeHtml(item.latestLeaveReason)}</div>` : "";
       return `
         <tr class="${idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}">
           <td class="p-2 text-center border border-slate-300 font-mono">${idx + 1}</td>
-          <td class="p-2 text-center border border-slate-300 font-mono font-bold">${formatStudentId(s.studentId)}</td>
+          <td class="p-2 text-center border border-slate-300 font-mono font-bold">${escapeHtml(formatStudentId(s.studentId))}</td>
           <td class="p-2 border border-slate-300 font-bold text-slate-900">
-            ${s.title || ""}${s.firstName} ${s.lastName} ${s.nickname ? `<span class="text-slate-500 font-normal">(${s.nickname})</span>` : ""}
+            ${safeFullName} ${safeNick}
           </td>
           <td class="p-2 text-center border border-slate-300 font-medium">
-            ${formatGradeRoomShort(s.grade, s.room)} ${s.no ? `<span class="text-slate-400 font-mono">(#${s.no})</span>` : ""}
+            ${safeGradeRoom} ${safeNo}
           </td>
-          <td class="p-2 border border-slate-300">${item.dormName}</td>
-          <td class="p-2 text-center border border-slate-300 font-bold">${s.dormRoom || "101"}</td>
+          <td class="p-2 border border-slate-300">${safeItemDorm}</td>
+          <td class="p-2 text-center border border-slate-300 font-bold">${safeDormRoom}</td>
           <td class="p-2 text-center border border-slate-300 font-bold">
             <span class="${
               item.currentStatus.status === "QUARANTINE"
@@ -155,7 +170,7 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
                 ? "text-rose-700 font-extrabold"
                 : "text-emerald-700"
             }">
-              ${item.currentStatus.label}
+              ${safeStatusLabel}
             </span>
           </td>
           <td class="p-2 text-center border border-slate-300 font-mono font-bold ${item.leaveCount > 0 ? "text-purple-700" : "text-slate-400"}">
@@ -165,9 +180,9 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
             ${
               item.latestLeaveDate
                 ? `<div>
-                    <span class="font-bold text-slate-800">${formatThaiMediumDate(item.latestLeaveDate)}</span>
-                    <span class="text-slate-600">(${item.latestLeaveStatusLabel})</span>
-                    ${item.latestLeaveReason ? `<div class="text-slate-500 mt-0.5">เหตุผล: ${item.latestLeaveReason}</div>` : ""}
+                    <span class="font-bold text-slate-800">${escapeHtml(formatThaiMediumDate(item.latestLeaveDate))}</span>
+                    <span class="text-slate-600">(${safeLatestLabel})</span>
+                    ${safeLatestReason}
                   </div>`
                 : `<span class="text-slate-400">-</span>`
             }
@@ -182,7 +197,7 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} - ${schoolName}</title>
+  <title>${safeTitle} - ${safeSchoolName}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -228,8 +243,8 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
         🖨️
       </div>
       <div>
-        <h2 class="text-sm font-bold">${title}</h2>
-        <p class="text-xs text-slate-400">${schoolName} • จัดทำเมื่อ ${formatThaiMediumDate(todayStr)} ${printTimeStr}</p>
+        <h2 class="text-sm font-bold">${safeTitle}</h2>
+        <p class="text-xs text-slate-400">${safeSchoolName} • จัดทำเมื่อ ${escapeHtml(formatThaiMediumDate(todayStr))} ${escapeHtml(printTimeStr)}</p>
       </div>
     </div>
     <div class="flex items-center gap-2.5">
@@ -247,20 +262,20 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
     <!-- Header -->
     <div class="text-center space-y-2 border-b-2 border-slate-900 pb-5 mb-5">
       <div class="flex items-center justify-center gap-3">
-        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="w-14 h-14 object-contain" />` : ""}
+        ${safeLogoUrl ? `<img src="${escapeAttr(safeLogoUrl)}" alt="Logo" class="w-14 h-14 object-contain" />` : ""}
         <div>
-          <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">${schoolName}</h1>
-          <p class="text-xs sm:text-sm font-semibold text-slate-600">${systemTitle}</p>
+          <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">${safeSchoolName}</h1>
+          <p class="text-xs sm:text-sm font-semibold text-slate-600">${safeSystemTitle}</p>
         </div>
       </div>
-      <h2 class="text-base sm:text-lg font-black text-purple-900 mt-2">${title}</h2>
+      <h2 class="text-base sm:text-lg font-black text-purple-900 mt-2">${safeTitle}</h2>
       
       <div class="flex flex-wrap items-center justify-center gap-3 text-xs text-slate-600 pt-1 font-medium">
-        <span class="bg-slate-100 px-2.5 py-0.5 rounded-md font-bold text-slate-700">หอพัก: ${dormName}</span>
+        <span class="bg-slate-100 px-2.5 py-0.5 rounded-md font-bold text-slate-700">หอพัก: ${safeDormNameFilter}</span>
         <span>•</span>
-        <span class="bg-slate-100 px-2.5 py-0.5 rounded-md font-bold text-slate-700">ระดับชั้น: ${gradeFilter === "ALL" ? "ทุกระดับชั้น" : gradeFilter}</span>
+        <span class="bg-slate-100 px-2.5 py-0.5 rounded-md font-bold text-slate-700">ระดับชั้น: ${safeGradeFilterLabel}</span>
         <span>•</span>
-        <span>ช่วงวันที่: <strong class="text-slate-800">${formatThaiMediumDate(startDate)}</strong> ถึง <strong class="text-slate-800">${formatThaiMediumDate(endDate)}</strong></span>
+        <span>ช่วงวันที่: <strong class="text-slate-800">${escapeHtml(formatThaiMediumDate(startDate))}</strong> ถึง <strong class="text-slate-800">${escapeHtml(formatThaiMediumDate(endDate))}</strong></span>
       </div>
     </div>
 
@@ -309,10 +324,10 @@ export function generateStudentSearchReportHtml(data: StudentSearchReportData): 
     <!-- Sign-off Block -->
     <div class="pt-6 border-t-2 border-slate-300 flex items-start justify-between text-xs text-slate-700">
       <div class="space-y-1">
-        <div><strong>ผู้จัดทำรายงาน:</strong> ${currentUser?.name || "เจ้าหน้าที่หอพัก"}</div>
-        <div><strong>ตำแหน่ง:</strong> ${currentUser?.roleLabel || currentUser?.roleCategoryName || "ครูประจำหอพัก"}</div>
+        <div><strong>ผู้จัดทำรายงาน:</strong> ${safeCreatorName}</div>
+        <div><strong>ตำแหน่ง:</strong> ${safeCreatorRole}</div>
         <div class="text-slate-400 text-[10px]">
-          พิมพ์เมื่อ: ${formatThaiFullDate(todayStr)} เวลา ${printTimeStr} น.
+          พิมพ์เมื่อ: ${escapeHtml(formatThaiFullDate(todayStr))} เวลา ${escapeHtml(printTimeStr)} น.
         </div>
       </div>
       <div class="text-center space-y-3 min-w-[220px]">
@@ -354,9 +369,22 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
     currentUser
   } = data;
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย";
-  const systemTitle = systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน";
-  const logoUrl = systemSettings?.schoolLogoUrl;
+  const safeSchoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย");
+  const safeSystemTitle = escapeHtml(systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน");
+  const safeLogoUrl = sanitizeSafeImageUrl(systemSettings?.schoolLogoUrl);
+  const safeDormName = escapeHtml(dormName);
+  const safeStudentId = escapeHtml(formatStudentId(student.studentId));
+  const safeStudentFullName = `${escapeHtml(student.title || "")}${escapeHtml(student.firstName)} ${escapeHtml(student.lastName)}`;
+  const safeStudentNick = student.nickname ? `<span class="text-purple-700 font-normal">(${escapeHtml(student.nickname)})</span>` : "";
+  const safeGradeRoom = escapeHtml(formatGradeRoomShort(student.grade, student.room));
+  const safeStudentNo = student.no ? `เลขที่ ${escapeHtml(student.no)}` : "";
+  const safeDormRoom = escapeHtml(student.dormRoom || "101");
+  const safeCurrentStatusLabel = escapeHtml(currentStatus.label);
+  const safeCurrentStatusReason = currentStatus.reason ? `<span class="text-xs text-rose-700 font-medium">• เหตุผล: ${escapeHtml(currentStatus.reason)}</span>` : "";
+  const safeStartDate = escapeHtml(startDate);
+  const safeEndDate = escapeHtml(endDate);
+  const safeCreatorName = escapeHtml(currentUser?.name || "เจ้าหน้าที่หอพัก");
+
   const todayStr = getTodayDateString();
   const printTimeStr = new Date().toLocaleTimeString("th-TH");
   const genderLabel = detectStudentGender(student.title, student.firstName, student.gender) === "male" ? "ชาย" : "หญิง";
@@ -365,17 +393,17 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
     .map((ev, idx) => `
       <tr class="${idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}">
         <td class="p-2.5 text-center border border-slate-300 font-mono font-bold text-slate-600">${idx + 1}</td>
-        <td class="p-2.5 text-center border border-slate-300 font-bold text-slate-900">${formatThaiFullDate(ev.date)}</td>
+        <td class="p-2.5 text-center border border-slate-300 font-bold text-slate-900">${escapeHtml(formatThaiFullDate(ev.date))}</td>
         <td class="p-2.5 text-center border border-slate-300 font-bold">
-          <span class="inline-block px-2.5 py-0.5 rounded-md text-xs ${ev.statusColor.bg} border ${ev.statusColor.border}">
-            ${ev.statusLabel}
+          <span class="inline-block px-2.5 py-0.5 rounded-md text-xs ${escapeAttr(ev.statusColor.bg)} border ${escapeAttr(ev.statusColor.border)}">
+            ${escapeHtml(ev.statusLabel)}
           </span>
         </td>
         <td class="p-2.5 border border-slate-300 text-slate-800">
-          ${ev.reason ? `<span>${ev.reason}</span>` : `<span class="text-slate-400">-</span>`}
+          ${ev.reason ? `<span>${escapeHtml(ev.reason)}</span>` : `<span class="text-slate-400">-</span>`}
         </td>
-        <td class="p-2.5 border border-slate-300 text-slate-700">${ev.dormName}</td>
-        <td class="p-2.5 text-center border border-slate-300 text-slate-500 text-[11px]">${ev.checkedBy || "-"}</td>
+        <td class="p-2.5 border border-slate-300 text-slate-700">${escapeHtml(ev.dormName)}</td>
+        <td class="p-2.5 text-center border border-slate-300 text-slate-500 text-[11px]">${escapeHtml(ev.checkedBy || "-")}</td>
       </tr>
     `)
     .join("");
@@ -385,7 +413,7 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ประวัติการออกหอพัก_${formatStudentId(student.studentId)}_${student.firstName}_${student.lastName}</title>
+  <title>ประวัติการออกหอพัก_${safeStudentId}_${escapeHtml(student.firstName)}_${escapeHtml(student.lastName)}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -431,8 +459,8 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
         🎓
       </div>
       <div>
-        <h2 class="text-sm font-bold">เอกสารประวัติการออกหอพัก: ${student.title || ""}${student.firstName} ${student.lastName}</h2>
-        <p class="text-xs text-slate-400">รหัสนักเรียน: ${formatStudentId(student.studentId)} • หอพัก: ${dormName}</p>
+        <h2 class="text-sm font-bold">เอกสารประวัติการออกหอพัก: ${safeStudentFullName}</h2>
+        <p class="text-xs text-slate-400">รหัสนักเรียน: ${safeStudentId} • หอพัก: ${safeDormName}</p>
       </div>
     </div>
     <div class="flex items-center gap-2.5">
@@ -450,17 +478,17 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
     <!-- School Header -->
     <div class="border-b-2 border-slate-900 pb-5 mb-6 text-center">
       <div class="flex items-center justify-center gap-3">
-        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="w-14 h-14 object-contain" />` : ""}
+        ${safeLogoUrl ? `<img src="${escapeAttr(safeLogoUrl)}" alt="Logo" class="w-14 h-14 object-contain" />` : ""}
         <div>
-          <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">${schoolName}</h1>
-          <p class="text-xs sm:text-sm font-semibold text-slate-600">${systemTitle}</p>
+          <h1 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">${safeSchoolName}</h1>
+          <p class="text-xs sm:text-sm font-semibold text-slate-600">${safeSystemTitle}</p>
         </div>
       </div>
       <h2 class="text-lg font-black text-purple-900 mt-2">
         เอกสารรายงานประวัติการเข้าพักและสถิติการออกหอพักนักเรียนรายบุคคล
       </h2>
       <p class="text-xs text-slate-500 font-medium mt-0.5">
-        ข้อมูล ณ วันที่ ${formatThaiFullDate(todayStr)} เวลา ${printTimeStr} น.
+        ข้อมูล ณ วันที่ ${escapeHtml(formatThaiFullDate(todayStr))} เวลา ${escapeHtml(printTimeStr)} น.
       </p>
     </div>
 
@@ -474,13 +502,13 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
         <div>
           <span class="text-slate-500 font-medium">ชื่อ-นามสกุล:</span>
           <div class="font-extrabold text-slate-900 text-sm mt-0.5">
-            ${student.title || ""}${student.firstName} ${student.lastName}
-            ${student.nickname ? `<span class="text-purple-700 font-normal">(${student.nickname})</span>` : ""}
+            ${safeStudentFullName}
+            ${safeStudentNick}
           </div>
         </div>
         <div>
           <span class="text-slate-500 font-medium">รหัสนักเรียน:</span>
-          <div class="font-mono font-bold text-slate-800 text-sm mt-0.5">${formatStudentId(student.studentId)}</div>
+          <div class="font-mono font-bold text-slate-800 text-sm mt-0.5">${safeStudentId}</div>
         </div>
         <div>
           <span class="text-slate-500 font-medium">เพศ:</span>
@@ -489,16 +517,16 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
         <div>
           <span class="text-slate-500 font-medium">ระดับชั้น / ห้องเรียน:</span>
           <div class="font-bold text-slate-800 mt-0.5">
-            ชั้น ${formatGradeRoomShort(student.grade, student.room)} ${student.no ? `เลขที่ ${student.no}` : ""}
+            ชั้น ${safeGradeRoom} ${safeStudentNo}
           </div>
         </div>
         <div>
           <span class="text-slate-500 font-medium">หอพักที่สังกัด:</span>
-          <div class="font-bold text-purple-900 mt-0.5">${dormName}</div>
+          <div class="font-bold text-purple-900 mt-0.5">${safeDormName}</div>
         </div>
         <div>
           <span class="text-slate-500 font-medium">ห้องพัก:</span>
-          <div class="font-bold text-slate-800 mt-0.5">ห้อง ${student.dormRoom || "101"}</div>
+          <div class="font-bold text-slate-800 mt-0.5">ห้อง ${safeDormRoom}</div>
         </div>
       </div>
 
@@ -513,12 +541,12 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
               ? "bg-rose-100 text-rose-800 border border-rose-200"
               : "bg-emerald-100 text-emerald-800 border border-emerald-200"
           }">
-            ${currentStatus.isOut ? `ออกหอพัก (${currentStatus.label})` : currentStatus.status === "QUARANTINE" ? "อยู่หอพัก (กักตัว)" : "อยู่ในหอพัก (ปกติ)"}
+            ${currentStatus.isOut ? `ออกหอพัก (${safeCurrentStatusLabel})` : currentStatus.status === "QUARANTINE" ? "อยู่หอพัก (กักตัว)" : "อยู่ในหอพัก (ปกติ)"}
           </span>
-          ${currentStatus.reason ? `<span class="text-xs text-rose-700 font-medium">• เหตุผล: ${currentStatus.reason}</span>` : ""}
+          ${safeCurrentStatusReason}
         </div>
         <div class="text-[11px] text-slate-400">
-          บันทึกล่าสุด: ${formatThaiMediumDate(currentStatus.date)}
+          บันทึกล่าสุด: ${escapeHtml(formatThaiMediumDate(currentStatus.date))}
         </div>
       </div>
     </div>
@@ -526,7 +554,7 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
     <!-- Summary Stats Counters -->
     <div class="grid grid-cols-2 gap-4 mb-6">
       <div class="bg-purple-50 p-4 rounded-2xl border border-purple-200 text-center">
-        <div class="text-xs font-bold text-purple-700">ออกหอพักในช่วงการค้นหา (${startDate} ถึง ${endDate})</div>
+        <div class="text-xs font-bold text-purple-700">ออกหอพักในช่วงการค้นหา (${safeStartDate} ถึง ${safeEndDate})</div>
         <div class="text-2xl font-black text-purple-950 mt-1">${leaveHistory.length} <span class="text-xs font-normal">ครั้ง</span></div>
       </div>
       <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 text-center">
@@ -562,10 +590,10 @@ export function generateStudentHistoryReportHtml(data: StudentHistoryReportData)
     <!-- Sign-off Block -->
     <div class="pt-6 border-t-2 border-slate-300 grid grid-cols-2 gap-8 text-xs text-slate-700">
       <div class="space-y-1">
-        <div><strong>ผู้จัดทำรายงาน:</strong> ${currentUser?.name || "เจ้าหน้าที่หอพัก"}</div>
-        <div><strong>สังกัด:</strong> ${dormName}</div>
+        <div><strong>ผู้จัดทำรายงาน:</strong> ${safeCreatorName}</div>
+        <div><strong>สังกัด:</strong> ${safeDormName}</div>
         <div class="text-slate-400 text-[10px] pt-1">
-          พิมพ์เมื่อ: ${formatThaiFullDate(todayStr)} เวลา ${printTimeStr} น.
+          พิมพ์เมื่อ: ${escapeHtml(formatThaiFullDate(todayStr))} เวลา ${escapeHtml(printTimeStr)} น.
         </div>
       </div>
       <div class="text-center space-y-3">

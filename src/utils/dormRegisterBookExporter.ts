@@ -1,6 +1,7 @@
 import { DailyAttendance, Dormitory, Student, SystemSettings } from "../types";
 import { formatGradeRoomShort, getDaysInMonth, THAI_DAYS_SHORT, THAI_MONTHS } from "./dateUtils";
 import { formatStudentId } from "./studentUtils";
+import { escapeHtml, openSafeWindowUrl } from "./security";
 
 // Thai National Fixed Holidays (Month is 1-indexed)
 export const THAI_NATIONAL_HOLIDAYS: Record<string, string> = {
@@ -159,7 +160,7 @@ export function triggerPrintDormBook(htmlContent: string, fileName: string = "�
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
 
-  const printWin = window.open(url, "_blank");
+  const printWin = openSafeWindowUrl(url);
   if (printWin) {
     printWin.focus();
   } else {
@@ -216,12 +217,13 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
   } = data;
 
   const yearBE = year + 543;
-  const monthName = THAI_MONTHS[month - 1] || "";
+  const monthName = escapeHtml(THAI_MONTHS[month - 1] || "");
   const daysInMonth = getDaysInMonth(year, month);
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
-  const teacherName = dorm.teacherName || "-";
+  const schoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล");
+  const teacherName = escapeHtml(dorm.teacherName || "-");
+  const safeDormName = escapeHtml(dorm.name);
   const dormTypeLabel = dorm.type === "male" ? "หอพักชาย" : dorm.type === "female" ? "หอพักหญิง" : "หอพักรวม";
 
   // Build daily attendance lookup map if mode is "filled"
@@ -276,9 +278,10 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
       ? `<tr><td colspan="${daysInMonth + 4}" style="padding: 24px; text-align: center; color: #64748b; font-size: 12px; border: 1px solid #cbd5e1;">ไม่มีข้อมูลนักเรียนในหอพักนี้</td></tr>`
       : chunk.map((std, idx) => {
           const rowNo = pageIndex * studentsPerPage + idx + 1;
-          const fullName = `${std.title || ""}${std.firstName || ""} ${std.lastName || ""}`.trim();
-          const nickname = std.nickname ? `(${std.nickname})` : "-";
-          const gradeRoom = formatGradeRoomShort(std.grade, std.room);
+          const fullName = escapeHtml(`${std.title || ""}${std.firstName || ""} ${std.lastName || ""}`.trim());
+          const nickname = std.nickname ? `(${escapeHtml(std.nickname)})` : "-";
+          const gradeRoom = escapeHtml(formatGradeRoomShort(std.grade, std.room));
+          const safeRowNo = escapeHtml(std.no || rowNo);
           const bgTr = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
 
           const dayCells = daysArray.map((day) => {
@@ -307,12 +310,12 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
               }
             }
 
-            return `<td style="border: 1px solid #cbd5e1; ${weekendBorder} ${holidayBg} ${cellStyle} text-align: center; padding: 2px 1px; width: ${isLandscape ? "24px" : "18px"}; height: 22px; font-family: Sarabun, sans-serif;">${cellContent}</td>`;
+            return `<td style="border: 1px solid #cbd5e1; ${weekendBorder} ${holidayBg} ${cellStyle} text-align: center; padding: 2px 1px; width: ${isLandscape ? "24px" : "18px"}; height: 22px; font-family: Sarabun, sans-serif;">${escapeHtml(cellContent)}</td>`;
           }).join("");
 
           return `
             <tr style="background-color: ${bgTr};">
-              <td style="border: 1px solid #cbd5e1; text-align: center; font-weight: 600; font-size: 11px; padding: 3px 2px; color: #1e293b;">${std.no || rowNo}</td>
+              <td style="border: 1px solid #cbd5e1; text-align: center; font-weight: 600; font-size: 11px; padding: 3px 2px; color: #1e293b;">${safeRowNo}</td>
               <td style="border: 1px solid #cbd5e1; text-align: left; font-size: 11px; padding: 3px 6px; white-space: nowrap; color: #0f172a; font-weight: 500;">${fullName}</td>
               <td style="border: 1px solid #cbd5e1; text-align: center; font-size: 10.5px; padding: 3px 4px; white-space: nowrap; color: #475569;">${nickname}</td>
               <td style="border: 1px solid #cbd5e1; text-align: center; font-size: 10.5px; padding: 3px 4px; white-space: nowrap; color: #475569; font-weight: 600;">${gradeRoom}</td>
@@ -343,7 +346,7 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
             สมุดเช็คยอดนักเรียนประจำเดือน เดือน${monthName} พ.ศ. ${yearBE}
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #334155; border-bottom: 1.5px solid #0f172a; padding-bottom: 4px; margin-bottom: 6px;">
-            <div><strong>หอพัก:</strong> ${dorm.name} (${dormTypeLabel})</div>
+            <div><strong>หอพัก:</strong> ${safeDormName} (${dormTypeLabel})</div>
             <div><strong>ครูประจำหอพัก:</strong> ${teacherName}</div>
             <div><strong>นักเรียนทั้งหมด:</strong> ${sortedStudents.length} คน</div>
             <div><strong>หน้า:</strong> ${pageIndex + 1} / ${totalPages}</div>
@@ -405,7 +408,7 @@ export function exportDormRegisterBookHtml(data: DormRegisterBookData): string {
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>สมุดเช็คยอดนักเรียน_${dorm.name}_เดือน${monthName}_${yearBE}</title>
+  <title>สมุดเช็คยอดนักเรียน_${safeDormName}_เดือน${monthName}_${yearBE}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
 

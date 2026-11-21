@@ -20,7 +20,7 @@ import { UserAndDatabaseView } from "./components/users/UserAndDatabaseView";
 import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusManagerView";
 import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
-import { FirebaseStatusBadge } from "./components/common/FirebaseStatusBadge";
+import { sanitizeUserForClient, stripDangerousKeys } from "./utils/security";
 import {
   useAddDormMutation,
   useAddStudentMutation,
@@ -70,7 +70,7 @@ function MainAppContent() {
     try {
       const saved = localStorage.getItem("dorm_system_settings");
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed = stripDangerousKeys(JSON.parse(saved));
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           return { ...DEFAULT_SYSTEM_SETTINGS, ...parsed };
         }
@@ -81,12 +81,13 @@ function MainAppContent() {
     return DEFAULT_SYSTEM_SETTINGS;
   });
 
-  // Sync settings from Firestore when query resolves
+  // Sync settings from central database when query resolves
   React.useEffect(() => {
     if (dbSettings) {
-      setSystemSettings(dbSettings);
+      const cleanSettings = stripDangerousKeys(dbSettings);
+      setSystemSettings(cleanSettings);
       try {
-        localStorage.setItem("dorm_system_settings", JSON.stringify(dbSettings));
+        localStorage.setItem("dorm_system_settings", JSON.stringify(cleanSettings));
       } catch (e) {}
     }
   }, [dbSettings]);
@@ -562,17 +563,13 @@ function MainAppContent() {
                 queryClient.invalidateQueries();
               }}
               onUserUpdated={(updatedUser) => {
-                setSessionUser(updatedUser);
-                setCurrentUser(updatedUser);
+                const safeUser = sanitizeUserForClient(updatedUser);
+                setSessionUser(safeUser);
+                setCurrentUser(safeUser);
               }}
             />
           )}
         </main>
-
-        {/* Right-Side Bottom Footer: สถานะเชื่อมต่อฐานข้อมูล */}
-        <footer className="shrink-0 bg-white border-t border-slate-200 shadow-2xs z-10">
-          <FirebaseStatusBadge variant="footer" />
-        </footer>
       </div>
     </div>
 

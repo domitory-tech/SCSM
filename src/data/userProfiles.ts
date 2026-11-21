@@ -1,6 +1,6 @@
 import { UserProfile } from "../types";
 
-// Standard System Accounts with instant login access
+// Default system roles (passwords are configured securely on first login or by an administrator)
 export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
   {
     id: "user-admin",
@@ -12,7 +12,7 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleLabel: "ผู้ดูแลระบบสูงสุด (Admin)",
     phone: "081-234-5678",
     dormPosition: "ผู้ดูแลระบบ",
-    password: "123456",
+    hasPassword: false,
     avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
   },
   {
@@ -25,7 +25,7 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleLabel: "เจ้าหน้าที่ประสานงานหอพัก",
     phone: "089-876-5432",
     dormPosition: "เจ้าหน้าที่ส่วนกลาง",
-    password: "123456",
+    hasPassword: false,
     avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
   },
   {
@@ -37,7 +37,7 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategoryName: "ครูหอพัก",
     roleLabel: "ครูประจำหอพัก",
     dormPosition: "ครูประจำหอพัก",
-    password: "123456",
+    hasPassword: false,
     avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
   },
   {
@@ -49,10 +49,9 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategoryName: "ผู้เยี่ยมชม",
     roleLabel: "ผู้เยี่ยมชมทั่วไป (Visitor)",
     dormPosition: "ผู้เยี่ยมชม",
-    password: "123456",
+    hasPassword: false,
     avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80"
   }
 ];
 
 export const DEMO_USERS: UserProfile[] = DEFAULT_SYSTEM_USERS;
-

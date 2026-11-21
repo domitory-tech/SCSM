@@ -9,6 +9,7 @@ import {
   cleanBedValue,
   formatBedDisplay
 } from "./dormUtils";
+import { escapeAttr, escapeHtml, openSafeWindowUrl, sanitizeSafeImageUrl } from "./security";
 
 export interface DormLayoutRoomGroup {
   roomName: string;
@@ -105,10 +106,10 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
   } = options;
 
   const isLandscape = orientation === "landscape";
-  const todayText = formatThaiFullDate(new Date().toISOString().split("T")[0]);
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
-  const schoolAcronym = systemSettings?.schoolAcronymTh ? `(${systemSettings.schoolAcronymTh})` : "";
-  const schoolLogoUrl = systemSettings?.schoolLogoUrl ? getDirectImageUrl(systemSettings.schoolLogoUrl) : "";
+  const todayText = escapeHtml(formatThaiFullDate(new Date().toISOString().split("T")[0]));
+  const schoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล");
+  const safeDocTitle = escapeHtml(documentTitle);
+  const schoolLogoUrl = sanitizeSafeImageUrl(systemSettings?.schoolLogoUrl ? getDirectImageUrl(systemSettings.schoolLogoUrl) : "");
 
   // Render each dormitory section
   const dormsHtml = dormsData.map((dData, dormIdx) => {
@@ -123,6 +124,10 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
       a.localeCompare(b, "th", { numeric: true })
     );
 
+    const safeDormName = escapeHtml(dorm.name);
+    const safeDormId = escapeHtml(dorm.id);
+    const safeDormTypeTh = escapeHtml(dormTypeTh);
+
     // PAGE 1: Master Summary / Cover Page
     const page1Html = `
       <div class="print-page page-first ${isLandscape ? "page-landscape" : "page-portrait"}">
@@ -131,7 +136,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
           <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 6px;">
             ${
               schoolLogoUrl
-                ? `<img src="${schoolLogoUrl}" alt="School Logo" style="width: 48px; height: 48px; object-fit: contain;" />`
+                ? `<img src="${escapeAttr(schoolLogoUrl)}" alt="School Logo" style="width: 48px; height: 48px; object-fit: contain;" />`
                 : `<div style="width: 44px; height: 44px; border-radius: 12px; background: #6b21a8; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px;">หอ</div>`
             }
             <div style="text-align: left;">
@@ -145,7 +150,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
           </div>
           
           <h1 style="font-size: 20px; font-weight: 900; color: #1e1b4b; margin: 4px 0 2px 0; letter-spacing: -0.3px;">
-            ผังการจัดห้องนอน ${dorm.name}
+            ผังการจัดห้องนอน ${safeDormName}
           </h1>
           <div style="font-size: 10.5px; color: #64748b; margin-top: 3px;">
             ข้อมูล ณ ${todayText}
@@ -156,7 +161,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
         <div class="section-box" style="margin-bottom: 16px;">
           <div class="section-title" style="font-size: 13px; font-weight: 800; color: #581c87; background: #faf5ff; border: 1px solid #e9d5ff; padding: 6px 12px; border-radius: 8px 8px 0 0; display: flex; align-items: center; justify-content: space-between;">
             <span>🏢 ข้อมูลทั่วไปของหอพัก</span>
-            <span style="font-size: 11px; font-weight: 700; color: #7e22ce;">รหัสหอพัก: ${dorm.id}</span>
+            <span style="font-size: 11px; font-weight: 700; color: #7e22ce;">รหัสหอพัก: ${safeDormId}</span>
           </div>
           <div style="border: 1px solid #e9d5ff; border-top: none; padding: 12px; border-radius: 0 0 8px 8px; background: #ffffff;">
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
@@ -175,7 +180,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e2e8f0; font-size: 11px; color: #475569;">
-              <div><strong>ประเภทหอพัก:</strong> ${dormTypeTh}</div>
+              <div><strong>ประเภทหอพัก:</strong> ${safeDormTypeTh}</div>
               <div><strong>เตียงที่ใช้:</strong> <span style="color: #4338ca; font-weight: 700;">${totalStudents} เตียง</span></div>
               <div><strong>เฉลี่ยต่อห้อง:</strong> ${(roomCount > 0 ? (totalStudents / roomCount).toFixed(1) : "0")} คน/ห้อง</div>
             </div>
@@ -212,15 +217,15 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
                         return `
                         <tr style="border-bottom: 1px solid #f1f5f9; ${isHead ? "background: #faf5ff;" : ""}">
                           <td style="padding: 6px 10px; text-align: center; font-weight: 700; color: #64748b;">${tIdx + 1}</td>
-                          <td style="padding: 6px 12px; font-weight: 700; color: #0f172a;">${t.name}</td>
+                          <td style="padding: 6px 12px; font-weight: 700; color: #0f172a;">${escapeHtml(t.name)}</td>
                           <td style="padding: 6px 12px;">
                             <span style="display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; ${
                               isHead ? "background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe;" : "background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0;"
                             }">
-                              ${posLabel}
+                              ${escapeHtml(posLabel)}
                             </span>
                           </td>
-                          <td style="padding: 6px 12px; text-align: center; font-family: monospace; font-weight: 700; color: #0284c7;">${phone}</td>
+                          <td style="padding: 6px 12px; text-align: center; font-family: monospace; font-weight: 700; color: #0284c7;">${escapeHtml(phone)}</td>
                           <td style="padding: 6px 12px; text-align: center;">
                             <span style="font-size: 9.5px; font-weight: 700; color: #166534; background: #dcfce7; padding: 1.5px 6px; border-radius: 4px;">ปฏิบัติหน้าที่</span>
                           </td>
@@ -250,7 +255,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
                         const pct = totalStudents > 0 ? ((count / totalStudents) * 100).toFixed(1) : "0.0";
                         return `
                         <div style="flex: 1 1 100px; min-width: 90px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; text-align: center;">
-                          <div style="font-size: 11px; font-weight: 700; color: #475569;">ชั้น ${grade}</div>
+                          <div style="font-size: 11px; font-weight: 700; color: #475569;">ชั้น ${escapeHtml(grade)}</div>
                           <div style="font-size: 15px; font-weight: 900; color: #0f172a; margin: 1px 0;">${count} <span style="font-size: 9.5px; font-weight: 600; color: #64748b;">คน</span></div>
                           <div style="font-size: 9px; color: #7e22ce; font-weight: 600;">(${pct}%)</div>
                         </div>
@@ -267,7 +272,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
                 ${roomGroups
                   .map((rg) => `
                     <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">
-                      ${rg.roomName} <strong>(${rg.students.length} คน)</strong>
+                      ${escapeHtml(rg.roomName)} <strong>(${rg.students.length} คน)</strong>
                     </span>
                   `)
                   .join("")}
@@ -290,9 +295,10 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
       const tableRowsHtml = bedRows
         .map((rowItem, rIdx) => {
           const st = rowItem.student;
-          const fullName = `${st.title || ""}${st.firstName} ${st.lastName}`.trim();
-          const nickname = st.nickname ? `(${st.nickname})` : "";
-          const gradeRoom = st.room ? `${st.grade}/${st.room}` : st.grade || "-";
+          const fullName = escapeHtml(`${st.title || ""}${st.firstName} ${st.lastName}`.trim());
+          const nickname = st.nickname ? `(${escapeHtml(st.nickname)})` : "";
+          const gradeRoom = escapeHtml(st.room ? `${st.grade}/${st.room}` : st.grade || "-");
+          const safeBedLabel = escapeHtml(rowItem.bedLabel);
           const isEven = rIdx % 2 === 0;
 
           return `
@@ -303,7 +309,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
                   <td rowspan="${rowItem.bedRowSpan}" style="padding: 4px 6px; text-align: center; font-weight: 800; font-size: 11px; color: #1e1b4b; background: ${
                       rowItem.bedGroupIndex % 2 === 0 ? "#faf5ff" : "#f8fafc"
                     }; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; vertical-align: middle; width: 125px;">
-                    <div>${rowItem.bedLabel}</div>
+                    <div>${safeBedLabel}</div>
                   </td>
                 `
                   : ""
@@ -325,7 +331,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
           <!-- Room Header -->
           <div style="background: #0f172a; color: #ffffff; padding: 5px 10px; display: flex; align-items: center; justify-content: space-between;">
             <div style="font-size: 12px; font-weight: 900; color: #a5f3fc; display: flex; align-items: center; gap: 4px;">
-              <span>🛏️ ${rg.roomName}</span>
+              <span>🛏️ ${escapeHtml(rg.roomName)}</span>
             </div>
             <div style="font-size: 10px; font-weight: 800; background: #7e22ce; color: #ffffff; padding: 1.5px 8px; border-radius: 12px;">
               ${rg.students.length} คน
@@ -362,7 +368,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
         <!-- Page Header on Page 2+ -->
         <div class="rooms-page-header" style="border-bottom: 1.5px solid #0f172a; padding-bottom: 6px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
           <div>
-            <strong style="color: #6b21a8; font-size: 13px;">ผังการจัดห้องนอน</strong> : <span style="font-weight: 800; font-size: 13px; color: #0f172a;">${dorm.name}</span> (${dormTypeTh})
+            <strong style="color: #6b21a8; font-size: 13px;">ผังการจัดห้องนอน</strong> : <span style="font-weight: 800; font-size: 13px; color: #0f172a;">${safeDormName}</span> (${safeDormTypeTh})
           </div>
           <div style="color: #475569; font-size: 10px;">
             ${schoolName} • รวม ${roomCount} ห้องนอน (${totalStudents} คน)
@@ -388,7 +394,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>${documentTitle}</title>
+  <title>${safeDocTitle}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
@@ -514,7 +520,7 @@ export function generateDormLayoutPrintHtml(options: DormLayoutPrintOptions): st
         🖨️
       </div>
       <div>
-        <div style="font-size: 13px; font-weight: 800; line-height: 1.2;">${documentTitle}</div>
+        <div style="font-size: 13px; font-weight: 800; line-height: 1.2;">${safeDocTitle}</div>
         <div style="font-size: 10.5px; color: #cbd5e1;">
           รูปแบบ: ${isLandscape ? "A4 แนวนอน (Landscape)" : "A4 แนวตั้ง (Portrait)"} • หน้าแรกพิมพ์ข้อมูลหอพัก & ครูทั้งหมด • หน้าที่ 2+ แสดง 2 คอลัมน์ต่อแถว
         </div>
@@ -564,8 +570,8 @@ export function triggerPrintDormLayout(options: DormLayoutPrintOptions) {
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
 
-  // 1. Try window.open
-  const printWin = window.open(url, "_blank");
+  // 1. Try openSafeWindowUrl
+  const printWin = openSafeWindowUrl(url);
   if (printWin) {
     printWin.focus();
   } else {

@@ -3,6 +3,7 @@ import { StudentComparisonItem } from "./fingerprintCompareUtils";
 import { formatThaiMediumDate, getTodayDateString, THAI_DAYS_FULL, THAI_MONTHS } from "./dateUtils";
 import { extractDormNumber, isDormMatch } from "./dormUtils";
 import { triggerPrintWindow } from "./studentSearchReportExporter";
+import { escapeHtml } from "./security";
 
 export type LateReportPrintScope =
   | "LATE_ALL"
@@ -163,15 +164,6 @@ export function formatThaiOfficialLateHeaderDate(dateStr?: string): string {
   const yearBE = dt.getFullYear() + 543;
 
   return `ประจำ${dayFull} ที่ ${dayOfMonth} เดือน${monthName} พ.ศ. ${yearBE}`;
-}
-
-function escapeHtml(text: string): string {
-  return String(text ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 /**

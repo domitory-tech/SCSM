@@ -16,7 +16,8 @@ export interface UserProfile {
   dormPosition?: DormPosition; // ตำแหน่งประจำหอพัก (ครูประธานหอพัก, ครูรองประธานหอพัก, ครูหัวหน้าหอพัก, ครูประจำหอพัก)
   allowedDormIds?: string[]; // Dormitories this user is allowed to check student lists for
   avatarUrl?: string;
-  password?: string;
+  passwordHash?: string;
+  hasPassword?: boolean;
 }
 
 export interface DormTeacher {

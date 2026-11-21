@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { Student, SystemSettings } from "../types";
 import { formatGradeRoomFullTitle, formatThaiMonthYear, getDaysInMonth, THAI_MONTHS, THAI_DAYS_SHORT } from "./dateUtils";
+import { escapeHtml, sanitizeHtmlFragment } from "./security";
 
 export interface MonthlyRoomData {
   grade: string;
@@ -30,7 +31,8 @@ export function exportAllMonthlyReportsHtml(
   fileName?: string
 ): void {
   const daysInMonth = getDaysInMonth(year, month);
-  const monthTitle = formatThaiMonthYear(year, month);
+  const monthTitle = escapeHtml(formatThaiMonthYear(year, month));
+  const safeSchoolName = escapeHtml(schoolName);
   const actualFileName = fileName || `รายงานสรุปเช็คยอดนักเรียน_ทุกระดับชั้น_${THAI_MONTHS[month - 1]}_${year + 543}.html`;
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -81,13 +83,16 @@ export function exportAllMonthlyReportsHtml(
               colorStyle = "color: #78350f; font-weight: 800; font-size: 10px;";
             }
 
-            return `<td style="border:1px solid #cbd5e1; padding:2px 1px; text-align:center; line-height:1; ${bgStyleCell} ${colorStyle}">${code}</td>`;
+            return `<td style="border:1px solid #cbd5e1; padding:2px 1px; text-align:center; line-height:1; ${bgStyleCell} ${colorStyle}">${escapeHtml(code)}</td>`;
           }).join("");
+
+          const safeStudentNo = escapeHtml(student.no || sIdx + 1);
+          const safeStudentName = escapeHtml(`${student.title || ""}${student.firstName} ${student.lastName}`);
 
           return `
             <tr style="${bgStyle}">
-              <td style="border:1px solid #cbd5e1; padding:3px 2px; text-align:center; font-weight:bold; color:#334155;">${student.no || sIdx + 1}</td>
-              <td style="border:1px solid #cbd5e1; padding:3px 6px; text-align:left; font-weight:500; color:#0f172a; white-space:nowrap;">${student.title || ""}${student.firstName} ${student.lastName}</td>
+              <td style="border:1px solid #cbd5e1; padding:3px 2px; text-align:center; font-weight:bold; color:#334155;">${safeStudentNo}</td>
+              <td style="border:1px solid #cbd5e1; padding:3px 6px; text-align:left; font-weight:500; color:#0f172a; white-space:nowrap;">${safeStudentName}</td>
               ${daysCellsHtml}
               <td style="border:1px solid #cbd5e1; padding:3px 2px; text-align:center; font-weight:bold; color:#581c87; background-color:#faf5ff;">
                 ${outCount > 0 ? `<span style="padding:1px 4px; border-radius:4px; background-color:#f3e8ff; color:#6b21a8; font-size:9.5px; font-weight:bold;">${outCount} วัน</span>` : `<span style="color:#94a3b8; font-weight:normal;">0</span>`}
@@ -129,10 +134,10 @@ export function exportAllMonthlyReportsHtml(
       <div class="monthly-print-page" style="${isLast ? 'page-break-after:auto; break-after:auto;' : ''}">
         <!-- Header -->
         <div style="text-align:center; margin-bottom:10px; padding-bottom:6px;">
-          <h1 style="font-size:16px; font-weight:800; color:#0f172a; margin:0 0 2px 0;">${schoolName}</h1>
+          <h1 style="font-size:16px; font-weight:800; color:#0f172a; margin:0 0 2px 0;">${safeSchoolName}</h1>
           <h2 style="font-size:13px; font-weight:700; color:#1e293b; margin:0 0 4px 0;">สรุปเช็คยอดนักเรียนประจำเดือน ${monthTitle}</h2>
           <div style="display:inline-block; padding:2px 12px; background-color:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:11.5px; font-weight:700; color:#0f172a;">
-            นักเรียนระดับชั้น ${roomData.fullTitle} (จำนวน ${roomData.totalStudents} คน)
+            นักเรียนระดับชั้น ${escapeHtml(roomData.fullTitle)} (จำนวน ${roomData.totalStudents} คน)
           </div>
         </div>
 
@@ -199,7 +204,7 @@ export function exportAllMonthlyReportsHtml(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${actualFileName.replace(".html", "")}</title>
+  <title>${escapeHtml(actualFileName.replace(".html", ""))}</title>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     @page {
@@ -297,7 +302,7 @@ export function exportMonthlyReportHtmlDocument(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileName.replace(".html", "")}</title>
+  <title>${escapeHtml(fileName.replace(".html", ""))}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -374,7 +379,7 @@ export function exportMonthlyReportHtmlDocument(
 </head>
 <body>
   <div class="max-w-[297mm] mx-auto">
-    ${container.innerHTML}
+    ${sanitizeHtmlFragment(container.innerHTML)}
   </div>
 </body>
 </html>`;

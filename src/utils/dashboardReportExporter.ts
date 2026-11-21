@@ -2,6 +2,7 @@ import { SystemSettings } from "../types";
 import { formatThaiFullDate, formatThaiMonthYear, formatGradeRoomShort } from "./dateUtils";
 import { formatDormShort } from "./dormUtils";
 import { formatStudentId } from "./studentUtils";
+import { escapeAttr, escapeHtml } from "./security";
 
 export interface DashboardReportExportData {
   periodType: "daily" | "weekly" | "monthly";
@@ -99,11 +100,15 @@ export function exportDashboardReportHtml(
     insights
   } = data;
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
-  const systemTitle = systemSettings?.systemTitleTh || "ระบบบริหารจัดการหอพักนักเรียน";
+  const schoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล");
+  const systemTitle = escapeHtml(systemSettings?.systemTitleTh || "ระบบบริหารจัดการหอพักนักเรียน");
+  const safePeriodTitle = escapeHtml(periodTitle);
+  const safeDateRangeText = escapeHtml(dateRangeText);
+  const safeFilterDormName = escapeHtml(filterDormName);
+  const safeFilterGradeName = escapeHtml(filterGradeName);
+  const safeReportTitle = escapeHtml(fileName.replace(".html", ""));
 
   // Build timeline bar chart in pure SVG
-  const isMonthlyMode = periodTitle.includes("เดือน");
   const maxTimelineTotal = Math.max(...dailyTimeline.map((d) => d.total || 1), 1);
   const stepX = 72;
   const timelineSvgBars = dailyTimeline.map((item, idx) => {
@@ -112,8 +117,8 @@ export function exportDashboardReportHtml(
     const x = 30 + idx * stepX;
     return `
       <g class="bar-group">
-        <text x="${x + 20}" y="123" text-anchor="middle" font-size="8.5" fill="#64748b" font-weight="600">${item.displayDate}</text>
-        <text x="${x + 20}" y="137" text-anchor="middle" font-size="9" fill="#6b21a8" font-weight="700">${item.dayName}</text>
+        <text x="${x + 20}" y="123" text-anchor="middle" font-size="8.5" fill="#64748b" font-weight="600">${escapeHtml(item.displayDate)}</text>
+        <text x="${x + 20}" y="137" text-anchor="middle" font-size="9" fill="#6b21a8" font-weight="700">${escapeHtml(item.dayName)}</text>
         
         <!-- Out Bar (Red/Orange) -->
         <rect x="${x + 5}" y="${105 - outH}" width="13" height="${outH}" fill="#f43f5e" rx="3" />
@@ -132,8 +137,8 @@ export function exportDashboardReportHtml(
   const reasonRowsHtml = reasonStats.map((r) => `
     <div class="flex items-center justify-between text-xs py-1.5 border-b border-slate-100 last:border-0">
       <div class="flex items-center gap-2">
-        <span class="w-3 h-3 rounded-full shrink-0" style="background-color: ${r.color};"></span>
-        <span class="font-semibold text-slate-700">${r.label}</span>
+        <span class="w-3 h-3 rounded-full shrink-0" style="background-color: ${escapeAttr(r.color)};"></span>
+        <span class="font-semibold text-slate-700">${escapeHtml(r.label)}</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="font-bold text-slate-900">${r.count} คน</span>
@@ -145,7 +150,7 @@ export function exportDashboardReportHtml(
   // Build dorm table rows
   const dormTableRowsHtml = dormStats.map((d, i) => `
     <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/70"} hover:bg-purple-50/50">
-      <td class="py-2 px-3 font-bold text-slate-800 border-r border-slate-200">${d.dormName}</td>
+      <td class="py-2 px-3 font-bold text-slate-800 border-r border-slate-200">${escapeHtml(d.dormName)}</td>
       <td class="py-2 px-3 text-center text-slate-600 border-r border-slate-200 font-medium">
         <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${d.type === "female" ? "bg-pink-100 text-pink-700" : d.type === "mixed" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}">
           ${d.type === "male" ? "ชาย" : d.type === "female" ? "หญิง" : "รวม"}
@@ -170,7 +175,7 @@ export function exportDashboardReportHtml(
   // Build grade table rows
   const gradeTableRowsHtml = gradeStats.map((g, i) => `
     <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/70"}">
-      <td class="py-2 px-3 font-bold text-slate-800 border-r border-slate-200">${g.grade}</td>
+      <td class="py-2 px-3 font-bold text-slate-800 border-r border-slate-200">${escapeHtml(g.grade)}</td>
       <td class="py-2 px-3 text-center font-semibold text-blue-700 border-r border-slate-200">${g.male}</td>
       <td class="py-2 px-3 text-center font-semibold text-pink-700 border-r border-slate-200">${g.female}</td>
       <td class="py-2 px-3 text-center font-bold text-slate-900 border-r border-slate-200">${g.total}</td>
@@ -184,7 +189,7 @@ export function exportDashboardReportHtml(
   const insightsHtml = insights.map((item) => `
     <li class="flex items-start gap-2 text-xs text-slate-700">
       <span class="text-purple-600 font-bold mt-0.5">•</span>
-      <span>${item}</span>
+      <span>${escapeHtml(item)}</span>
     </li>
   `).join("");
 
@@ -200,17 +205,20 @@ export function exportDashboardReportHtml(
     const pageNumInReport = pageIdx + 2;
     const isLastAbsentPage = pageIdx === totalAbsentPages - 1;
 
-    const rowsHtml = pageChunk.map((a, i) => `
+    const rowsHtml = pageChunk.map((a, i) => {
+      const reasonText = (a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-");
+      return `
       <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
         <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
-        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
-        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${formatStudentId(a.studentId)}</td>
-        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
-        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
-        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
-        <td class="py-2 px-2.5 font-bold text-rose-600">${(a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-")}</td>
+        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${escapeHtml(a.date)}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${escapeHtml(formatStudentId(a.studentId))}</td>
+        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${escapeHtml(a.fullName)}</td>
+        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${escapeHtml(formatGradeRoomShort(a.gradeRoom))}</td>
+        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${escapeHtml(formatDormShort(a.dormName))}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${escapeHtml(reasonText)}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
 
     return `
     <!-- PAGE ${pageNumInReport}: Detailed Absence Records Log (${pageIdx + 1}/${totalAbsentPages}) -->
@@ -225,10 +233,10 @@ export function exportDashboardReportHtml(
               </h2>
             </div>
             <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
-              ${dateRangeText}
+              ${safeDateRangeText}
             </p>
             <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
-              ${filterDormName} • ${filterGradeName}
+              ${safeFilterDormName} • ${safeFilterGradeName}
             </p>
             <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
               ${schoolName} • ${systemTitle}
@@ -299,7 +307,7 @@ export function exportDashboardReportHtml(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileName.replace(".html", "")}</title>
+  <title>${safeReportTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -399,8 +407,8 @@ export function exportDashboardReportHtml(
         📊
       </div>
       <div>
-        <h1 class="text-white text-sm font-bold leading-tight">รายงานแดชบอร์ดวิเคราะห์สถิติหอพัก (${periodTitle})</h1>
-        <p class="text-slate-400 text-xs font-normal">${dateRangeText} • ${schoolName}</p>
+        <h1 class="text-white text-sm font-bold leading-tight">รายงานแดชบอร์ดวิเคราะห์สถิติหอพัก (${safePeriodTitle})</h1>
+        <p class="text-slate-400 text-xs font-normal">${safeDateRangeText} • ${schoolName}</p>
       </div>
     </div>
     <div class="flex items-center gap-3">
@@ -428,7 +436,7 @@ export function exportDashboardReportHtml(
           <span>Dormitory Statistical & Analytics Dashboard</span>
         </div>
         <h1 class="text-xl font-black text-slate-900 tracking-tight">รายงานวิเคราะห์สถิติ & สรุปข้อมูลหอพักนักเรียน</h1>
-        <p class="text-sm text-purple-800 font-bold mt-1">${periodTitle}</p>
+        <p class="text-sm text-purple-800 font-bold mt-1">${safePeriodTitle}</p>
         <p class="text-[11px] text-slate-500 font-medium mt-0.5">${schoolName} • ${systemTitle}</p>
       </div>
 
@@ -464,7 +472,7 @@ export function exportDashboardReportHtml(
         <!-- Daily Timeline Trend Chart (7 cols) -->
         <div class="col-span-7 p-3 bg-slate-50 border border-slate-200 rounded-xl">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-xs font-bold text-slate-800">📊 แนวโน้มการอยู่หอพักเทียบกับการออกหอพัก ${periodTitle.includes("เดือน") ? "(รวมวันจันทร์ - อาทิตย์)" : `(${periodTitle})`}</h2>
+            <h2 class="text-xs font-bold text-slate-800">📊 แนวโน้มการอยู่หอพักเทียบกับการออกหอพัก ${safePeriodTitle.includes("เดือน") ? "(รวมวันจันทร์ - อาทิตย์)" : `(${safePeriodTitle})`}</h2>
             <div class="flex items-center gap-2 text-[10px]">
               <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-emerald-500 rounded-xs"></span> อยู่หอ</span>
               <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-rose-500 rounded-xs"></span> ออกหอ</span>
@@ -642,8 +650,13 @@ export function exportAbsentListOnlyHtml(
     signatories
   } = data;
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
-  const systemTitle = systemSettings?.systemTitleTh || "ระบบบริหารจัดการหอพักนักเรียน";
+  const schoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล");
+  const systemTitle = escapeHtml(systemSettings?.systemTitleTh || "ระบบบริหารจัดการหอพักนักเรียน");
+  const safePeriodTitle = escapeHtml(periodTitle);
+  const safeDateRangeText = escapeHtml(dateRangeText);
+  const safeFilterDormName = escapeHtml(filterDormName);
+  const safeFilterGradeName = escapeHtml(filterGradeName);
+  const safeReportTitle = escapeHtml(fileName.replace(".html", ""));
 
   const ROWS_PER_PAGE = 26;
   const totalPages = absentList.length > 0 ? Math.ceil(absentList.length / ROWS_PER_PAGE) : 1;
@@ -660,10 +673,10 @@ export function exportAbsentListOnlyHtml(
               </h1>
             </div>
             <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
-              ${dateRangeText}
+              ${safeDateRangeText}
             </p>
             <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
-              ${filterDormName} • ${filterGradeName}
+              ${safeFilterDormName} • ${safeFilterGradeName}
             </p>
             <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
               ${schoolName} • ${systemTitle}
@@ -690,19 +703,21 @@ export function exportAbsentListOnlyHtml(
     const startIdx = pageIdx * ROWS_PER_PAGE;
     const endIdx = Math.min((pageIdx + 1) * ROWS_PER_PAGE, absentList.length);
     const chunk = absentList.slice(startIdx, endIdx);
-    const isLastPage = pageIdx === totalPages - 1;
 
-    const rowsHtml = chunk.map((a, i) => `
+    const rowsHtml = chunk.map((a, i) => {
+      const reasonText = (a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-");
+      return `
       <tr class="${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"} text-xs">
         <td class="py-2 px-2 text-center font-medium text-slate-500 border-r border-slate-200">${startIdx + i + 1}</td>
-        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${a.date}</td>
-        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${formatStudentId(a.studentId)}</td>
-        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${a.fullName}</td>
-        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${formatGradeRoomShort(a.gradeRoom)}</td>
-        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${formatDormShort(a.dormName)}</td>
-        <td class="py-2 px-2.5 font-bold text-rose-600">${(a.reason || a.statusLabel || "").includes("เช็คยอดอัตโนมัติ") || a.status === "SEMESTER_BREAK" ? "ปิดภาคเรียน" : (a.reason || a.statusLabel || "-")}</td>
+        <td class="py-2 px-2 text-center font-medium text-slate-700 border-r border-slate-200 whitespace-nowrap">${escapeHtml(a.date)}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-800 border-r border-slate-200 whitespace-nowrap text-center">${escapeHtml(formatStudentId(a.studentId))}</td>
+        <td class="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 leading-snug">${escapeHtml(a.fullName)}</td>
+        <td class="py-2 px-1.5 text-center text-slate-700 border-r border-slate-200 whitespace-nowrap font-semibold">${escapeHtml(formatGradeRoomShort(a.gradeRoom))}</td>
+        <td class="py-2 px-1.5 text-center text-purple-700 font-bold border-r border-slate-200 whitespace-nowrap">${escapeHtml(formatDormShort(a.dormName))}</td>
+        <td class="py-2 px-2.5 font-bold text-rose-600">${escapeHtml(reasonText)}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
 
     return `
     <div class="report-page flex flex-col justify-between">
@@ -717,10 +732,10 @@ export function exportAbsentListOnlyHtml(
               </h1>
             </div>
             <p class="text-xs text-purple-700 font-bold mt-1 whitespace-nowrap">
-              ${dateRangeText}
+              ${safeDateRangeText}
             </p>
             <p class="text-xs text-slate-700 font-semibold mt-0.5 whitespace-nowrap">
-              ${filterDormName} • ${filterGradeName}
+              ${safeFilterDormName} • ${safeFilterGradeName}
             </p>
             <p class="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
               ${schoolName} • ${systemTitle}
@@ -792,7 +807,7 @@ export function exportAbsentListOnlyHtml(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${fileName.replace(".html", "")}</title>
+  <title>${safeReportTitle}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -893,10 +908,10 @@ export function exportAbsentListOnlyHtml(
       </div>
       <div>
         <h1 class="text-white text-sm font-bold leading-tight">
-          บันทึกประวัติการออกหอพักของนักเรียนในช่วงนี้ (${periodTitle})
+          บันทึกประวัติการออกหอพักของนักเรียนในช่วงนี้ (${safePeriodTitle})
         </h1>
         <p class="text-slate-400 text-xs font-normal">
-          ${dateRangeText} • รวมรายชื่อทั้งหมด ${absentList.length} รายการ
+          ${safeDateRangeText} • รวมรายชื่อทั้งหมด ${absentList.length} รายการ
         </p>
       </div>
     </div>

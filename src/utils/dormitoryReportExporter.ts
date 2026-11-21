@@ -2,6 +2,7 @@ import { DormTeacher, SystemSettings, UserProfile } from "../types";
 import { formatThaiFullDate } from "./dateUtils";
 import { isTeacherCheckedBy } from "./dormUtils";
 import { formatStudentId } from "./studentUtils";
+import { escapeAttr, escapeHtml, openSafeWindowUrl, sanitizeSafeImageUrl } from "./security";
 
 export interface DormitorySummaryExportData {
   dormId: string;
@@ -75,9 +76,14 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
     checkedAt
   } = data;
 
-  const schoolName = systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล";
-  const systemTitle = systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน";
-  const logoUrl = systemSettings?.schoolLogoUrl;
+  const schoolName = escapeHtml(systemSettings?.schoolNameTh || "โรงเรียนพิจิตรปัญญานุกูล");
+  const systemTitle = escapeHtml(systemSettings?.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน");
+  const safeLogoUrl = sanitizeSafeImageUrl(systemSettings?.schoolLogoUrl);
+  const safeDormName = escapeHtml(dormName);
+  const safeDateText = escapeHtml(dateText);
+  const safeCheckedBy = checkedBy ? escapeHtml(checkedBy) : "";
+  const safeReportDate = escapeHtml(data.reportDate);
+  const safeCreatorName = currentUser?.name ? escapeHtml(currentUser.name) : "";
 
   const teacherList = Array.isArray(teachers) && teachers.length > 0 ? teachers : [];
   const anyTeacherMatched = Boolean(checkedBy && teacherList.some((t) => isTeacherCheckedBy(t.name, checkedBy)));
@@ -133,7 +139,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
             <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
             <span>คณะครูประจำหอพัก (${teacherList.length} ท่าน)</span>
           </div>
-          ${checkedBy ? `<span class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200">ผู้บันทึกข้อมูล: ${checkedBy}</span>` : ""}
+          ${safeCheckedBy ? `<span class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200">ผู้บันทึกข้อมูล: ${safeCheckedBy}</span>` : ""}
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
           ${teacherList.map((t) => {
@@ -147,21 +153,21 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
               }">
                 <div class="flex items-center gap-1.5 min-w-0">
                   <span class="w-2 h-2 rounded-full shrink-0 ${isChecker ? "bg-emerald-600" : styleInfo.dotClass}"></span>
-                  <span class="truncate ${isChecker ? "font-black text-emerald-950" : "text-slate-800"}">${t.name}</span>
-                  <span class="text-[9px] px-1.5 py-0.2 rounded shrink-0 ${styleInfo.badgeClass}">${styleInfo.label}</span>
+                  <span class="truncate ${isChecker ? "font-black text-emerald-950" : "text-slate-800"}">${escapeHtml(t.name)}</span>
+                  <span class="text-[9px] px-1.5 py-0.2 rounded shrink-0 ${styleInfo.badgeClass}">${escapeHtml(styleInfo.label)}</span>
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
-                  ${t.phone && t.phone !== "-" ? `<span class="text-[10px] text-slate-500 font-mono">📞 ${t.phone}</span>` : ""}
+                  ${t.phone && t.phone !== "-" ? `<span class="text-[10px] text-slate-500 font-mono">📞 ${escapeHtml(t.phone)}</span>` : ""}
                   ${isChecker ? `<span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full">ผู้เช็คยอด</span>` : ""}
                 </div>
               </div>
             `;
           }).join("")}
-          ${checkedBy && !anyTeacherMatched ? `
+          ${safeCheckedBy && !anyTeacherMatched ? `
             <div class="px-2.5 py-1.5 rounded-xl text-xs bg-emerald-100/90 border border-emerald-400 text-emerald-950 font-bold flex items-center justify-between gap-1.5">
               <div class="flex items-center gap-1.5 min-w-0">
                 <span class="w-2 h-2 rounded-full shrink-0 bg-emerald-600"></span>
-                <span class="truncate font-black text-emerald-950">${checkedBy}</span>
+                <span class="truncate font-black text-emerald-950">${safeCheckedBy}</span>
                 <span class="text-[9px] px-1.5 py-0.2 rounded font-bold bg-emerald-200 text-emerald-900 shrink-0">ส่วนกลาง/เช็คแทน</span>
               </div>
               <span class="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded-full shrink-0">ผู้เช็คยอด</span>
@@ -177,7 +183,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
         <div class="flex items-center justify-between py-1 px-2.5 rounded-lg bg-slate-50 border border-slate-100 text-xs">
           <div class="flex items-center gap-1.5">
             <span class="w-4 h-4 rounded-full bg-purple-100 text-purple-700 font-black text-[10px] flex items-center justify-center">${r.index}</span>
-            <span class="font-bold text-slate-800 text-[11px]">${r.label}</span>
+            <span class="font-bold text-slate-800 text-[11px]">${escapeHtml(r.label)}</span>
           </div>
           <div class="flex items-center gap-2">
             <span class="font-extrabold text-slate-900 text-xs">${r.count} <span class="font-normal text-slate-500 text-[10px]">คน</span></span>
@@ -198,14 +204,14 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
             <span class="w-4 h-4 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center text-[10px]">${idx + 1}</span>
             <span>หัวข้อที่ ${idx + 1}</span>
           </div>
-          <div class="text-slate-800 pl-5 text-[11px] leading-relaxed whitespace-pre-wrap">${n}</div>
+          <div class="text-slate-800 pl-5 text-[11px] leading-relaxed whitespace-pre-wrap">${escapeHtml(n)}</div>
         </div>
       `).join("")
     : `<div class="p-4 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 font-medium">ไม่มีบันทึกเรื่องการอบรม</div>`;
 
   const gradeTableRows = gradeStats.map((g, idx) => `
     <tr class="${idx % 2 === 0 ? "bg-white" : "bg-slate-50/70"}">
-      <td class="py-1.5 px-3 font-bold text-slate-800 border-r border-slate-200">${g.grade}</td>
+      <td class="py-1.5 px-3 font-bold text-slate-800 border-r border-slate-200">${escapeHtml(g.grade)}</td>
       <td class="py-1.5 px-2.5 text-center text-blue-700 font-semibold border-r border-slate-200">${g.male}</td>
       <td class="py-1.5 px-2.5 text-center text-pink-700 font-semibold border-r border-slate-200">${g.female}</td>
       <td class="py-1.5 px-2.5 text-center font-bold text-slate-900 border-r border-slate-200">${g.total}</td>
@@ -218,10 +224,10 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
   const absentListRows = absentList.map((st) => `
     <tr class="hover:bg-slate-50 text-xs">
       <td class="py-1.5 px-2.5 text-center font-semibold text-slate-500 border-r border-slate-200">${st.index}</td>
-      <td class="py-1.5 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${formatStudentId(st.studentId)}</td>
-      <td class="py-1.5 px-3 font-bold text-slate-900 border-r border-slate-200">${st.fullName}</td>
-      <td class="py-1.5 px-2.5 text-center font-bold text-slate-800 border-r border-slate-200">${st.gradeRoom}</td>
-      <td class="py-1.5 px-3 font-medium text-slate-800">${st.reason}</td>
+      <td class="py-1.5 px-2.5 text-center font-mono font-bold text-purple-900 border-r border-slate-200">${escapeHtml(formatStudentId(st.studentId))}</td>
+      <td class="py-1.5 px-3 font-bold text-slate-900 border-r border-slate-200">${escapeHtml(st.fullName)}</td>
+      <td class="py-1.5 px-2.5 text-center font-bold text-slate-800 border-r border-slate-200">${escapeHtml(st.gradeRoom)}</td>
+      <td class="py-1.5 px-3 font-medium text-slate-800">${escapeHtml(st.reason)}</td>
     </tr>
   `).join("");
 
@@ -229,7 +235,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <title>รายงานสรุปรายหอพัก_${dormName}_${data.reportDate}</title>
+  <title>รายงานสรุปรายหอพัก_${safeDormName}_${safeReportDate}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&family=Prompt:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -273,7 +279,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
     <div class="flex items-center gap-3">
       <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
       <div>
-        <h4 class="text-sm font-bold text-slate-800">รายงานสรุปรายหอพัก (${dormName})</h4>
+        <h4 class="text-sm font-bold text-slate-800">รายงานสรุปรายหอพัก (${safeDormName})</h4>
         <p class="text-xs text-slate-500">พร้อมสำหรับการพิมพ์กระดาษ A4 หรือบันทึกเป็น PDF</p>
       </div>
     </div>
@@ -291,20 +297,20 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
   <div class="report-page">
     <!-- Header -->
     <div class="border-b-2 border-purple-600 pb-3 mb-4 flex items-start gap-4">
-      ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="w-14 h-14 object-contain shrink-0" />` : ""}
+      ${safeLogoUrl ? `<img src="${escapeAttr(safeLogoUrl)}" alt="Logo" class="w-14 h-14 object-contain shrink-0" />` : ""}
       <div class="flex-1">
         <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-extrabold uppercase mb-1">
           <span>Dormitory Daily Summary Report</span>
         </div>
-        <h1 class="text-xl font-black text-slate-900 tracking-tight">รายงานสรุปรายหอพัก (${dormName})</h1>
-        <p class="text-sm text-purple-800 font-bold mt-0.5">สรุปยอดประจำวัน: ${dateText}</p>
+        <h1 class="text-xl font-black text-slate-900 tracking-tight">รายงานสรุปรายหอพัก (${safeDormName})</h1>
+        <p class="text-sm text-purple-800 font-bold mt-0.5">สรุปยอดประจำวัน: ${safeDateText}</p>
         <p class="text-[11px] text-slate-500 font-medium">${schoolName} • ${systemTitle}</p>
       </div>
       <div class="text-right text-xs">
         <div class="px-2.5 py-1 rounded-md text-[11px] font-extrabold ${dormType === "male" ? "bg-blue-100 text-blue-800" : "bg-pink-100 text-pink-800"} inline-block">
           ${dormType === "male" ? "หอพักนักเรียนชาย" : dormType === "female" ? "หอพักนักเรียนหญิง" : "หอพักนักเรียน"}
         </div>
-        ${currentUser ? `<div class="text-[10px] text-slate-400 mt-1">ผู้จัดทำ: ${currentUser.name}</div>` : ""}
+        ${safeCreatorName ? `<div class="text-[10px] text-slate-400 mt-1">ผู้จัดทำ: ${safeCreatorName}</div>` : ""}
       </div>
     </div>
 
@@ -318,7 +324,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
         <div class="space-y-3">
           <div class="text-xs font-black text-purple-950 flex items-center gap-2 pb-1 border-b border-purple-200/80">
             <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
-            <span>รายละเอียดสรุปยอดประจำวันของ ${dormName}</span>
+            <span>รายละเอียดสรุปยอดประจำวันของ ${safeDormName}</span>
           </div>
 
           <!-- Section 1: ข้อมูลนักเรียนในหอพัก -->
@@ -383,7 +389,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
         </div>
         <div class="pt-2 text-[10px] text-slate-400 border-t border-slate-200/60 flex items-center justify-between">
           <span>${schoolName}</span>
-          <span>${dateText}</span>
+          <span>${safeDateText}</span>
         </div>
       </div>
     </div>
@@ -391,7 +397,7 @@ export function generateDormitorySummaryHtml(data: DormitorySummaryExportData): 
     <!-- Section 4: ตารางสถิติแยกตามระดับชั้น (ม.1 - ม.6) -->
     <div class="mb-4">
       <h3 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-        <span>สรุปสถิติข้อมูลแยกตามระดับชั้นภายใน ${dormName}</span>
+        <span>สรุปสถิติข้อมูลแยกตามระดับชั้นภายใน ${safeDormName}</span>
       </h3>
       <div class="border border-slate-200 rounded-xl overflow-hidden">
         <table class="w-full text-left text-xs border-collapse">
@@ -479,7 +485,7 @@ export function exportDormitoryReportHtmlDocument(data: DormitorySummaryExportDa
   const htmlContent = generateDormitorySummaryHtml(data);
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const printWin = window.open(url, "_blank");
+  const printWin = openSafeWindowUrl(url);
   if (printWin) {
     printWin.focus();
   } else {

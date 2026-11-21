@@ -118,7 +118,7 @@ export const ReasonAnalyticsCard: React.FC<ReasonAnalyticsCardProps> = ({
     }
   };
 
-  // Process all historical attendance records from Firestore
+  // Process all historical attendance records from primary cloud database
   const processedHistoricalData = useMemo(() => {
     const dormStudentCounts: Record<string, number> = {};
     dorms.forEach((d) => {

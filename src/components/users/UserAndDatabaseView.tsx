@@ -4,7 +4,7 @@ import { UserProfile, UserRole, Dormitory, SystemSettings, DormPosition, RoleNav
 import { NavigationPermissionsTab } from "./NavigationPermissionsTab";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
-import { FirebaseStatusBadge } from "../common/FirebaseStatusBadge";
+import { isValidPasswordStrength, sanitizeSafeImageUrl } from "../../utils/security";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   fetchUsers,
@@ -20,9 +20,9 @@ import {
   exportAttendanceAndNoticesDatabase,
   restoreAttendanceAndNoticesDatabase,
   savePrimaryDatabase,
-  initializeDefaultFirebaseDatabase,
   syncLiveFirebaseDatabase,
   deleteSampleData,
+  verifyAuthorizedAdminOrStaffPassword,
   DeleteSampleDataOptions
 } from "../../services/api";
 import {
@@ -418,7 +418,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     dormPosition: "ครูประจำหอพัก" as DormPosition,
     allowedDormIds: [] as string[],
     avatarUrl: PRESET_AVATARS[0],
-    password: "123456"
+    password: ""
   });
 
 
@@ -521,7 +521,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
         }
         showNotification(
           "success",
-          "บันทึกรูปโปรไฟล์ลงในระบบฐานข้อมูล Firebase เรียบร้อยแล้ว (ไม่ต้องเชื่อมต่อ Google Drive)"
+          "บันทึกรูปโปรไฟล์ลงในระบบฐานข้อมูลกลางเรียบร้อยแล้ว (ไม่ต้องเชื่อมต่อ Google Drive)"
         );
       } else {
         showNotification("error", "ไม่สามารถประมวลผลรูปภาพได้: " + (err.message || err));
@@ -570,11 +570,16 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       return;
     }
 
-    const authorizedUsers = users.filter((u) => u.roleLevel === 1 || u.roleLevel === 2);
-    const isPasswordCorrect =
-      (currentUser?.password && sampleAuthPassword === currentUser.password) ||
-      authorizedUsers.some((u) => u.password === sampleAuthPassword) ||
-      sampleAuthPassword === "123456";
+    if (!isAdmin && !isStaff) {
+      setSampleAuthError("เฉพาะเจ้าหน้าที่หรือผู้ดูแลระบบเท่านั้นที่มีสิทธิ์ดำเนินการ");
+      return;
+    }
+
+    const isPasswordCorrect = await verifyAuthorizedAdminOrStaffPassword(
+      sampleAuthPassword,
+      currentUser,
+      users
+    );
 
     if (!isPasswordCorrect) {
       setSampleAuthError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
@@ -600,21 +605,19 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     }
   };
 
-  // Firebase project setup & seed states
+  // Central database sync & GitHub modal states
   const [isInitializingDefaultDb, setIsInitializingDefaultDb] = useState<boolean>(false);
-  const [isFirebaseConfigModalOpen, setIsFirebaseConfigModalOpen] = useState<boolean>(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
-  const [copiedConfigField, setCopiedConfigField] = useState<string | null>(null);
 
   const handleInitializeDefaultDb = async () => {
     setIsInitializingDefaultDb(true);
     try {
       const res = await syncLiveFirebaseDatabase();
-      showNotification(res.success ? "success" : "error", res.message || "ซิงค์ข้อมูลจาก Firebase สำเร็จ");
+      showNotification(res.success ? "success" : "error", res.message || "ซิงค์ข้อมูลจากฐานข้อมูลกลางสำเร็จ");
       if (onDataReset) onDataReset();
       loadUsersList();
     } catch (err: any) {
-      showNotification("error", err.message || "เกิดข้อผิดพลาดในการซิงค์ข้อมูลจาก Firebase");
+      showNotification("error", err.message || "เกิดข้อผิดพลาดในการซิงค์ข้อมูลจากฐานข้อมูลกลาง");
     } finally {
       setIsInitializingDefaultDb(false);
     }
@@ -731,12 +734,16 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       return;
     }
 
-    // Check against Level 1 (Admin) or Level 2 (Staff) users, or current user, or default 123456
-    const authorizedUsers = users.filter((u) => u.roleLevel === 1 || u.roleLevel === 2);
-    const isPasswordCorrect =
-      (currentUser?.password && adminAuthPassword === currentUser.password) ||
-      authorizedUsers.some((u) => u.password === adminAuthPassword) ||
-      adminAuthPassword === "123456";
+    if (!isAdmin && !isStaff) {
+      setAdminAuthError("เฉพาะเจ้าหน้าที่หรือผู้ดูแลระบบเท่านั้นที่มีสิทธิ์ดำเนินการ");
+      return;
+    }
+
+    const isPasswordCorrect = await verifyAuthorizedAdminOrStaffPassword(
+      adminAuthPassword,
+      currentUser,
+      users
+    );
 
     if (!isPasswordCorrect) {
       setAdminAuthError("รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง");
@@ -838,8 +845,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   // Password Change Handler
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPassword || newPassword.trim().length === 0) {
-      showNotification("error", "กรุณาระบุรหัสผ่านใหม่");
+    if (!isValidPasswordStrength(newPassword)) {
+      showNotification("error", "รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
       return;
     }
 
@@ -850,6 +857,11 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
 
     const targetUser = users.find((u) => u.id === selectedTargetUserId) || currentUser;
     if (!targetUser) return;
+
+    if (!isAdmin && targetUser.hasPassword && !oldPassword.trim()) {
+      showNotification("error", "กรุณากรอกรหัสผ่านเดิมเพื่อยืนยัน");
+      return;
+    }
 
     try {
       await changeUserPassword(targetUser.id, {
@@ -875,9 +887,13 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     if (!targetUser) return;
 
     try {
-      let updatedAvatar = customAvatarUrl.trim() || selectedAvatar;
+      let updatedAvatar = customAvatarUrl.trim() ? sanitizeSafeImageUrl(customAvatarUrl.trim()) : selectedAvatar;
+      if (customAvatarUrl.trim() && !updatedAvatar) {
+        showNotification("error", "URL รูปภาพไม่ถูกต้อง (ต้องขึ้นต้นด้วย https:// หรือไฟล์ภาพที่ปลอดภัย)");
+        return;
+      }
 
-      // When a local file is selected, compress it directly into a clean, compact Data URL (no auth/unauthorized-domain error)
+      // When a local file is selected, compress it directly into a clean, compact Data URL
       if (profileSelectedFile) {
         showNotification("success", "กำลังประมวลผลรูปภาพโปรไฟล์...");
         const compressed = await compressImageFile(profileSelectedFile, 250, 250, 0.85);
@@ -909,13 +925,24 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   // Add / Edit User Handler
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      showNotification("error", "กรุณาระบุชื่อ-นามสกุล");
+    const trimmedName = formData.name.trim();
+    const trimmedPhone = formData.phone.trim();
+    if (!trimmedName || trimmedName.length > 120) {
+      showNotification("error", "กรุณาระบุชื่อ-นามสกุล (ไม่เกิน 120 ตัวอักษร)");
+      return;
+    }
+    if (trimmedPhone.length > 30) {
+      showNotification("error", "เบอร์โทรศัพท์ยาวเกินกำหนด");
+      return;
+    }
+    const rawPasswordInput = formData.password.trim();
+    if (rawPasswordInput && !isValidPasswordStrength(rawPasswordInput)) {
+      showNotification("error", "รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
       return;
     }
 
     if (!isAdmin && isStaff && (Number(formData.roleLevel) === 1 || Number(formData.roleLevel) === 2)) {
-      showNotification("error", "สิทธิ์เจ้าหน้าที่สามารถเพิ่มหรือแก้ไขได้เฉพาะสิทธิ์ครูหอพัก (ระดับ 3) เท่านั้น");
+      showNotification("error", "สิทธิ์เจ้าหน้าที่สามารถเพิ่มหรือแก้ไขได้เฉพาะสิทธิ์ครูหอพัก (ระดับ 3) หรือผู้เยี่ยมชมเท่านั้น");
       return;
     }
 
@@ -938,7 +965,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       role = "GUEST";
     }
 
-    let processedAvatarUrl = getDirectImageUrl(formData.avatarUrl || PRESET_AVATARS[0]);
+    let processedAvatarUrl = getDirectImageUrl(formData.avatarUrl || PRESET_AVATARS[0]) || PRESET_AVATARS[0];
 
     // Compress local file directly if selected in modal
     if (modalSelectedFile) {
@@ -952,9 +979,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
 
     try {
       if (editingUser) {
-        const payload: Partial<UserProfile> = {
-          name: formData.name.trim(),
-          phone: formData.phone.trim(),
+        const payload: Partial<UserProfile> & { password?: string } = {
+          name: trimmedName,
+          phone: trimmedPhone,
           roleLevel: level as any,
           roleCategory: formData.roleCategory,
           roleCategoryName,
@@ -964,19 +991,19 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           dormPosition: formData.dormPosition,
           allowedDormIds: formData.allowedDormIds,
           avatarUrl: processedAvatarUrl,
-          ...(formData.password ? { password: formData.password } : {})
+          ...(rawPasswordInput ? { password: rawPasswordInput } : {})
         };
 
         const updated = await updateUser(editingUser.id, payload);
-        showNotification("success", `อัปเดตข้อมูลผู้ใช้ ${formData.name} สำเร็จแล้ว`);
+        showNotification("success", `อัปเดตข้อมูลผู้ใช้ ${trimmedName} สำเร็จแล้ว`);
 
         if (currentUser && currentUser.id === editingUser.id && onUserUpdated) {
           onUserUpdated({ ...currentUser, ...updated });
         }
       } else {
-        const newUser = await addUser({
-          name: formData.name.trim(),
-          phone: formData.phone.trim(),
+        await addUser({
+          name: trimmedName,
+          phone: trimmedPhone,
           roleLevel: level as any,
           roleCategory: formData.roleCategory,
           roleCategoryName,
@@ -986,9 +1013,9 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           dormPosition: formData.dormPosition,
           allowedDormIds: formData.allowedDormIds,
           avatarUrl: processedAvatarUrl,
-          password: formData.password || "123456"
+          ...(rawPasswordInput ? { password: rawPasswordInput } : {})
         });
-        showNotification("success", `เพิ่มผู้ใช้งานใหม่ ${formData.name} สำเร็จแล้ว`);
+        showNotification("success", `เพิ่มผู้ใช้งานใหม่ ${trimmedName} สำเร็จแล้ว`);
       }
 
       setIsAddUserModalOpen(false);
@@ -2178,7 +2205,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-slate-800 truncate">เลือกรูปภาพจากเครื่องของท่าน</div>
-                    <div className="text-[10px] text-slate-500 truncate">บันทึกรูปภาพลงฐานข้อมูล Firebase โดยตรง รวดเร็ว ปลอดภัย และแสดงผลได้ทันที</div>
+                    <div className="text-[10px] text-slate-500 truncate">บันทึกรูปภาพลงฐานข้อมูลกลางระบบโดยตรง รวดเร็ว ปลอดภัย และแสดงผลได้ทันที</div>
                   </div>
                 </div>
 
@@ -2341,7 +2368,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   dormPosition: "ครูประจำหอพัก",
                   allowedDormIds: [],
                   avatarUrl: PRESET_AVATARS[0],
-                  password: "123456"
+                  password: ""
                 });
                 setIsAddUserModalOpen(true);
               }}
@@ -2375,7 +2402,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   <th className="py-3 px-4">ชื่อ - นามสกุล</th>
                   <th className="py-3 px-4">ระดับสิทธิ์ (Role Level)</th>
                   <th className="py-3 px-4">สิทธิ์เข้าถึง / หอพักที่เช็ครายชื่อได้</th>
-                  <th className="py-3 px-4">รหัสผ่านปัจจุบัน</th>
+                  <th className="py-3 px-4">สถานะรหัสผ่าน</th>
                   <th className="py-3 px-4 text-center">จัดการ</th>
                 </tr>
               </thead>
@@ -2458,8 +2485,17 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                           <span className="text-gray-500 text-xs">ทุกหอพัก (สิทธิ์ส่วนกลาง)</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 font-mono font-bold text-purple-700">
-                        {(isAdmin || (isStaff && (u.roleLevel === 3 || u.roleLevel === 4))) ? u.password || "123456" : "******"}
+                      <td className="py-3 px-4">
+                        {u.hasPassword ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <Lock className="w-3 h-3" />
+                            <span>ตั้งค่าแล้ว (เข้ารหัส)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <span>รอตั้งรหัสผ่านครั้งแรก</span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -2482,7 +2518,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                                     dormPosition: u.dormPosition || "ครูประจำหอพัก",
                                     allowedDormIds: u.allowedDormIds || (u.dormId ? [u.dormId] : []),
                                     avatarUrl: u.avatarUrl || PRESET_AVATARS[0],
-                                    password: u.password || "123456"
+                                    password: ""
                                   });
                                   setIsAddUserModalOpen(true);
                                 }}
@@ -2575,9 +2611,6 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               </p>
             </div>
 
-            {/* Firebase Primary Database Card */}
-            <FirebaseStatusBadge compact={false} />
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                 {/* Primary Database Sync Status */}
                 <div className="p-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 space-y-3 md:col-span-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -2587,13 +2620,13 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     </div>
                     <div>
                       <h4 className="font-bold text-gray-900 text-sm flex flex-wrap items-center gap-2">
-                        <span>ฐานข้อมูลหลัก Firebase Cloud (Primary Firestore DB)</span>
+                        <span>ฐานข้อมูลกลางระบบ (Primary Cloud Database)</span>
                         <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
-                          ✓ เชื่อมต่อกับ Firebase สำเร็จ
+                          ✓ ระบบซิงค์ฐานข้อมูลพร้อมใช้งาน
                         </span>
                       </h4>
                       <p className="text-xs text-gray-600 mt-1">
-                        ระบบใช้ <strong>Firebase Firestore</strong> เป็นฐานข้อมูลหลักสำหรับโปรเจกต์ <strong>Student Counting System</strong> พร้อมระบบซิงค์ข้อมูลอัตโนมัติ
+                        ระบบเชื่อมต่อฐานข้อมูลกลางสำหรับโปรเจกต์ <strong>Student Counting System</strong> พร้อมระบบสำรองและซิงค์ข้อมูลอัตโนมัติ
                       </p>
                     </div>
                   </div>
@@ -2601,7 +2634,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     onClick={async () => {
                       try {
                         await savePrimaryDatabase();
-                        showNotification("success", "บันทึกและซิงค์ข้อมูลหลักไปยัง Firebase สำเร็จเรียบร้อยแล้ว");
+                        showNotification("success", "บันทึกและซิงค์ข้อมูลหลักสำเร็จเรียบร้อยแล้ว");
                       } catch (e: any) {
                         showNotification("error", e.message || "ไม่สามารถบันทึกฐานข้อมูลหลักได้");
                       }
@@ -2609,7 +2642,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 shadow-xs"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    <span>ซิงค์ข้อมูลไปยัง Firebase</span>
+                    <span>ซิงค์ข้อมูลหลัก</span>
                   </button>
                 </div>
 
@@ -3557,7 +3590,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               </div>
             </div>
 
-            {/* SECTION 5: การตรวจสอบและซิงค์ข้อมูลจริงจาก Firebase Firestore */}
+            {/* SECTION 5: การตรวจสอบและซิงค์ข้อมูลจากฐานข้อมูลกลาง */}
             <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 space-y-6 mt-6 shadow-xl border border-indigo-500/30 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -3568,35 +3601,35 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                   </div>
                   <div>
                     <h4 className="font-extrabold text-white text-base flex flex-wrap items-center gap-2">
-                      <span>5. ซิงค์ & ตรวจสอบข้อมูลสดจาก Firebase Firestore (Live Database Sync)</span>
+                      <span>5. ซิงค์ & ตรวจสอบข้อมูลจากฐานข้อมูลกลาง (Live Database Sync)</span>
                       <span className="bg-emerald-400/20 text-emerald-300 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
-                        Live Firebase Connected
+                        Live Database Connected
                       </span>
                     </h4>
                     <p className="text-xs text-slate-300 mt-1">
-                      ระบบเชื่อมต่อโดยตรงกับฐานข้อมูลจริงบน Firebase Firestore และดึงข้อมูลจริงทั้งหมดโดยไม่สร้างหรือใช้ฐานข้อมูลตัวอย่าง
+                      ซิงค์และดึงข้อมูลล่าสุดจากฐานข้อมูลกลางระบบเพื่ออัปเดตข้อมูลหอพัก นักเรียน และการเช็คยอด
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+              <div className="grid grid-cols-1 gap-6 relative z-10">
                 {/* Live Data Sync Card */}
                 <div className="bg-white/5 p-5 rounded-2xl border border-white/10 space-y-4 flex flex-col justify-between">
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-emerald-300 font-extrabold text-sm border-b border-white/10 pb-2">
                       <RefreshCw className="w-4 h-4 text-emerald-400" />
-                      <span>ซิงค์และดึงข้อมูลสดจาก Firebase (Sync Live Data)</span>
+                      <span>ซิงค์และดึงข้อมูลล่าสุดจากฐานข้อมูลกลาง (Sync Live Data)</span>
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      กดปุ่มด้านล่างเพื่อดึงข้อมูลสดล่าสุดทั้งหมดจากคอลเลกชันใน Firebase Firestore ของคุณมาอัปเดตระบบทันที
+                      กดปุ่มด้านล่างเพื่อดึงข้อมูลล่าสุดทั้งหมดจากฐานข้อมูลกลางระบบมาอัปเดตหน้าจอทันที
                     </p>
                     <div className="p-3 bg-black/40 rounded-xl border border-white/10 text-[11px] text-slate-300 space-y-1 font-mono">
-                      <div className="text-emerald-400 font-bold">✓ Live Firestore Collections:</div>
-                      <div>• dorms (ข้อมูลหอพักจริง)</div>
-                      <div>• students (รายชื่อนักเรียนจริง)</div>
-                      <div>• users (บัญชีผู้ใช้งานจริง)</div>
-                      <div>• attendance & notices (การเช็คยอด & เรื่องแจ้งอบรมจริง)</div>
+                      <div className="text-emerald-400 font-bold">✓ Synchronized Collections:</div>
+                      <div>• dorms (ข้อมูลหอพัก)</div>
+                      <div>• students (รายชื่อนักเรียน)</div>
+                      <div>• users (บัญชีผู้ใช้งานแบบไม่เปิดเผยรหัสผ่าน)</div>
+                      <div>• attendance & notices (การเช็คยอด & เรื่องแจ้งอบรม)</div>
                     </div>
                   </div>
 
@@ -3606,43 +3639,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
                   >
                     <RefreshCw className={`w-4 h-4 ${isInitializingDefaultDb ? "animate-spin" : ""}`} />
-                    <span>{isInitializingDefaultDb ? "กำลังดึงข้อมูลจาก Firebase..." : "ซิงค์ & ดึงข้อมูลล่าสุดจาก Firebase Firestore"}</span>
-                  </button>
-                </div>
-
-                {/* Project ID Config Info & Custom Switch Card */}
-                <div className="bg-white/5 p-5 rounded-2xl border border-white/10 space-y-4 flex flex-col justify-between">
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-indigo-300 font-extrabold text-sm border-b border-white/10 pb-2">
-                      <Globe className="w-4 h-4 text-indigo-400" />
-                      <span>การตั้งค่าเชื่อมต่อ Firebase Project ID & Credentials</span>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      ตรวจสอบและคัดลอกค่าการตั้งค่า Firebase Config หรือดูวิธีการเปลี่ยน Project ID เมื่อย้ายไปใช้บัญชีอื่น
-                    </p>
-
-                    <div className="p-3 bg-black/40 rounded-xl border border-white/10 text-[11px] space-y-2">
-                      <div className="flex justify-between items-center text-slate-300">
-                        <span className="text-slate-400">Project ID ปัจจุบัน:</span>
-                        <span className="font-mono text-amber-200 font-bold">gen-lang-client-0460310471</span>
-                      </div>
-                      <div className="flex justify-between items-center text-slate-300">
-                        <span className="text-slate-400">Database ID:</span>
-                        <span className="font-mono text-emerald-300 font-bold">ai-studio-c3d2ba83...</span>
-                      </div>
-                      <div className="flex justify-between items-center text-slate-300">
-                        <span className="text-slate-400">บัญชีผู้ดูแล:</span>
-                        <span className="text-slate-200 font-bold">domitory@pcccr.ac.th</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setIsFirebaseConfigModalOpen(true)}
-                    className="w-full py-2.5 bg-white/10 hover:bg-white/20 text-white font-extrabold text-xs rounded-xl transition-all border border-white/20 cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <Settings className="w-4 h-4 text-amber-400" />
-                    <span>ดูรายละเอียดคู่มือการตั้งค่า Firebase Project ID</span>
+                    <span>{isInitializingDefaultDb ? "กำลังดึงข้อมูลล่าสุด..." : "ซิงค์ & ดึงข้อมูลล่าสุดจากฐานข้อมูลกลาง"}</span>
                   </button>
                 </div>
               </div>
@@ -3685,7 +3682,6 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     <div className="p-3 bg-black/40 rounded-xl border border-white/10 text-[11px] text-slate-300 space-y-1 font-mono">
                       <div className="text-emerald-400 font-bold">✓ Included Files for GitHub:</div>
                       <div>• /src (React Component Architecture)</div>
-                      <div>• firebase-applet-config.json</div>
                       <div>• package.json & Vite Config</div>
                     </div>
                   </div>
@@ -3799,13 +3795,15 @@ git push -u origin main`);
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">รหัสผ่านเริ่มต้น</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    {editingUser ? "กำหนดรหัสผ่านใหม่ (ไม่บังคับ)" : "รหัสผ่าน (อย่างน้อย 6 ตัวอักษร)"}
+                  </label>
                   <input
-                    type="text"
+                    type="password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="123"
-                    className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2 outline-none"
+                    placeholder={editingUser ? "เว้นว่างไว้หากไม่เปลี่ยน..." : "อย่างน้อย 6 ตัวอักษร หรือเว้นว่างให้ผู้ใช้ตั้งเอง"}
+                    className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#A05AFF]"
                   />
                 </div>
               </div>
@@ -4378,119 +4376,6 @@ git push -u origin main`);
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Firebase Config Guide & Project ID Modal */}
-      {isFirebaseConfigModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 text-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-indigo-500/30 space-y-5 animate-scale-up max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
-                  <Server className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-white">
-                    คู่มือการใช้งานระบบร่วมกับ Firebase Project ID / บัญชีอื่น
-                  </h3>
-                  <p className="text-xs text-amber-300 font-medium">
-                    Student Counting System — Firebase Database Management
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsFirebaseConfigModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs text-slate-300 leading-relaxed">
-              <div className="bg-indigo-950/60 p-4 rounded-xl border border-indigo-500/30 space-y-2">
-                <div className="font-bold text-amber-300 text-sm flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span>1. สถานะการเชื่อมต่อปัจจุบัน (Current Connected Firebase Project)</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1">
-                  <div className="bg-black/50 p-2.5 rounded-lg border border-white/5">
-                    <span className="text-slate-400 block">Project ID:</span>
-                    <span className="font-mono text-amber-200 font-bold">gen-lang-client-0460310471</span>
-                  </div>
-                  <div className="bg-black/50 p-2.5 rounded-lg border border-white/5">
-                    <span className="text-slate-400 block">Project Name:</span>
-                    <span className="font-mono text-emerald-300 font-bold">Student Counting System</span>
-                  </div>
-                  <div className="bg-black/50 p-2.5 rounded-lg border border-white/5">
-                    <span className="text-slate-400 block">Primary Account Email:</span>
-                    <span className="font-mono text-indigo-200 font-bold">domitory@pcccr.ac.th</span>
-                  </div>
-                  <div className="bg-black/50 p-2.5 rounded-lg border border-white/5">
-                    <span className="text-slate-400 block">Default Password:</span>
-                    <span className="font-mono text-amber-300 font-bold">Tasawan*</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="font-bold text-white text-sm">2. การย้ายระบบไปใช้กับ Firebase Project ID อื่น</div>
-                <ol className="list-decimal list-inside space-y-2 text-slate-300 pl-1">
-                  <li>
-                    สร้างโปรเจกต์ใหม่ที่ <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="text-amber-400 underline font-bold">Firebase Console</a> ตั้งชื่อว่า <strong className="text-amber-200">Student Counting System</strong>
-                  </li>
-                  <li>เปิดใช้งาน <strong>Cloud Firestore Database</strong> ในโหมด Production หรือ Test Mode</li>
-                  <li>
-                    กดปุ่ม <strong className="text-amber-300">"สร้าง & ติดตั้งโครงสร้างข้อมูลเริ่มต้นบน Firebase"</strong> ในหน้านี้ ระบบจะสร้าง Collections, 6 หอพัก และบัญชีตั้งต้นให้โดยอัตโนมัติ
-                  </li>
-                  <li>
-                    หากมีไฟล์สำรองเดิม สามารถใช้ฟังก์ชัน <strong className="text-cyan-300">"กู้คืนฐานข้อมูล (Restore Import)"</strong> เพื่อนำเข้าข้อมูลทั้งหมดเข้าสู่ Firebase Firestore โปรเจกต์ใหม่ได้ทันที
-                  </li>
-                </ol>
-              </div>
-
-              <div className="bg-black/60 p-4 rounded-xl border border-white/10 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200 text-xs">โครงสร้างคอลเลกชันใน Firestore (Firestore Collection Reference)</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`dorms
-students
-users
-notices
-attendance
-_system_status`);
-                      setCopiedConfigField("schema");
-                      setTimeout(() => setCopiedConfigField(null), 2000);
-                    }}
-                    className="px-2.5 py-1 bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] rounded-md flex items-center gap-1 cursor-pointer"
-                  >
-                    {copiedConfigField === "schema" ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedConfigField === "schema" ? "คัดลอกแล้ว!" : "คัดลอก"}</span>
-                  </button>
-                </div>
-                <pre className="text-[11px] font-mono text-emerald-300 bg-slate-950 p-2.5 rounded-lg border border-white/5 overflow-x-auto">
-{`Collections:
-- dorms/          [ข้อมูลหอพัก 1 ถึง 6]
-- students/       [ข้อมูลนักเรียนหอพัก]
-- users/          [ผู้ใช้/ผู้ดูแล/เจ้าหน้าที่/ครูหอพัก]
-- notices/        [ข้อความแจ้งเรื่องที่อบรม]
-- attendance/     [ประวัติการเช็คยอดประจำวัน]
-- _system_status/ [การตั้งค่าสถานะเริ่มต้นระบบ]`}</pre>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => setIsFirebaseConfigModalOpen(false)}
-                className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md cursor-pointer"
-              >
-                รับทราบ และ ปิดหน้าต่าง
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
 import { DailyAttendance, DailyReportData, Dormitory, Student, SystemSettings, UserProfile } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getTodayDateString, getPreviousDateString, isGradeMatch, isDormPresentStatus } from "../../utils/dateUtils";
+import { openSafeWindowUrl, sanitizeHttpsUrl } from "../../utils/security";
 import { formatStudentId } from "../../utils/studentUtils";
 import { isDormMatch, isPlaceholderTeacherName, matchStudentToDorm } from "../../utils/dormUtils";
 import {
@@ -475,13 +476,14 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
       const res = await onExportGoogleSheets(reportData);
       const targetFolderUrl = res.driveFolderUrl || res.spreadsheetUrl || GOOGLE_DRIVE_FOLDER_URL;
       
+      const safeTargetUrl = sanitizeHttpsUrl(targetFolderUrl) || GOOGLE_DRIVE_FOLDER_URL;
       setExportResult({
-        url: targetFolderUrl,
+        url: safeTargetUrl,
         msg: res.message || "ส่งออกรายงานไปยังโฟลเดอร์ Google Drive เรียบร้อยแล้ว!"
       });
 
-      // Automatically open the target Google Drive Folder in a new tab
-      window.open(targetFolderUrl, "_blank");
+      // Safely open the target Google Drive Folder in a new tab
+      openSafeWindowUrl(safeTargetUrl);
     } catch (err: any) {
       alert("เกิดข้อผิดพลาดในการส่งออก Google Sheets: " + err.message);
     } finally {

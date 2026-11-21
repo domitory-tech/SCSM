@@ -96,11 +96,10 @@ export async function uploadImageToGoogleDrive(
   );
 
   if (!uploadRes.ok) {
-    const errText = await uploadRes.text();
     if (uploadRes.status === 401) {
       cachedAccessToken = null;
     }
-    throw new Error(`เกิดข้อผิดพลาดในการอัปโหลดไปยัง Google Drive (${uploadRes.status}): ${errText}`);
+    throw new Error(`เกิดข้อผิดพลาดในการอัปโหลดไปยัง Google Drive (HTTP ${uploadRes.status})`);
   }
 
   const fileData = await uploadRes.json();

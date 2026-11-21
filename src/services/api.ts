@@ -13,7 +13,6 @@ import {
   commitChunkedSetDocs,
   commitChunkedDeleteDocs,
   cleanFirestoreData,
-  FIREBASE_PROJECT_INFO,
   withTimeout
 } from "../lib/firebase";
 import {
@@ -30,11 +29,19 @@ import {
 import { getTodayDateString, getYesterdayDateString, getPreviousDateString, getNextDateString, isGradeMatch, isRealAttendanceCheck, findNextSpecialStatus, isDormPresentStatus } from "../utils/dateUtils";
 import { cleanBedValue, matchStudentToDorm, isDormMatch, isPlaceholderTeacherName } from "../utils/dormUtils";
 import { formatStudentId, generateDefault5DigitStudentId, formatGrade } from "../utils/studentUtils";
+import {
+  hashPassword,
+  verifyPassword,
+  isValidPasswordStrength,
+  sanitizeUserForClient,
+  sanitizeSafeImageUrl,
+  stripDangerousKeys
+} from "../utils/security";
 
 import { DEFAULT_ROLE_NAVIGATION_PERMISSIONS } from "../utils/permissionUtils";
 import { DEFAULT_SYSTEM_USERS } from "../data/userProfiles";
 
-// Default System Settings for Firestore Initialization
+// Default System Settings for Initial Setup
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   schoolNameTh: "โรงเรียนพิจิตรปัญญานุกูล",
   schoolNameEn: "Pichit Panyanukul School",
@@ -66,13 +73,25 @@ export const CACHE_KEYS = {
   SYSTEM_SETTINGS: "dorm_system_settings"
 };
 
+const AUTH_HASH_CACHE_KEY = "dorm_auth_hashes_v1";
+
 export function getLocalCache<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? stripDangerousKeys(JSON.parse(raw)) : null;
   } catch (e) {
     return null;
   }
+}
+
+function getAuthHashMap(): Record<string, string> {
+  return getLocalCache<Record<string, string>>(AUTH_HASH_CACHE_KEY) || {};
+}
+
+function setAuthHashForUser(userId: string, passwordHash: string): void {
+  const map = getAuthHashMap();
+  map[userId] = passwordHash;
+  setLocalCache(AUTH_HASH_CACHE_KEY, map);
 }
 
 export function setLocalCache<T>(key: string, data: T): void {
@@ -84,7 +103,7 @@ export function setLocalCache<T>(key: string, data: T): void {
 }
 
 // ----------------------------------------------------------------------
-// Short-TTL & In-Flight Deduplicated Firestore Collection Read Cache
+// Short-TTL & In-Flight Deduplicated Cloud Collection Read Cache
 // ----------------------------------------------------------------------
 const READ_DEDUPE_TTL_MS = 4000;
 const inFlightCollectionReads = new Map<string, Promise<Array<{ id: string; data: Record<string, any> }>>>();
@@ -158,7 +177,7 @@ export function updateLocalCacheList<T extends { id: string }>(
 }
 
 // ----------------------------------------------------------------------
-// Dormitories API (Firebase Firestore Exclusive with Local Cache)
+// Dormitories API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchDorms(): Promise<Dormitory[]> {
   try {
@@ -169,11 +188,11 @@ export async function fetchDorms(): Promise<Dormitory[]> {
       setLocalCache(CACHE_KEYS.DORMS, sorted);
       return sorted;
     }
-    // If empty in Firestore, return empty array (do NOT seed mock data)
+    // If empty in primary database, return empty array (do NOT seed mock data)
     setLocalCache(CACHE_KEYS.DORMS, []);
     return [];
   } catch (err: any) {
-    console.warn("Firestore fetchDorms offline fallback:", err?.message || err);
+    console.warn("Primary database fetchDorms offline fallback:", err?.message || err);
     return getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
   }
 }
@@ -227,7 +246,7 @@ export async function deleteDorm(id: string) {
 }
 
 // ----------------------------------------------------------------------
-// Students API (Firebase Firestore Exclusive with Local Cache)
+// Students API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchStudents(params?: {
   dormId?: string;
@@ -255,7 +274,7 @@ export async function fetchStudents(params?: {
       });
       setLocalCache(CACHE_KEYS.STUDENTS, students);
     } else {
-      // If collection is empty in Firestore, return empty array (do NOT seed mock data)
+      // If collection is empty in primary database, return empty array (do NOT seed mock data)
       setLocalCache(CACHE_KEYS.STUDENTS, []);
       students = [];
     }
@@ -271,7 +290,7 @@ export async function fetchStudents(params?: {
     }
     return students.sort((a, b) => (a.no || 0) - (b.no || 0));
   } catch (err: any) {
-    console.warn("Firestore fetchStudents offline fallback:", err?.message || err);
+    console.warn("Primary database fetchStudents offline fallback:", err?.message || err);
     let students = (getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || []).map((s) => {
       const bedVal = (s.dormBed !== undefined && s.dormBed !== null && String(s.dormBed).trim() !== "")
         ? String(s.dormBed).trim()
@@ -462,67 +481,206 @@ export async function batchTransferStudentsDorm(
 }
 
 // ----------------------------------------------------------------------
-// Users API (Firebase Firestore Exclusive with Local Cache)
+// Users API (Central Cloud Database with Local Cache & PBKDF2 Credential Hashing)
 // ----------------------------------------------------------------------
 export async function fetchUsers(): Promise<UserProfile[]> {
+  const localHashes = getAuthHashMap();
+  const hydrateSafeUser = (u: any): UserProfile => {
+    const hasHash = Boolean(u?.passwordHash || localHashes[u?.id] || u?.hasPassword);
+    return sanitizeUserForClient({ ...u, hasPassword: hasHash });
+  };
+
   try {
     const docs = await readCollectionCached("users", 2500);
     if (docs.length > 0) {
-      const users = docs.map((d) => ({ id: d.id, ...d.data } as UserProfile));
+      // Cache password hashes strictly in internal hash store, never exposed in returned UserProfile objects
+      docs.forEach((d) => {
+        if (typeof d.data?.passwordHash === "string" && d.data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          setAuthHashForUser(d.id, d.data.passwordHash);
+        }
+      });
+      const users = docs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
       const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
       setLocalCache(CACHE_KEYS.USERS, sorted);
       return sorted;
     }
     const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
-    if (cached && cached.length > 0) return cached;
-    setLocalCache(CACHE_KEYS.USERS, DEFAULT_SYSTEM_USERS);
-    return DEFAULT_SYSTEM_USERS;
+    if (cached && cached.length > 0) return cached.map(hydrateSafeUser);
+    const defaultSafe = DEFAULT_SYSTEM_USERS.map(hydrateSafeUser);
+    setLocalCache(CACHE_KEYS.USERS, defaultSafe);
+    return defaultSafe;
   } catch (err: any) {
-    console.warn("Firestore fetchUsers offline fallback:", err?.message || err);
-    return getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || DEFAULT_SYSTEM_USERS;
+    console.warn("fetchUsers offline fallback:", err?.message || err);
+    const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
+    return (cached && cached.length > 0 ? cached : DEFAULT_SYSTEM_USERS).map(hydrateSafeUser);
   }
 }
 
-export async function addUser(userData: Partial<UserProfile>): Promise<UserProfile> {
-  const id = userData.id || `user-${Date.now()}`;
-  const newUser: UserProfile = {
-    id,
-    name: userData.name || "ผู้ใช้งานใหม่",
-    role: userData.role || "DORM_TEACHER",
-    roleLevel: userData.roleLevel || 3,
-    roleCategory: userData.roleCategory || "DORM_TEACHER",
-    roleCategoryName: userData.roleCategoryName || "ครูหอพัก",
-    roleLabel: userData.roleLabel || "ครูประจำหอพัก",
-    password: userData.password || "123456",
-    avatarUrl: userData.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    ...userData
-  };
+export async function verifyUserPasswordById(userId: string, enteredPassword: string): Promise<boolean> {
+  if (!userId || !enteredPassword || !enteredPassword.trim()) return false;
+  const hashMap = getAuthHashMap();
+  let storedHash = hashMap[userId];
+
+  if (!storedHash) {
+    try {
+      const snap = await withTimeout(getDoc(doc(db, "users", userId)), 2500);
+      if (snap.exists()) {
+        const data = snap.data() as Record<string, any>;
+        if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          storedHash = data.passwordHash;
+          setAuthHashForUser(userId, storedHash);
+        }
+      }
+    } catch (_) {}
+  }
+
+  return verifyPassword(enteredPassword, storedHash);
+}
+
+export async function verifyAuthorizedAdminOrStaffPassword(
+  enteredPassword: string,
+  currentUser: UserProfile | null,
+  usersList?: UserProfile[]
+): Promise<boolean> {
+  if (!enteredPassword || !enteredPassword.trim()) return false;
+
+  // Verify against current logged-in Admin/Staff first
+  if (currentUser && (currentUser.roleLevel === 1 || currentUser.roleLevel === 2)) {
+    if (await verifyUserPasswordById(currentUser.id, enteredPassword)) {
+      return true;
+    }
+  }
+
+  // Or verify against any Level 1 / Level 2 user who has a configured password hash
+  const candidates = (usersList || (await fetchUsers())).filter(
+    (u) => u.roleLevel === 1 || u.roleLevel === 2
+  );
+  for (const adminUser of candidates) {
+    if (await verifyUserPasswordById(adminUser.id, enteredPassword)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function setupFirstTimePassword(userId: string, newPassword: string): Promise<UserProfile> {
+  if (!isValidPasswordStrength(newPassword)) {
+    throw new Error("รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
+  }
+
+  const users = await fetchUsers();
+  const targetUser = users.find((u) => u.id === userId) || DEFAULT_SYSTEM_USERS.find((u) => u.id === userId);
+  if (!targetUser) {
+    throw new Error("ไม่พบบัญชีผู้ใช้งานที่ระบุ");
+  }
+
+  const hashMap = getAuthHashMap();
+  if (hashMap[userId] || targetUser.hasPassword) {
+    throw new Error("บัญชีนี้ตั้งค่ารหัสผ่านไว้แล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านเดิม");
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  setAuthHashForUser(userId, passwordHash);
 
   try {
-    await setDoc(doc(db, "users", id), cleanFirestoreData(newUser));
+    await setDoc(doc(db, "users", userId), cleanFirestoreData({ passwordHash, hasPassword: true }), { merge: true });
+  } catch (e) {
+    console.warn("Saved initial password hash offline locally:", e);
+  }
+
+  const updatedSafe = sanitizeUserForClient({ ...targetUser, hasPassword: true });
+  updateLocalCacheList(CACHE_KEYS.USERS, updatedSafe, "UPSERT");
+  return updatedSafe;
+}
+
+export async function addUser(
+  userData: Partial<UserProfile> & { password?: string }
+): Promise<UserProfile> {
+  const cleanInput = stripDangerousKeys(userData);
+  const id = cleanInput.id || `user-${Date.now()}`;
+  const rawPassword = typeof cleanInput.password === "string" ? cleanInput.password.trim() : "";
+
+  if (rawPassword && !isValidPasswordStrength(rawPassword)) {
+    throw new Error("รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
+  }
+
+  const passwordHash = rawPassword ? await hashPassword(rawPassword) : undefined;
+  if (passwordHash) {
+    setAuthHashForUser(id, passwordHash);
+  }
+
+  const dbPayload: Record<string, any> = {
+    ...cleanInput,
+    id,
+    name: (cleanInput.name || "ผู้ใช้งานใหม่").trim().slice(0, 120),
+    role: cleanInput.role || "DORM_TEACHER",
+    roleLevel: cleanInput.roleLevel || 3,
+    roleCategory: cleanInput.roleCategory || "DORM_TEACHER",
+    roleCategoryName: cleanInput.roleCategoryName || "ครูหอพัก",
+    roleLabel: cleanInput.roleLabel || "ครูประจำหอพัก",
+    avatarUrl:
+      sanitizeSafeImageUrl(cleanInput.avatarUrl) ||
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    hasPassword: Boolean(passwordHash)
+  };
+  delete dbPayload.password;
+  if (passwordHash) {
+    dbPayload.passwordHash = passwordHash;
+  }
+
+  try {
+    await setDoc(doc(db, "users", id), cleanFirestoreData(dbPayload));
   } catch (e) {
     console.warn("Saved user offline locally:", e);
   }
 
-  updateLocalCacheList(CACHE_KEYS.USERS, newUser, "UPSERT");
-  return newUser;
+  const safeUser = sanitizeUserForClient(dbPayload);
+  updateLocalCacheList(CACHE_KEYS.USERS, safeUser, "UPSERT");
+  return safeUser;
 }
 
-export async function updateUser(id: string, userData: Partial<UserProfile>): Promise<UserProfile> {
+export async function updateUser(
+  id: string,
+  userData: Partial<UserProfile> & { password?: string }
+): Promise<UserProfile> {
+  const cleanInput = stripDangerousKeys(userData);
   const docRef = doc(db, "users", id);
-  let updated: any = { ...userData, id };
+  const rawPassword = typeof cleanInput.password === "string" ? cleanInput.password.trim() : "";
+
+  if (rawPassword && !isValidPasswordStrength(rawPassword)) {
+    throw new Error("รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
+  }
+
+  const dbUpdate: Record<string, any> = { ...cleanInput, id };
+  delete dbUpdate.password;
+
+  if (cleanInput.avatarUrl !== undefined) {
+    dbUpdate.avatarUrl = sanitizeSafeImageUrl(cleanInput.avatarUrl) || cleanInput.avatarUrl;
+  }
+
+  if (rawPassword) {
+    const newHash = await hashPassword(rawPassword);
+    dbUpdate.passwordHash = newHash;
+    dbUpdate.hasPassword = true;
+    setAuthHashForUser(id, newHash);
+  }
+
+  let merged: any = dbUpdate;
   try {
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      updated = { ...snap.data(), ...userData };
+      merged = { ...snap.data(), ...dbUpdate };
+      delete merged.password;
     }
-    await setDoc(docRef, cleanFirestoreData(updated), { merge: true });
+    await setDoc(docRef, cleanFirestoreData(merged), { merge: true });
   } catch (e) {
     console.warn("Updated user offline locally:", e);
   }
 
-  updateLocalCacheList(CACHE_KEYS.USERS, updated as UserProfile, "UPSERT");
-  return updated as UserProfile;
+  const safeUser = sanitizeUserForClient(merged);
+  updateLocalCacheList(CACHE_KEYS.USERS, safeUser, "UPSERT");
+  return safeUser;
 }
 
 export async function deleteUser(id: string) {
@@ -530,6 +688,12 @@ export async function deleteUser(id: string) {
     await deleteDoc(doc(db, "users", id));
   } catch (e) {
     console.warn("Deleted user offline locally:", e);
+  }
+
+  const map = getAuthHashMap();
+  if (map[id]) {
+    delete map[id];
+    setLocalCache(AUTH_HASH_CACHE_KEY, map);
   }
 
   updateLocalCacheList(CACHE_KEYS.USERS, { id } as any, "DELETE");
@@ -540,9 +704,23 @@ export async function changeUserPassword(
   id: string,
   payload: { oldPassword?: string; newPassword: string; isAdminOverride?: boolean }
 ) {
+  if (!isValidPasswordStrength(payload.newPassword)) {
+    throw new Error("รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
+  }
+
+  const existingHash = getAuthHashMap()[id];
+  if (!payload.isAdminOverride && existingHash) {
+    if (!payload.oldPassword || !(await verifyUserPasswordById(id, payload.oldPassword))) {
+      throw new Error("รหัสผ่านเดิมไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง");
+    }
+  }
+
+  const passwordHash = await hashPassword(payload.newPassword);
+  setAuthHashForUser(id, passwordHash);
+
   const docRef = doc(db, "users", id);
   try {
-    await updateDoc(docRef, { password: payload.newPassword });
+    await setDoc(docRef, { passwordHash, hasPassword: true }, { merge: true });
   } catch (e) {
     console.warn("Changed password offline locally:", e);
   }
@@ -550,15 +728,15 @@ export async function changeUserPassword(
   const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
   const idx = cachedUsers.findIndex((u) => u.id === id);
   if (idx >= 0) {
-    cachedUsers[idx] = { ...cachedUsers[idx], password: payload.newPassword };
+    cachedUsers[idx] = sanitizeUserForClient({ ...cachedUsers[idx], hasPassword: true });
     setLocalCache(CACHE_KEYS.USERS, cachedUsers);
   }
 
-  return { success: true, message: "เปลี่ยนรหัสผ่านสำเร็จใน Firebase" };
+  return { success: true, message: "เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว" };
 }
 
 // ----------------------------------------------------------------------
-// Database Management API (Firebase Firestore Exclusive with Local Cache)
+// Database Management API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export interface DeleteSampleDataOptions {
   target: "ALL" | "USERS" | "DORMS" | "STUDENTS" | "ATTENDANCE_NOTICES";
@@ -670,7 +848,7 @@ export async function clearDatabase() {
         totalDeleted += await commitChunkedDeleteDocs(colName, ids);
       }
     } catch (e) {
-      console.warn(`Could not clear ${colName} in Firestore (offline):`, e);
+      console.warn(`Could not clear ${colName} in primary database (offline):`, e);
     }
   }
 
@@ -842,8 +1020,7 @@ export async function exportAttendanceAndNoticesDatabase(payload: {
     totalNotices: filteredNotices.length,
     attendance: filteredAttendance,
     notices: filteredNotices,
-    system: "Student Counting System",
-    firebaseProject: FIREBASE_PROJECT_INFO.projectId
+    system: "Student Counting System"
   };
 }
 
@@ -857,7 +1034,11 @@ export async function restoreAttendanceAndNoticesDatabase(payload: {
   dormId?: string;
   restoreStrategy?: "UPSERT" | "REPLACE";
 }) {
-  const { data, mode = "ALL", date, month, startDate, endDate, dormId, restoreStrategy = "UPSERT" } = payload;
+  const cleanPayload = stripDangerousKeys(payload);
+  const { data, mode = "ALL", date, month, startDate, endDate, dormId, restoreStrategy = "UPSERT" } = cleanPayload;
+  if (!data || typeof data !== "object") {
+    throw new Error("รูปแบบข้อมูลสำรองไม่ถูกต้อง");
+  }
   const rawAttendance: DailyAttendance[] = Array.isArray(data.attendance) ? data.attendance : [];
   const rawNotices: Notice[] = Array.isArray(data.notices) ? data.notices : [];
 
@@ -988,16 +1169,15 @@ export async function exportDatabase() {
     const exportObj = {
       dorms: dormsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       students: studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-      users: usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      users: usersSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() })),
       notices: noticesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       attendance: attSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       systemSettings: sysSnap.exists() ? sysSnap.data() : null,
       exportedAt: new Date().toISOString(),
-      system: "Student Counting System",
-      firebaseProject: FIREBASE_PROJECT_INFO.projectId
+      system: "Student Counting System"
     };
 
-    // Update local cache with exported snapshot
+    // Update local cache with exported snapshot (never cache raw credentials)
     setLocalCache(CACHE_KEYS.DORMS, exportObj.dorms);
     setLocalCache(CACHE_KEYS.STUDENTS, exportObj.students);
     setLocalCache(CACHE_KEYS.USERS, exportObj.users);
@@ -1013,18 +1193,21 @@ export async function exportDatabase() {
     return {
       dorms: getLocalCache(CACHE_KEYS.DORMS) || [],
       students: getLocalCache(CACHE_KEYS.STUDENTS) || [],
-      users: getLocalCache(CACHE_KEYS.USERS) || [],
+      users: ((getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || []) as any[]).map(sanitizeUserForClient),
       notices: getLocalCache(CACHE_KEYS.NOTICES) || [],
       attendance: getLocalCache(CACHE_KEYS.ATTENDANCE) || [],
       systemSettings: getLocalCache(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS,
       exportedAt: new Date().toISOString(),
-      system: "Student Counting System",
-      firebaseProject: FIREBASE_PROJECT_INFO.projectId
+      system: "Student Counting System"
     };
   }
 }
 
-export async function restoreDatabase(data: any) {
+export async function restoreDatabase(rawData: any) {
+  const data = stripDangerousKeys(rawData);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("รูปแบบไฟล์สำรองฐานข้อมูลไม่ถูกต้อง");
+  }
   let restoredCount = 0;
 
   if (Array.isArray(data.dorms) && data.dorms.length > 0) {
@@ -1040,9 +1223,10 @@ export async function restoreDatabase(data: any) {
     } catch (e) { console.warn("Restored students offline:", e); }
   }
   if (Array.isArray(data.users) && data.users.length > 0) {
-    setLocalCache(CACHE_KEYS.USERS, data.users);
+    const safeUsers = data.users.map(sanitizeUserForClient);
+    setLocalCache(CACHE_KEYS.USERS, safeUsers);
     try {
-      restoredCount += await commitChunkedSetDocs("users", data.users);
+      restoredCount += await commitChunkedSetDocs("users", safeUsers);
     } catch (e) { console.warn("Restored users offline:", e); }
   }
   if (Array.isArray(data.notices) && data.notices.length > 0) {
@@ -1081,7 +1265,7 @@ export async function syncLiveFirebaseDatabase() {
 
     const dorms = dormsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const students = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const users = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const users = usersSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() }));
     const notices = noticesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const attendance = attSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
@@ -1097,7 +1281,7 @@ export async function syncLiveFirebaseDatabase() {
 
     return {
       success: true,
-      message: `ซิงค์ข้อมูลจริงจาก Firebase สำเร็จ: หอพัก ${dorms.length} แห่ง, นักเรียน ${students.length} คน, ผู้ใช้ ${users.length} บัญชี, บันทึกยอด ${attendance.length} รายการ`,
+      message: `ซิงค์ข้อมูลจากฐานข้อมูลกลางสำเร็จ: หอพัก ${dorms.length} แห่ง, นักเรียน ${students.length} คน, ผู้ใช้ ${users.length} บัญชี, บันทึกยอด ${attendance.length} รายการ`,
       counts: {
         dorms: dorms.length,
         students: students.length,
@@ -1107,10 +1291,10 @@ export async function syncLiveFirebaseDatabase() {
       }
     };
   } catch (e: any) {
-    console.warn("Sync live firebase database failed:", e);
+    console.warn("Sync live database failed:", e);
     return {
       success: false,
-      message: `เกิดข้อผิดพลาดในการซิงค์ข้อมูลจาก Firebase: ${e?.message || e}`,
+      message: `เกิดข้อผิดพลาดในการซิงค์ข้อมูลจากฐานข้อมูลกลาง: ${e?.message || e}`,
       counts: {
         dorms: (getLocalCache<any[]>(CACHE_KEYS.DORMS) || []).length,
         students: (getLocalCache<any[]>(CACHE_KEYS.STUDENTS) || []).length,
@@ -1137,7 +1321,7 @@ export async function savePrimaryDatabase() {
 }
 
 // ----------------------------------------------------------------------
-// Notices API (Firebase Firestore Exclusive with Local Cache)
+// Notices API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchNotices(date?: string): Promise<Notice[]> {
   try {
@@ -1149,7 +1333,7 @@ export async function fetchNotices(date?: string): Promise<Notice[]> {
       return notices.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
     }
   } catch (err: any) {
-    console.warn("Firestore fetchNotices offline fallback:", err?.message || err);
+    console.warn("Primary database fetchNotices offline fallback:", err?.message || err);
   }
 
   let notices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
@@ -1203,7 +1387,7 @@ export async function deleteNotice(id: string) {
 }
 
 // ----------------------------------------------------------------------
-// Attendance API (Firebase Firestore Exclusive with Local Cache)
+// Attendance API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 
 /**
@@ -1442,7 +1626,7 @@ export async function fetchAllCheckedAttendanceDates(): Promise<string[]> {
     records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
   } catch (err: any) {
-    console.warn("Firestore fetchAllCheckedAttendanceDates offline fallback:", err?.message || err);
+    console.warn("Primary database fetchAllCheckedAttendanceDates offline fallback:", err?.message || err);
     records = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   }
 
@@ -1470,7 +1654,7 @@ export async function fetchAllAttendanceRecords(): Promise<DailyAttendance[]> {
     records = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, records);
   } catch (err: any) {
-    console.warn("Firestore fetchAllAttendanceRecords offline fallback:", err?.message || err);
+    console.warn("Primary database fetchAllAttendanceRecords offline fallback:", err?.message || err);
     records = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   }
   return records;
@@ -1486,7 +1670,7 @@ export async function fetchAttendance(
     allRecords = docs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
     setLocalCache(CACHE_KEYS.ATTENDANCE, allRecords);
   } catch (err: any) {
-    console.warn("Firestore fetchAttendance offline fallback:", err?.message || err);
+    console.warn("Primary database fetchAttendance offline fallback:", err?.message || err);
     allRecords = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
   }
 
@@ -1499,7 +1683,7 @@ export async function fetchAttendance(
     );
     if (match) return match;
 
-    // Direct Firestore Document lookup fallback
+    // Direct Cloud Document lookup fallback
     try {
       const docSnap = await getDoc(doc(db, "attendance", docId));
       if (docSnap.exists()) {
@@ -1660,7 +1844,7 @@ export async function bulkSetHomeBreakAllDorms(
     updatedRecords.push(record);
   }
 
-  // Save chunked batch in Firestore
+  // Save chunked batch in primary cloud database
   try {
     const CHUNK_SIZE = 10;
     for (let i = 0; i < updatedRecords.length; i += CHUNK_SIZE) {
@@ -1672,7 +1856,7 @@ export async function bulkSetHomeBreakAllDorms(
       await batch.commit();
     }
   } catch (err: any) {
-    console.warn("Firestore bulkSetHomeBreakAllDorms saved offline locally:", err?.message || err);
+    console.warn("Primary database bulkSetHomeBreakAllDorms saved offline locally:", err?.message || err);
   }
 
   invalidateFirestoreReadCache("attendance");
@@ -1696,7 +1880,7 @@ export async function bulkSetHomeBreakAllDorms(
 }
 
 // ----------------------------------------------------------------------
-// System Settings API (Firebase Firestore Exclusive with Local Cache)
+// System Settings API (Primary Cloud Database with Local Cache)
 // ----------------------------------------------------------------------
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   try {
@@ -1708,7 +1892,7 @@ export async function fetchSystemSettings(): Promise<SystemSettings> {
     }
     return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
   } catch (err: any) {
-    console.warn("Firestore fetchSystemSettings offline fallback:", err?.message || err);
+    console.warn("Primary database fetchSystemSettings offline fallback:", err?.message || err);
     return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
   }
 }
@@ -1719,13 +1903,13 @@ export async function updateSystemSettings(settings: SystemSettings): Promise<Sy
   try {
     await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settings), { merge: true });
   } catch (err) {
-    console.warn("Firestore updateSystemSettings saved locally (offline):", err);
+    console.warn("Primary database updateSystemSettings saved locally (offline):", err);
   }
   return settings;
 }
 
 // ----------------------------------------------------------------------
-// Reports API (Generated from Firebase Firestore Data)
+// Reports API (Generated from Primary Cloud Database Data)
 // ----------------------------------------------------------------------
 export async function fetchDailyReport(date?: string): Promise<DailyReportData> {
   const reportDate = date || getTodayDateString();

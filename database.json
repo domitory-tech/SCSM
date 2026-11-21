@@ -1975,7 +1975,7 @@
       "roleCategoryName": "ผู้ดูแล",
       "roleLabel": "ผู้ดูแลระบบ / ผู้บริหาร (สิทธิ์เข้าถึงทั้งหมด)",
       "avatarUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-      "password": "123456"
+      "hasPassword": false
     },
     {
       "id": "user-2",
@@ -1986,7 +1986,7 @@
       "roleCategoryName": "ผู้ดูแล",
       "roleLabel": "หัวหน้างานหอพัก (แจ้งอบรม & อนุมัติการเช็คยอด)",
       "avatarUrl": "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80",
-      "password": "123456"
+      "hasPassword": false
     },
     {
       "id": "user-1",
@@ -1997,7 +1997,7 @@
       "roleCategoryName": "เจ้าหน้าที่",
       "roleLabel": "เจ้าหน้าที่สำนักงาน (นำเข้าข้อมูล & จัดทำรายงาน)",
       "avatarUrl": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-      "password": "123456"
+      "hasPassword": false
     },
     {
       "id": "user-3",
@@ -2012,7 +2012,7 @@
         "dorm-1"
       ],
       "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-      "password": "123456"
+      "hasPassword": false
     },
     {
       "id": "user-4",
@@ -2027,7 +2027,7 @@
         "dorm-4"
       ],
       "avatarUrl": "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
-      "password": "123456"
+      "hasPassword": false
     }
   ]
 }

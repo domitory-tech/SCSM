@@ -1,65 +1,86 @@
 import { UserProfile } from "../types";
+import { sanitizeUserForClient, stripDangerousKeys } from "./security";
 
 const SESSION_KEY = "dorm_user_session";
 
+function getCookieSecureFlag(): string {
+  try {
+    if (typeof window !== "undefined" && window.location.protocol === "https:") {
+      return "; Secure";
+    }
+  } catch (_) {}
+  return "";
+}
+
 /**
- * Saves the current user session using a Session Cookie (and sessionStorage backup).
- * A session cookie has no 'Expires' or 'Max-Age' directive, so browsers delete it
- * automatically when the browser window or application is closed.
+ * Saves the current user session (credentials/hashes stripped) using a Session Cookie
+ * and sessionStorage backup.
  */
 export function setSessionUser(user: UserProfile): void {
   try {
-    const jsonStr = encodeURIComponent(JSON.stringify(user));
-    // Session cookie: no Expires or Max-Age directive
+    const safeUser = sanitizeUserForClient(user);
+    const serialized = JSON.stringify(safeUser);
+    const jsonStr = encodeURIComponent(serialized);
+    const secureFlag = getCookieSecureFlag();
+
     try {
-      document.cookie = `${SESSION_KEY}=${jsonStr}; path=/; SameSite=Lax`;
+      document.cookie = `${SESSION_KEY}=${jsonStr}; path=/; SameSite=Lax${secureFlag}`;
     } catch (_) {}
-    // Backup in sessionStorage and localStorage
     try {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      sessionStorage.setItem(SESSION_KEY, serialized);
     } catch (_) {}
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      localStorage.setItem(SESSION_KEY, serialized);
     } catch (_) {}
   } catch (e) {
     console.error("Error setting session user:", e);
   }
 }
 
+function parseSafeSession(raw: string): UserProfile | null {
+  try {
+    const parsed = stripDangerousKeys(JSON.parse(raw)) as UserProfile;
+    if (parsed && typeof parsed.id === "string" && parsed.id.trim()) {
+      return sanitizeUserForClient(parsed);
+    }
+  } catch (_) {}
+  return null;
+}
+
 /**
  * Retrieves the logged-in user from the active Session Cookie, sessionStorage, or localStorage.
- * Returns null if the user logged out or if the browser was closed.
+ * Strips any legacy plaintext password fields if present.
  */
 export function getSessionUser(): UserProfile | null {
   try {
-    // 1. Check Session Cookie
     try {
       const cookies = document.cookie.split(";");
-      for (let cookie of cookies) {
-        const [key, value] = cookie.trim().split("=");
+      for (const cookie of cookies) {
+        const eqIdx = cookie.indexOf("=");
+        if (eqIdx === -1) continue;
+        const key = cookie.slice(0, eqIdx).trim();
+        const value = cookie.slice(eqIdx + 1).trim();
         if (key === SESSION_KEY && value) {
           const decoded = decodeURIComponent(value);
-          const parsed = JSON.parse(decoded) as UserProfile;
-          if (parsed && parsed.id) return parsed;
+          const parsed = parseSafeSession(decoded);
+          if (parsed) return parsed;
         }
       }
     } catch (_) {}
 
-    // 2. Check sessionStorage
     try {
       const sessionSaved = sessionStorage.getItem(SESSION_KEY);
       if (sessionSaved) {
-        const parsed = JSON.parse(sessionSaved) as UserProfile;
-        if (parsed && parsed.id) return parsed;
+        const parsed = parseSafeSession(sessionSaved);
+        if (parsed) return parsed;
       }
     } catch (_) {}
 
-    // 3. Check localStorage
     try {
       const localSaved = localStorage.getItem(SESSION_KEY);
       if (localSaved) {
-        const parsed = JSON.parse(localSaved) as UserProfile;
-        if (parsed && parsed.id) return parsed;
+        const parsed = parseSafeSession(localSaved);
+        if (parsed) return parsed;
       }
     } catch (_) {}
   } catch (e) {
@@ -72,9 +93,10 @@ export function getSessionUser(): UserProfile | null {
  * Clears the user session cookie, sessionStorage, and localStorage upon explicit Logout.
  */
 export function clearSessionUser(): void {
+  const secureFlag = getCookieSecureFlag();
   try {
     try {
-      document.cookie = `${SESSION_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+      document.cookie = `${SESSION_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${secureFlag}`;
     } catch (_) {}
     try {
       sessionStorage.removeItem(SESSION_KEY);

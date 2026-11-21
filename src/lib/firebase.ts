@@ -16,8 +16,8 @@ import firebaseConfig from "../../firebase-applet-config.json";
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firestore with specific database ID if provided
-const customDbId = (firebaseConfig as any).firestoreDatabaseId || (firebaseConfig as any).databaseId || "ai-studio-c3d2ba83-2c19-424a-a0e5-96002be8d733";
+// Initialize Cloud Database with configured database ID if provided
+const customDbId = (firebaseConfig as any).firestoreDatabaseId || (firebaseConfig as any).databaseId || "(default)";
 export const db = customDbId && customDbId !== "(default)"
   ? getFirestore(app, customDbId)
   : getFirestore(app);
@@ -33,7 +33,7 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
+export interface DatabaseErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
@@ -45,9 +45,11 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export type FirestoreErrorInfo = DatabaseErrorInfo;
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const currentUser = auth.currentUser;
-  const errInfo: FirestoreErrorInfo = {
+  const errInfo: DatabaseErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: currentUser?.uid,
@@ -58,25 +60,22 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.warn("Firestore Error:", JSON.stringify(errInfo));
+  console.warn("Database Error:", JSON.stringify(errInfo));
   return errInfo;
 }
 
-export const FIREBASE_PROJECT_INFO = {
+export const CLOUD_PROJECT_INFO = {
   projectName: "Student Counting System",
-  projectId: firebaseConfig.projectId,
-  databaseId: customDbId || "(default)",
-  userEmail: "domitory@pcccr.ac.th",
-  appId: firebaseConfig.appId,
-  authDomain: firebaseConfig.authDomain
 };
 
-export interface FirebaseConnectionStatus {
+export interface CloudConnectionStatus {
   isConnected: boolean;
   lastChecked: string | null;
   error: string | null;
   latencyMs: number | null;
 }
+
+export type FirebaseConnectionStatus = CloudConnectionStatus;
 
 export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -95,17 +94,15 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): P
   });
 }
 
-// Check connection to Firestore safely
-export async function checkFirebaseConnection(): Promise<FirebaseConnectionStatus> {
+// Check connection to central cloud database safely
+export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> {
   const startTime = Date.now();
   try {
-    // Perform a lightweight read ping rather than a write to avoid polluting Firestore write streams
     const testDocRef = doc(db, "system_settings", "config");
     const pingTask = getDoc(testDocRef);
 
-    // Timeout at 4 seconds so UI never hangs or waits 10s for SDK timeout
     await withTimeout(pingTask, 4000);
-    
+
     const latency = Date.now() - startTime;
     return {
       isConnected: true,
@@ -114,17 +111,17 @@ export async function checkFirebaseConnection(): Promise<FirebaseConnectionStatu
       latencyMs: latency
     };
   } catch (err: any) {
-    console.warn("Firebase ping attempt failed:", err?.message || err);
+    console.warn("Cloud database ping attempt failed:", err?.message || err);
     return {
       isConnected: false,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
-      error: err?.message || "Failed to reach Firestore in time",
+      error: err?.message || "Failed to reach central database in time",
       latencyMs: null
     };
   }
 }
 
-// Recursively remove undefined values from objects and arrays so Firestore never throws "Unsupported field value: undefined"
+// Recursively remove undefined values from objects and arrays before persistence
 export function cleanFirestoreData<T>(obj: T): T {
   if (obj === null || obj === undefined) {
     return null as any;
@@ -146,7 +143,7 @@ export function cleanFirestoreData<T>(obj: T): T {
   return obj;
 }
 
-// Chunked batch helper to bypass Firestore 500 operations limit
+// Chunked batch helper to bypass batch operation limits
 export async function commitChunkedSetDocs(
   collectionName: string,
   items: any[],
@@ -190,7 +187,7 @@ export async function commitChunkedDeleteDocs(
   return count;
 }
 
-// Seed / Migrate initial dataset from backend to Firebase Firestore
+// Seed / Migrate initial dataset to cloud database
 export async function seedInitialFirebaseData(initialData: {
   dorms?: any[];
   students?: any[];
@@ -215,6 +212,6 @@ export async function seedInitialFirebaseData(initialData: {
     totalCount += await commitChunkedSetDocs("attendance", initialData.attendance);
   }
 
-  console.log(`Firebase initial seed completed successfully (${totalCount} documents).`);
+  console.log(`Initial database seed completed successfully (${totalCount} documents).`);
   return totalCount;
 }
