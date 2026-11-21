@@ -613,8 +613,10 @@ export async function setupFirstTimePassword(userId: string, newPassword: string
   const passwordHash = await hashPassword(newPassword);
   setAuthHashForUser(userId, passwordHash);
 
+  const hashMapAfter = getAuthHashMap();
+  const fullUserPayload = sanitizeUserForCloud({ ...targetUser, hasPassword: true, passwordHash }, hashMapAfter);
   try {
-    await setDoc(doc(db, "users", userId), cleanFirestoreData({ passwordHash, hasPassword: true }), { merge: true });
+    await setDoc(doc(db, "users", userId), cleanFirestoreData(fullUserPayload));
   } catch (e) {
     console.warn("Saved initial password hash offline locally:", e);
   }
@@ -748,14 +750,19 @@ export async function changeUserPassword(
   const passwordHash = await hashPassword(payload.newPassword);
   setAuthHashForUser(id, passwordHash);
 
+  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+  const existingUser = cachedUsers.find((u) => u.id === id) || DEFAULT_SYSTEM_USERS.find((u) => u.id === id);
   const docRef = doc(db, "users", id);
   try {
-    await setDoc(docRef, { passwordHash, hasPassword: true }, { merge: true });
+    if (existingUser) {
+      const fullPayload = sanitizeUserForCloud({ ...existingUser, hasPassword: true, passwordHash }, getAuthHashMap());
+      await setDoc(docRef, cleanFirestoreData(fullPayload));
+    } else {
+      await setDoc(docRef, { passwordHash, hasPassword: true }, { merge: true });
+    }
   } catch (e) {
     console.warn("Changed password offline locally:", e);
   }
-
-  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
   const idx = cachedUsers.findIndex((u) => u.id === id);
   if (idx >= 0) {
     cachedUsers[idx] = sanitizeUserForClient({ ...cachedUsers[idx], hasPassword: true });
@@ -1249,14 +1256,14 @@ export async function restoreDatabase(rawData: any) {
     const cleanDorms = rawDorms.map(sanitizeDormForCloud);
     setLocalCache(CACHE_KEYS.DORMS, cleanDorms);
     try {
-      restoredCount += await commitChunkedSetDocs("dorms", cleanDorms);
+      restoredCount += await commitChunkedSetDocs("dorms", cleanDorms, "id", false);
     } catch (e) { console.warn("Restored dorms offline:", e); }
   }
   if (Array.isArray(data.students) && data.students.length > 0) {
     const cleanStudents = data.students.map((s: any, idx: number) => sanitizeStudentForCloud(s, idx));
     setLocalCache(CACHE_KEYS.STUDENTS, cleanStudents);
     try {
-      restoredCount += await commitChunkedSetDocs("students", cleanStudents);
+      restoredCount += await commitChunkedSetDocs("students", cleanStudents, "id", false);
     } catch (e) { console.warn("Restored students offline:", e); }
   }
   if (Array.isArray(data.users) && data.users.length > 0) {
@@ -1264,7 +1271,7 @@ export async function restoreDatabase(rawData: any) {
     const cleanUsers = data.users.map((u: any) => sanitizeUserForCloud(u, hashMap));
     setLocalCache(CACHE_KEYS.USERS, cleanUsers.map(sanitizeUserForClient));
     try {
-      restoredCount += await commitChunkedSetDocs("users", cleanUsers);
+      restoredCount += await commitChunkedSetDocs("users", cleanUsers, "id", false);
     } catch (e) { console.warn("Restored users offline:", e); }
   }
   if (Array.isArray(data.notices) && data.notices.length > 0) {
@@ -1273,7 +1280,7 @@ export async function restoreDatabase(rawData: any) {
       .filter((n: Notice | null): n is Notice => n !== null);
     setLocalCache(CACHE_KEYS.NOTICES, cleanNotices);
     try {
-      restoredCount += await commitChunkedSetDocs("notices", cleanNotices);
+      restoredCount += await commitChunkedSetDocs("notices", cleanNotices, "id", false);
     } catch (e) { console.warn("Restored notices offline:", e); }
   }
   if (Array.isArray(data.attendance) && data.attendance.length > 0) {
@@ -1282,14 +1289,14 @@ export async function restoreDatabase(rawData: any) {
       .filter((a: DailyAttendance | null): a is DailyAttendance => a !== null);
     setLocalCache(CACHE_KEYS.ATTENDANCE, cleanAttendance);
     try {
-      restoredCount += await commitChunkedSetDocs("attendance", cleanAttendance);
+      restoredCount += await commitChunkedSetDocs("attendance", cleanAttendance, "id", false);
     } catch (e) { console.warn("Restored attendance offline:", e); }
   }
   if (data.systemSettings && typeof data.systemSettings === "object") {
     const cleanSettings = sanitizeSettingsForCloud(data.systemSettings);
     setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, cleanSettings);
     try {
-      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(cleanSettings), { merge: true });
+      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(cleanSettings));
     } catch (e) { console.warn("Restored settings offline:", e); }
   }
 
@@ -1627,7 +1634,18 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
   }
 
   const snapshot = getDisplayedDatabaseSnapshot(liveData);
-  const hashMap = getAuthHashMap();
+  const hashMap = { ...getAuthHashMap() };
+
+  // Preserve any existing passwordHash stored on Firestore user docs before full-doc overwrite
+  try {
+    const existingUsersSnap = await getDocs(collection(db, "users"));
+    existingUsersSnap.docs.forEach((d) => {
+      const data = d.data();
+      if (!hashMap[d.id] && typeof data?.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+        hashMap[d.id] = data.passwordHash;
+      }
+    });
+  } catch (_) {}
 
   const dormsMap = new Map<string, Dormitory>();
   snapshot.dorms.forEach((d) => {
@@ -1660,23 +1678,24 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
   const usersToUpload = snapshot.users.map((u) => sanitizeUserForCloud(u, hashMap));
   const settingsToUpload = sanitizeSettingsForCloud(snapshot.systemSettings);
 
+  // Use merge=false so stale legacy fields (e.g. old password, null, or unallowed keys) are cleanly replaced
   // 1. Upload dorms FIRST (required by student and attendance exists() rules)
-  const dormCount = await commitChunkedSetDocs("dorms", dormsToUpload);
+  const dormCount = await commitChunkedSetDocs("dorms", dormsToUpload, "id", false);
   // 2. Upload users
-  const userCount = await commitChunkedSetDocs("users", usersToUpload);
+  const userCount = await commitChunkedSetDocs("users", usersToUpload, "id", false);
   // 3. Upload students
-  const studentCount = await commitChunkedSetDocs("students", studentsToUpload);
+  const studentCount = await commitChunkedSetDocs("students", studentsToUpload, "id", false);
   // 4. Upload notices
-  const noticeCount = await commitChunkedSetDocs("notices", noticesToUpload);
+  const noticeCount = await commitChunkedSetDocs("notices", noticesToUpload, "id", false);
   // 5. Upload attendance records (highlight!)
-  const attendanceCount = await commitChunkedSetDocs("attendance", attendanceToUpload);
+  const attendanceCount = await commitChunkedSetDocs("attendance", attendanceToUpload, "id", false);
   // 6. Upload system settings & saved marker
   try {
-    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settingsToUpload), { merge: true });
+    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settingsToUpload));
     await setDoc(doc(db, "_system_status", "saved"), {
       lastSavedAt: new Date().toISOString(),
       status: "SAVED"
-    }, { merge: true });
+    });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, "system_settings/config", true);
   }

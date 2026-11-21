@@ -170,7 +170,8 @@ export function cleanFirestoreData<T>(obj: T): T {
 export async function commitChunkedSetDocs(
   collectionName: string,
   items: any[],
-  idKey: string = "id"
+  idKey: string = "id",
+  merge: boolean = true
 ) {
   if (!items || items.length === 0) return 0;
   const CHUNK_SIZE = 400;
@@ -182,7 +183,11 @@ export async function commitChunkedSetDocs(
       const docId = item[idKey] || item.id || `doc-${Date.now()}-${Math.random()}`;
       const docRef = doc(db, collectionName, docId);
       const cleaned = cleanFirestoreData(item);
-      batch.set(docRef, cleaned, { merge: true });
+      if (merge) {
+        batch.set(docRef, cleaned, { merge: true });
+      } else {
+        batch.set(docRef, cleaned);
+      }
       count++;
     });
     try {

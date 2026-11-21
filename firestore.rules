@@ -38,7 +38,7 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isEmailVerified() && request.auth.token.email == 'domitory@pcccr.ac.th';
+      return isEmailVerified() && request.auth.token.email.lower() == 'domitory@pcccr.ac.th';
     }
 
     function isAdmin() {
@@ -245,7 +245,7 @@ service cloud.firestore {
       allow get: if isValidId(dormId) && isEmailVerified();
       allow list: if isEmailVerified();
       allow create: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && incoming().id == existing().id && isStaffOrAdmin();
+      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin();
       allow delete: if isValidId(dormId) && isAdmin();
     }
 
@@ -254,7 +254,7 @@ service cloud.firestore {
       allow list: if isEmailVerified();
       allow create: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin() &&
         exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
-      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && incoming().id == existing().id && isStaffOrAdmin() &&
+      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin() &&
         exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
       allow delete: if isValidId(studentId) && isStaffOrAdmin();
     }
@@ -263,7 +263,7 @@ service cloud.firestore {
       allow get: if isValidId(noticeId) && isEmailVerified();
       allow list: if isEmailVerified();
       allow create: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && incoming().id == existing().id && isStaffOrAdmin();
+      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin();
       allow delete: if isValidId(noticeId) && isStaffOrAdmin();
     }
 
@@ -278,9 +278,9 @@ service cloud.firestore {
       allow update: if isValidId(attendanceId) &&
         isEmailVerified() &&
         isValidDailyAttendance(incoming()) &&
-        incoming().id == existing().id &&
-        incoming().date == existing().date &&
-        incoming().dormId == existing().dormId &&
+        (!('id' in existing()) || incoming().id == existing().id) &&
+        (!('date' in existing()) || incoming().date == existing().date) &&
+        (!('dormId' in existing()) || incoming().dormId == existing().dormId) &&
         (
           isStaffOrAdmin() ||
           (
