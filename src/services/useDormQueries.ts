@@ -63,7 +63,7 @@ export function useUsersQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["users"],
     queryFn: () => fetchUsers(),
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    staleTime: 1000 * 60 * 5, // 5 minutes
     enabled,
   });
 }
@@ -140,7 +140,7 @@ export function useStudentsQuery(params?: { dormId?: string; grade?: string; roo
   return useQuery({
     queryKey: ["students", params],
     queryFn: () => fetchStudents(params),
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 60 * 5,
     enabled,
   });
 }
@@ -236,7 +236,7 @@ export function useNoticesQuery(date?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["notices", date],
     queryFn: () => fetchNotices(date),
-    staleTime: 1000 * 30, // 30 seconds
+    staleTime: 1000 * 60 * 5, // 5 minutes
     enabled,
   });
 }
@@ -278,7 +278,7 @@ export function useAttendanceQuery(date: string, dormId?: string, enabled: boole
   return useQuery({
     queryKey: ["attendance", date, dormId],
     queryFn: () => fetchAttendance(date, dormId),
-    staleTime: 1000 * 15, // 15 seconds
+    staleTime: 1000 * 60 * 5, // 5 minutes
     enabled,
   });
 }
@@ -287,7 +287,7 @@ export function useAllAttendanceRecordsQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["allAttendanceRecords"],
     queryFn: fetchAllAttendanceRecords,
-    staleTime: 1000 * 30, // 30 seconds
+    staleTime: 1000 * 60 * 5, // 5 minutes
     enabled,
   });
 }
@@ -350,7 +350,7 @@ export function useDailyReportQuery(date?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["dailyReport", date],
     queryFn: () => fetchDailyReport(date),
-    staleTime: 1000 * 30,
+    staleTime: 1000 * 60 * 5,
     enabled,
   });
 }

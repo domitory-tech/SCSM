@@ -10,7 +10,11 @@ import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 import { getDirectImageUrl } from "../../utils/dateUtils";
 import { getUserAvatarUrl } from "../../utils/avatarUtils";
 import { isValidPasswordStrength, sanitizeUserForClient } from "../../utils/security";
-import { ensureAuthReady } from "../../lib/firebase";
+import {
+  ensureAuthReady,
+  FIRESTORE_PRICING_URL,
+  FIRESTORE_QUOTA_UPGRADE_URL
+} from "../../lib/firebase";
 import {
   ShieldCheck,
   User,
@@ -28,7 +32,8 @@ import {
   UserCheck,
   WifiOff,
   RefreshCw,
-  Loader2
+  Loader2,
+  ExternalLink
 } from "lucide-react";
 
 interface LoginModalProps {
@@ -40,7 +45,7 @@ interface LoginModalProps {
   targetTabName?: string;
   standalone?: boolean;
   systemSettings?: SystemSettings;
-  dbConnectionState?: "checking" | "online" | "offline";
+  dbConnectionState?: "checking" | "online" | "offline" | "quota_exceeded";
   onRetryConnection?: () => void;
   isRetryingConnection?: boolean;
 }
@@ -74,7 +79,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       let cancelled = false;
       setIsLoadingUsers(true);
       ensureAuthReady()
-        .then(() => fetchUsers(true))
+        .then(() => fetchUsers(false))
         .then((users) => {
           if (cancelled) return;
           if (users && users.length > 0) {
@@ -303,7 +308,56 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         </div>
       )}
 
-      {standalone && !currentUser && dbConnectionState !== "offline" && (
+      {standalone && !currentUser && dbConnectionState === "quota_exceeded" && (
+        <div className="mx-6 mt-5 p-3.5 bg-rose-50 border border-rose-300 rounded-2xl flex flex-col gap-2.5 text-xs text-rose-950 font-medium">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4.5 h-4.5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold">
+                  โควตาการอ่านข้อมูลฟรีรายวันของ Firestore เต็มแล้ว (Quota exceeded)
+                </div>
+                <p className="text-[11px] text-rose-900 leading-relaxed">
+                  โควตาฟรีรายวันของฐานข้อมูลเต็มชั่วคราวและจะรีเซ็ตใหม่ในวันถัดไป คุณยังสามารถเข้าสู่ระบบเพื่อใช้งานข้อมูลแคชภายในเครื่อง หรืออัปเกรดแผนฐานข้อมูลได้
+                </p>
+              </div>
+            </div>
+            {onRetryConnection && (
+              <button
+                type="button"
+                onClick={onRetryConnection}
+                disabled={isRetryingConnection}
+                className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-100 text-rose-900 border border-rose-300 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
+                <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ลองเชื่อมต่อใหม่"}</span>
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 pl-7 text-[11px]">
+            <a
+              href={FIRESTORE_QUOTA_UPGRADE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-bold text-rose-700 hover:text-rose-900 underline"
+            >
+              <span>อัปเกรดฐานข้อมูลใน Firebase Console</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <a
+              href={FIRESTORE_PRICING_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-semibold text-slate-600 hover:text-slate-900 underline"
+            >
+              <span>รายละเอียดโควตาแผน Spark</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      )}
+
+      {standalone && !currentUser && dbConnectionState !== "offline" && dbConnectionState !== "quota_exceeded" && (
         <div className="mx-6 mt-5 p-3.5 bg-purple-50 border border-purple-200 rounded-2xl flex items-center gap-3 text-xs text-purple-900 font-semibold">
           <Lock className="w-4.5 h-4.5 text-[#A05AFF] shrink-0" />
           <span>

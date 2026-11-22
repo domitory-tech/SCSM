@@ -19,6 +19,8 @@ import {
   ensureFirebaseAuthSession,
   getFirestoreAccessIssue,
   FIREBASE_PROJECT_ID,
+  FIRESTORE_QUOTA_UPGRADE_URL,
+  isQuotaExceededError,
   classifyFirestoreError,
   setFirestoreAccessIssue,
   commitChunkedSetDocs,
@@ -120,18 +122,21 @@ export function setLocalCache<T>(key: string, data: T): void {
 // ----------------------------------------------------------------------
 // Short-TTL & In-Flight Deduplicated Cloud Collection Read Cache
 // ----------------------------------------------------------------------
-const READ_DEDUPE_TTL_MS = 4000;
+const READ_DEDUPE_TTL_MS = 30000;
 const inFlightCollectionReads = new Map<string, Promise<Array<{ id: string; data: Record<string, any> }>>>();
 const recentCollectionReads = new Map<string, { timestamp: number; items: Array<{ id: string; data: Record<string, any> }> }>();
+const realtimeSyncedCollections = new Set<string>();
 
 export function invalidateFirestoreReadCache(collectionName?: string): void {
   if (!collectionName) {
     recentCollectionReads.clear();
     inFlightCollectionReads.clear();
+    realtimeSyncedCollections.clear();
     return;
   }
   recentCollectionReads.delete(collectionName);
   inFlightCollectionReads.delete(collectionName);
+  realtimeSyncedCollections.delete(collectionName);
 }
 
 function isOfflineNetworkError(err: any): boolean {
@@ -148,6 +153,9 @@ function isOfflineNetworkError(err: any): boolean {
 
 function buildFirestoreWriteFailureMessage(err: any): string {
   const accessIssue = getFirestoreAccessIssue();
+  if (accessIssue?.code === "QUOTA_EXCEEDED" || isQuotaExceededError(err)) {
+    return `โควตาการใช้งานฟรีรายวันของ Firestore เต็มแล้ว (Quota exceeded) โควตาจะรีเซ็ตใหม่ในวันถัดไป หรืออัปเกรดแผนฐานข้อมูลได้ที่: ${FIRESTORE_QUOTA_UPGRADE_URL}`;
+  }
   if (accessIssue?.code === "ANONYMOUS_AUTH_DISABLED") {
     return `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) — กรุณาไปที่ Authentication -> Sign-in method -> Anonymous -> Enable`;
   }
@@ -193,8 +201,12 @@ async function readCollectionCached(
   timeoutMs: number = 10000
 ): Promise<Array<{ id: string; data: Record<string, any> }>> {
   const cached = recentCollectionReads.get(collectionName);
-  if (cached && Date.now() - cached.timestamp < READ_DEDUPE_TTL_MS) {
+  if (cached && (realtimeSyncedCollections.has(collectionName) || Date.now() - cached.timestamp < READ_DEDUPE_TTL_MS)) {
     return cached.items;
+  }
+
+  if (getFirestoreAccessIssue()?.code === "QUOTA_EXCEEDED") {
+    throw new Error("Quota exceeded for Firestore daily free reads");
   }
 
   const existingPromise = inFlightCollectionReads.get(collectionName);
@@ -749,7 +761,10 @@ export async function checkUserPasswordStatusFromPrimaryDb(
   const cachedUser = cachedUsers.find((u) => u.id === userId);
   const localFallback = Boolean(localHashes[userId] || cachedUser?.hasPassword);
 
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+  if (
+    (typeof navigator !== "undefined" && navigator.onLine === false) ||
+    getFirestoreAccessIssue()?.code === "QUOTA_EXCEEDED"
+  ) {
     return { hasPassword: localFallback, checkedFromCloud: false };
   }
 
@@ -773,7 +788,11 @@ export async function checkUserPasswordStatusFromPrimaryDb(
           return { hasPassword: true, checkedFromCloud: true };
         }
       }
-    } catch {
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        classifyFirestoreError(err, `user_auth/${userId}`, false);
+        return { hasPassword: localFallback, checkedFromCloud: false };
+      }
       // Continue checking other primary sources
     }
 
@@ -788,7 +807,11 @@ export async function checkUserPasswordStatusFromPrimaryDb(
           return { hasPassword: true, checkedFromCloud: true };
         }
       }
-    } catch {
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        classifyFirestoreError(err, `user_directory/${userId}`, false);
+        return { hasPassword: localFallback, checkedFromCloud: false };
+      }
       // Continue checking /users if signed in
     }
 
@@ -809,7 +832,11 @@ export async function checkUserPasswordStatusFromPrimaryDb(
             return { hasPassword: true, checkedFromCloud: true };
           }
         }
-      } catch {
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          classifyFirestoreError(err, `users/${userId}`, true);
+          return { hasPassword: localFallback, checkedFromCloud: false };
+        }
         // Non-admin/non-owner cannot read /users/{userId}
       }
     }
@@ -837,64 +864,70 @@ export async function fetchUsers(forceFresh: boolean = false): Promise<UserProfi
     return sanitizeUserForClient({ ...u, hasPassword: hasHash });
   };
 
-  // 1. Try reading full /users collection (succeeds for verified Admin; silently falls back for other devices/users)
-  try {
-    await ensureAuthReady();
-    let docs: Array<{ id: string; data: Record<string, any> }> = [];
-    if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
-      const snap = await withTimeout(getDocsFromServer(collection(db, "users")), 10000);
-      docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
-      recentCollectionReads.set("users", { timestamp: Date.now(), items: docs });
-    } else {
-      docs = await readCollectionCached("users", 10000);
-    }
+  // 1. Try reading full /users collection ONLY when verified Admin/Google user is signed in
+  if (auth.currentUser?.emailVerified && getFirestoreAccessIssue()?.code !== "QUOTA_EXCEEDED") {
+    try {
+      await ensureAuthReady();
+      let docs: Array<{ id: string; data: Record<string, any> }> = [];
+      if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+        const snap = await withTimeout(getDocsFromServer(collection(db, "users")), 10000);
+        docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+        recentCollectionReads.set("users", { timestamp: Date.now(), items: docs });
+      } else {
+        docs = await readCollectionCached("users", 10000);
+      }
 
-    if (docs.length > 0) {
-      // Cache password hashes strictly in internal hash store, never exposed in returned UserProfile objects
-      docs.forEach((d) => {
-        if (typeof d.data?.passwordHash === "string" && d.data.passwordHash.startsWith("pbkdf2_sha256$")) {
-          setAuthHashForUser(d.id, d.data.passwordHash);
-        }
-      });
-      // Mirror existing /users documents to non-PII /user_directory and /user_auth for cross-device logins
-      ensureUserSplitCollectionsSynced(docs, getAuthHashMap()).catch(() => {});
+      if (docs.length > 0) {
+        docs.forEach((d) => {
+          if (typeof d.data?.passwordHash === "string" && d.data.passwordHash.startsWith("pbkdf2_sha256$")) {
+            setAuthHashForUser(d.id, d.data.passwordHash);
+          }
+        });
+        ensureUserSplitCollectionsSynced(docs, getAuthHashMap()).catch(() => {});
 
-      const users = docs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
-      const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
-      setLocalCache(CACHE_KEYS.USERS, sorted);
-      return sorted;
+        const users = docs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
+        const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
+        setLocalCache(CACHE_KEYS.USERS, sorted);
+        return sorted;
+      }
+    } catch {
+      // Fall back to /user_directory below
     }
-  } catch {
-    // Expected on devices without Admin Google Sign-In; proceed to public non-PII /user_directory
   }
 
   // 2. Read non-PII /user_directory from primary Firestore database (accessible across all devices)
-  try {
-    await ensureAuthReady();
-    let dirDocs: Array<{ id: string; data: Record<string, any> }> = [];
-    if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
-      const snap = await withTimeout(getDocsFromServer(collection(db, "user_directory")), 10000);
-      dirDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
-      recentCollectionReads.set("user_directory", { timestamp: Date.now(), items: dirDocs });
-    } else {
-      dirDocs = await readCollectionCached("user_directory", 10000);
-    }
+  if (getFirestoreAccessIssue()?.code !== "QUOTA_EXCEEDED") {
+    try {
+      await ensureAuthReady();
+      let dirDocs: Array<{ id: string; data: Record<string, any> }> = [];
+      if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+        const snap = await withTimeout(getDocsFromServer(collection(db, "user_directory")), 10000);
+        dirDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+        recentCollectionReads.set("user_directory", { timestamp: Date.now(), items: dirDocs });
+      } else {
+        dirDocs = await readCollectionCached("user_directory", 10000);
+      }
 
-    if (dirDocs.length > 0) {
-      const users = dirDocs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
-      const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
-      setLocalCache(CACHE_KEYS.USERS, sorted);
-      return sorted;
+      if (dirDocs.length > 0) {
+        const users = dirDocs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
+        const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
+        setLocalCache(CACHE_KEYS.USERS, sorted);
+        return sorted;
+      }
+    } catch (err: any) {
+      classifyFirestoreError(err, "user_directory", false);
+      console.warn("fetchUsers user_directory fallback:", err?.message || err);
     }
-  } catch (err: any) {
-    console.warn("fetchUsers user_directory fallback:", err?.message || err);
   }
 
-  // 3. Fallback list: still verify each account's password status against /user_auth/{id} on primary DB if online
+  // 3. Fallback list: avoid extra per-user Firestore reads if offline or quota is exceeded
   const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
   const baseList = (cached && cached.length > 0 ? cached : DEFAULT_SYSTEM_USERS).map(hydrateSafeUser);
 
-  if (typeof navigator === "undefined" || navigator.onLine !== false) {
+  if (
+    (typeof navigator === "undefined" || navigator.onLine !== false) &&
+    getFirestoreAccessIssue()?.code !== "QUOTA_EXCEEDED"
+  ) {
     try {
       const checks = await Promise.allSettled(
         baseList.map(async (u) => {
@@ -2912,6 +2945,7 @@ function teardownRealtimeListeners() {
     } catch {}
   });
   activeRealtimeUnsubs = [];
+  realtimeSyncedCollections.clear();
   if (activeUsersRealtimeUnsub) {
     try {
       activeUsersRealtimeUnsub();
@@ -2934,11 +2968,17 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
   activeRealtimeRefCount++;
 
   if (activeRealtimeRefCount === 1) {
-    emitRealtimeState({ status: "connecting", error: null });
+    if (getFirestoreAccessIssue()?.code === "QUOTA_EXCEEDED") {
+      emitRealtimeState({
+        status: "error",
+        error: "โควตาการอ่านข้อมูลฟรีรายวันของ Firestore เต็มแล้ว (Quota exceeded)"
+      });
+    } else {
+      emitRealtimeState({ status: "connecting", error: null });
 
-    ensureFirebaseAuthSession()
-      .then(() => {
-        if (activeRealtimeRefCount <= 0) return;
+      ensureFirebaseAuthSession()
+        .then(() => {
+          if (activeRealtimeRefCount <= 0 || getFirestoreAccessIssue()?.code === "QUOTA_EXCEEDED") return;
 
         // 1. Dorms realtime stream
         const unsubDorms = onSnapshot(
@@ -2946,6 +2986,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           (snap) => {
             const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
             recentCollectionReads.set("dorms", { timestamp: Date.now(), items: rawDocs });
+            if (!snap.metadata.fromCache) realtimeSyncedCollections.add("dorms");
             const cloudDorms = rawDocs
               .map((d) => ({ id: d.id, ...d.data } as Dormitory))
               .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -2976,6 +3017,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           (snap) => {
             const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
             recentCollectionReads.set("students", { timestamp: Date.now(), items: rawDocs });
+            if (!snap.metadata.fromCache) realtimeSyncedCollections.add("students");
             const cloudStudents = rawDocs
               .map((d) => {
                 const raw = d.data;
@@ -3022,6 +3064,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           (snap) => {
             const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
             recentCollectionReads.set("notices", { timestamp: Date.now(), items: rawDocs });
+            if (!snap.metadata.fromCache) realtimeSyncedCollections.add("notices");
             const cloudNotices = rawDocs
               .map((d) => ({ id: d.id, ...d.data } as Notice))
               .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -3052,6 +3095,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           (snap) => {
             const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
             recentCollectionReads.set("attendance", { timestamp: Date.now(), items: rawDocs });
+            if (!snap.metadata.fromCache) realtimeSyncedCollections.add("attendance");
             const cloudAttendance = rawDocs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
 
             if (!snap.metadata.fromCache || cloudAttendance.length > 0) {
@@ -3085,6 +3129,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           (snap) => {
             const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
             recentCollectionReads.set("user_directory", { timestamp: Date.now(), items: rawDocs });
+            if (!snap.metadata.fromCache) realtimeSyncedCollections.add("user_directory");
             if (hasActiveAdminUsersStream) return;
 
             const localHashes = getAuthHashMap();
@@ -3168,6 +3213,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
           error: err?.message || "ไม่สามารถเริ่มการเชื่อมต่อ Realtime Firestore ได้"
         });
       });
+    }
   }
 
   return () => {
@@ -3806,7 +3852,10 @@ export async function bulkSetHomeBreakAllDorms(
 // ----------------------------------------------------------------------
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   try {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (
+      (typeof navigator !== "undefined" && navigator.onLine === false) ||
+      getFirestoreAccessIssue()?.code === "QUOTA_EXCEEDED"
+    ) {
       return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
     }
     await ensureFirebaseAuthSession();

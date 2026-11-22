@@ -21,12 +21,14 @@ import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusM
 import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { sanitizeUserForClient, stripDangerousKeys } from "./utils/security";
-import { AlertTriangle, Loader2, RefreshCw, WifiOff, X } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2, RefreshCw, WifiOff, X } from "lucide-react";
 import {
   auth,
   checkFirebaseConnection,
   ensureFirebaseAuthSession,
   FIREBASE_PROJECT_ID,
+  FIRESTORE_PRICING_URL,
+  FIRESTORE_QUOTA_UPGRADE_URL,
   FirestoreAccessIssue,
   subscribeFirestoreAccessIssue
 } from "./lib/firebase";
@@ -73,7 +75,7 @@ const queryClient = new QueryClient({
 const EMPTY_TODAY_ATTENDANCE: Record<string, DailyAttendance> = {};
 
 function MainAppContent() {
-  const [dbConnectionState, setDbConnectionState] = useState<"checking" | "online" | "offline">(() =>
+  const [dbConnectionState, setDbConnectionState] = useState<"checking" | "online" | "offline" | "quota_exceeded">(() =>
     typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "checking"
   );
   const [isRetryingConnection, setIsRetryingConnection] = useState<boolean>(false);
@@ -159,8 +161,12 @@ function MainAppContent() {
           queryClient.setQueryData(["systemSettings"], cleanSettings);
         }
         setDbConnectionState("online");
-        invalidateFirestoreReadCache();
-        queryClient.invalidateQueries();
+        if (showSpinner) {
+          invalidateFirestoreReadCache();
+          queryClient.invalidateQueries();
+        }
+      } else if (status.quotaExceeded) {
+        setDbConnectionState("quota_exceeded");
       } else {
         setDbConnectionState("offline");
       }
@@ -189,15 +195,18 @@ function MainAppContent() {
       if (issue?.code === "ANONYMOUS_AUTH_DISABLED") {
         setIsAuthBannerDismissed(false);
       }
-      if (issue?.code === "OFFLINE") {
+      if (issue?.code === "QUOTA_EXCEEDED") {
+        setDbConnectionState("quota_exceeded");
+      } else if (issue?.code === "OFFLINE") {
         setDbConnectionState("offline");
       }
     });
 
-    let lastUid: string | null | undefined = undefined;
+    let lastUid: string | null | undefined = auth.currentUser?.uid ?? null;
     const unsubAuth = auth.onAuthStateChanged((fbUser) => {
       const nextUid = fbUser ? fbUser.uid : null;
-      if ((lastUid !== undefined && lastUid !== nextUid) || (lastUid === undefined && nextUid !== null)) {
+      const upgradedToGoogle = Boolean(fbUser?.emailVerified);
+      if (lastUid !== nextUid && upgradedToGoogle) {
         invalidateFirestoreReadCache();
         queryClient.invalidateQueries();
       }
@@ -235,6 +244,7 @@ function MainAppContent() {
   const isLoginGateActive =
     !currentUser &&
     (dbConnectionState === "offline" ||
+      dbConnectionState === "quota_exceeded" ||
       (dbConnectionState === "online" && Boolean(systemSettings.guestRequiresLogin)));
   const canLoadAppData = !isCheckingInitialConnection && !isLoginGateActive;
 
@@ -512,7 +522,56 @@ function MainAppContent() {
               </div>
             </div>
           )}
+          {dbConnectionState === "quota_exceeded" && (
+            <div className="mb-5 rounded-2xl border-2 border-rose-300 bg-gradient-to-r from-rose-50 via-white to-amber-50 p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <h3 className="text-sm font-extrabold text-rose-950">
+                      โควตาการอ่านข้อมูลรายวันของ Firestore เต็มแล้ว (Quota exceeded)
+                    </h3>
+                    <p className="text-xs text-rose-900 leading-relaxed">
+                      โควตาฟรีรายวัน (Free daily read units) ของโปรเจกต์เต็มชั่วคราว และจะรีเซ็ตใหม่ในวันถัดไป ขณะนี้ระบบแสดงข้อมูลจากหน่วยความจำภายในเครื่องชั่วคราว
+                    </p>
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <a
+                        href={FIRESTORE_QUOTA_UPGRADE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-extrabold text-rose-700 hover:text-rose-900 underline"
+                      >
+                        <span>อัปเกรดฐานข้อมูลใน Firebase Console</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                      <a
+                        href={FIRESTORE_PRICING_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900 underline"
+                      >
+                        <span>ดูรายละเอียดโควตาแผน Spark (Enterprise edition)</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => verifyDatabaseConnectivity(true)}
+                  disabled={isRetryingConnection}
+                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-900 border border-rose-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
+                  <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ลองเชื่อมต่ออีกครั้ง"}</span>
+                </button>
+              </div>
+            </div>
+          )}
           {dbConnectionState !== "offline" &&
+            dbConnectionState !== "quota_exceeded" &&
             firestoreAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" &&
             !isAuthBannerDismissed && (
             <div className="mb-5 rounded-2xl border-2 border-rose-300 bg-gradient-to-r from-rose-50 via-white to-amber-50 p-4 shadow-sm">

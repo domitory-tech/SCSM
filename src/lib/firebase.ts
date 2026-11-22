@@ -28,6 +28,8 @@ export const auth = getAuth(app);
 
 export const FIREBASE_PROJECT_ID = (firebaseConfig as any).projectId || "";
 export const FIREBASE_DATABASE_ID = customDbId;
+export const FIRESTORE_QUOTA_UPGRADE_URL = `https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/firestore/databases/${FIREBASE_DATABASE_ID}/data?openUpgradeDialog=true`;
+export const FIRESTORE_PRICING_URL = "https://firebase.google.com/pricing#cloud-firestore";
 
 export async function ensureAuthReady(): Promise<void> {
   try {
@@ -45,6 +47,7 @@ export type FirestoreAccessIssueCode =
   | "UNAUTHORIZED_DOMAIN"
   | "PERMISSION_DENIED"
   | "POPUP_BLOCKED"
+  | "QUOTA_EXCEEDED"
   | "OFFLINE";
 
 export interface FirestoreAccessIssue {
@@ -52,6 +55,7 @@ export interface FirestoreAccessIssue {
   message: string;
   hostname?: string;
   path?: string;
+  upgradeUrl?: string;
 }
 
 let currentAccessIssue: FirestoreAccessIssue | null = null;
@@ -61,9 +65,16 @@ export function getFirestoreAccessIssue(): FirestoreAccessIssue | null {
   return currentAccessIssue;
 }
 
-export function setFirestoreAccessIssue(issue: FirestoreAccessIssue | null): void {
-  // Do not accidentally clear ANONYMOUS_AUTH_DISABLED on read queries; only clear it when auth succeeds
-  if (issue === null && currentAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED") {
+export function setFirestoreAccessIssue(
+  issue: FirestoreAccessIssue | null,
+  forceClearSticky: boolean = false
+): void {
+  // Do not accidentally clear ANONYMOUS_AUTH_DISABLED or QUOTA_EXCEEDED on stale callbacks
+  if (
+    issue === null &&
+    !forceClearSticky &&
+    (currentAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" || currentAccessIssue?.code === "QUOTA_EXCEEDED")
+  ) {
     return;
   }
   const same =
@@ -150,6 +161,18 @@ export async function ensureFirebaseAuthSession(): Promise<User | null> {
   return inFlightAnonymousSignIn;
 }
 
+export function isQuotaExceededError(error: unknown): boolean {
+  const errCode = String((error as any)?.code || "").toLowerCase();
+  const errMsg = error instanceof Error ? error.message : String(error || "");
+  const lowerMsg = errMsg.toLowerCase();
+  return (
+    errCode.includes("resource-exhausted") ||
+    lowerMsg.includes("quota exceeded") ||
+    lowerMsg.includes("quota limit exceeded") ||
+    lowerMsg.includes("free daily read units per project")
+  );
+}
+
 export function classifyFirestoreError(
   error: unknown,
   path: string | null = null,
@@ -159,6 +182,18 @@ export function classifyFirestoreError(
   const errMsg = error instanceof Error ? error.message : String(error || "");
   const lowerMsg = errMsg.toLowerCase();
   const hostname = getCurrentHostname();
+
+  if (isQuotaExceededError(error)) {
+    setFirestoreAccessIssue({
+      code: "QUOTA_EXCEEDED",
+      message:
+        "โควตาการอ่านข้อมูลฟรีรายวันของ Firestore เต็มแล้ว (Free daily read units exceeded) โควตาจะรีเซ็ตใหม่ในวันถัดไป หรืออัปเกรดฐานข้อมูลใน Firebase Console",
+      hostname,
+      path: path || undefined,
+      upgradeUrl: FIRESTORE_QUOTA_UPGRADE_URL
+    });
+    return;
+  }
 
   const isPermDenied =
     errCode.includes("permission-denied") ||
@@ -348,6 +383,7 @@ export const CLOUD_PROJECT_INFO = {
 
 export interface CloudConnectionStatus {
   isConnected: boolean;
+  quotaExceeded?: boolean;
   lastChecked: string | null;
   error: string | null;
   latencyMs: number | null;
@@ -386,6 +422,7 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
     });
     return {
       isConnected: false,
+      quotaExceeded: false,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
       error: offlineMsg,
       latencyMs: null,
@@ -399,9 +436,10 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
     const snap = await withTimeout(getDocFromServer(testDocRef), 8000);
 
     const latency = Date.now() - startTime;
-    setFirestoreAccessIssue(null);
+    setFirestoreAccessIssue(null, true);
     return {
       isConnected: true,
+      quotaExceeded: false,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
       error: null,
       latencyMs: latency,
@@ -410,8 +448,10 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
   } catch (err: any) {
     console.warn("Cloud database ping attempt failed:", err?.message || err);
     classifyFirestoreError(err, "system_settings/config", false);
+    const quotaHit = isQuotaExceededError(err);
     return {
       isConnected: false,
+      quotaExceeded: quotaHit,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
       error: err?.message || "Failed to reach central database in time",
       latencyMs: null,
