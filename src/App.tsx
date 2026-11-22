@@ -236,17 +236,17 @@ function MainAppContent() {
     }
   }, [activeTab, currentUser, systemSettings.navigationPermissions]);
 
-  // Login Gate Policy:
-  // - While checking initial database connectivity (without an active logged-in session), wait briefly so we don't flash protected UI
-  // - If offline (cannot connect to Firestore database): require users to pass login before entering the app
-  // - If online (connected to Firestore database): follow admin Visitor Access Mode (systemSettings.guestRequiresLogin)
-  const isCheckingInitialConnection = !currentUser && dbConnectionState === "checking";
+  // Connection & Login Gate Policy:
+  // - While checking initial database connectivity, show a centered checking card so no app UI flashes prematurely
+  // - If offline or Firestore daily read quota is exceeded, hide ALL system pages and show ONLY a centered message card
+  // - If online: follow admin Visitor Access Mode (systemSettings.guestRequiresLogin)
+  const isConnectionBlocked = dbConnectionState === "offline" || dbConnectionState === "quota_exceeded";
+  const isCheckingInitialConnection = dbConnectionState === "checking";
   const isLoginGateActive =
     !currentUser &&
-    (dbConnectionState === "offline" ||
-      dbConnectionState === "quota_exceeded" ||
-      (dbConnectionState === "online" && Boolean(systemSettings.guestRequiresLogin)));
-  const canLoadAppData = !isCheckingInitialConnection && !isLoginGateActive;
+    dbConnectionState === "online" &&
+    Boolean(systemSettings.guestRequiresLogin);
+  const canLoadAppData = dbConnectionState === "online" && !isLoginGateActive;
 
   // Auto trigger popup for system maintenance notice (Once per day, only after entering the app)
   React.useEffect(() => {
@@ -422,6 +422,79 @@ function MainAppContent() {
     );
   }
 
+  // When offline or Firestore quota is exceeded, hide ALL system pages and render ONLY a centered message box
+  if (isConnectionBlocked) {
+    const isQuota = dbConnectionState === "quota_exceeded";
+    return (
+      <div className="min-h-screen w-full bg-gradient-to-br from-[#f2f4f9] via-purple-50/70 to-teal-50/50 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white rounded-3xl max-w-md w-full p-7 sm:p-8 shadow-2xl border border-slate-200/80 flex flex-col items-center text-center gap-5">
+          <div
+            className={`w-16 h-16 rounded-2xl text-white flex items-center justify-center shadow-md ${
+              isQuota
+                ? "bg-gradient-to-br from-rose-500 to-red-600"
+                : "bg-gradient-to-br from-amber-500 to-orange-500"
+            }`}
+          >
+            {isQuota ? <AlertTriangle className="w-8 h-8" /> : <WifiOff className="w-8 h-8" />}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              {systemSettings.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน"}
+            </p>
+            <h2 className={`text-lg font-extrabold leading-snug ${isQuota ? "text-rose-950" : "text-slate-900"}`}>
+              {isQuota
+                ? "โควตาการอ่านข้อมูลฟรีรายวันของ Firestore เต็มแล้ว (Quota exceeded)"
+                : "ไม่สามารถเชื่อมต่อฐานข้อมูลได้ (Offline)"}
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {isQuota
+                ? "โควตาการใช้งานฟรีรายวันของฐานข้อมูลเต็มชั่วคราว และจะรีเซ็ตใหม่ในวันถัดไป จึงยังไม่สามารถเปิดใช้งานระบบได้ในขณะนี้"
+                : "ไม่สามารถเชื่อมต่อฐานข้อมูลกลาง Firestore ได้ในขณะนี้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง"}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => verifyDatabaseConnectivity(true)}
+            disabled={isRetryingConnection}
+            className={`w-full py-3 px-4 rounded-xl text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-opacity cursor-pointer disabled:opacity-60 ${
+              isQuota
+                ? "bg-gradient-to-r from-rose-600 to-red-600 hover:opacity-95"
+                : "bg-gradient-to-r from-[#A05AFF] to-[#1BCFB4] hover:opacity-95"
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${isRetryingConnection ? "animate-spin" : ""}`} />
+            <span>{isRetryingConnection ? "กำลังตรวจสอบการเชื่อมต่อ..." : "ลองเชื่อมต่อใหม่"}</span>
+          </button>
+
+          {isQuota && (
+            <div className="w-full pt-3 border-t border-slate-100 flex flex-col gap-2 text-xs">
+              <a
+                href={FIRESTORE_QUOTA_UPGRADE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 font-bold text-rose-700 hover:text-rose-900 underline"
+              >
+                <span>อัปเกรดฐานข้อมูลใน Firebase Console</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href={FIRESTORE_PRICING_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-800 underline"
+              >
+                <span>ดูรายละเอียดโควตาแผน Spark (Enterprise edition)</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // If system is offline or guestRequiresLogin is enabled and user is not logged in, render ONLY the centered login box
   if (isLoginGateActive) {
     return (
@@ -494,85 +567,7 @@ function MainAppContent() {
         {/* Right Side Column: Main Content Area + Bottom Footer */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#f2f4f9]">
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-6">
-          {dbConnectionState === "offline" && (
-            <div className="mb-5 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-4 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start sm:items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <WifiOff className="w-5 h-5" />
-                  </div>
-                  <div className="space-y-0.5 min-w-0">
-                    <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
-                      <span>ระบบกำลังทำงานในโหมดออฟไลน์ (Offline Mode)</span>
-                    </h3>
-                    <p className="text-xs text-amber-900 leading-relaxed">
-                      ไม่สามารถเชื่อมต่อฐานข้อมูลกลาง Firestore ได้ชั่วคราว กำลังใช้งานข้อมูลจากหน่วยความจำภายในเครื่อง
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => verifyDatabaseConnectivity(true)}
-                  disabled={isRetryingConnection}
-                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center disabled:opacity-60"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
-                  <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ตรวจสอบการเชื่อมต่ออีกครั้ง"}</span>
-                </button>
-              </div>
-            </div>
-          )}
-          {dbConnectionState === "quota_exceeded" && (
-            <div className="mb-5 rounded-2xl border-2 border-rose-300 bg-gradient-to-r from-rose-50 via-white to-amber-50 p-4 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <AlertTriangle className="w-5 h-5" />
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <h3 className="text-sm font-extrabold text-rose-950">
-                      โควตาการอ่านข้อมูลรายวันของ Firestore เต็มแล้ว (Quota exceeded)
-                    </h3>
-                    <p className="text-xs text-rose-900 leading-relaxed">
-                      โควตาฟรีรายวัน (Free daily read units) ของโปรเจกต์เต็มชั่วคราว และจะรีเซ็ตใหม่ในวันถัดไป ขณะนี้ระบบแสดงข้อมูลจากหน่วยความจำภายในเครื่องชั่วคราว
-                    </p>
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <a
-                        href={FIRESTORE_QUOTA_UPGRADE_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-extrabold text-rose-700 hover:text-rose-900 underline"
-                      >
-                        <span>อัปเกรดฐานข้อมูลใน Firebase Console</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                      <a
-                        href={FIRESTORE_PRICING_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900 underline"
-                      >
-                        <span>ดูรายละเอียดโควตาแผน Spark (Enterprise edition)</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => verifyDatabaseConnectivity(true)}
-                  disabled={isRetryingConnection}
-                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-900 border border-rose-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center disabled:opacity-60"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
-                  <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ลองเชื่อมต่ออีกครั้ง"}</span>
-                </button>
-              </div>
-            </div>
-          )}
-          {dbConnectionState !== "offline" &&
-            dbConnectionState !== "quota_exceeded" &&
-            firestoreAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" &&
+          {firestoreAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" &&
             !isAuthBannerDismissed && (
             <div className="mb-5 rounded-2xl border-2 border-rose-300 bg-gradient-to-r from-rose-50 via-white to-amber-50 p-4 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
