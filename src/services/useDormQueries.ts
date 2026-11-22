@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addDorm,
@@ -23,9 +24,13 @@ import {
   fetchStudents,
   fetchSystemSettings,
   fetchUsers,
+  getRealtimeDatabaseState,
   importStudents,
   postNotice,
+  RealtimeDatabaseState,
   saveAttendance,
+  startRealtimePrimaryDatabase,
+  subscribeRealtimeDatabaseState,
   updateDorm,
   updateNotice,
   updateStudent,
@@ -394,3 +399,79 @@ export function useDeleteSampleDataMutation() {
   });
 }
 
+export function useRealtimePrimaryDatabaseSync(enabled: boolean = true) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const stop = startRealtimePrimaryDatabase({
+      onDorms: (dorms) => {
+        queryClient.setQueryData(["dorms"], dorms);
+        queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      },
+      onStudents: (students) => {
+        queryClient.setQueryData(["students", undefined], students);
+        queryClient.invalidateQueries({
+          queryKey: ["students"],
+          predicate: (q) => q.queryKey[1] !== undefined
+        });
+        queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      },
+      onUsers: (users) => {
+        queryClient.setQueryData(["users"], users);
+      },
+      onNotices: (notices) => {
+        queryClient.setQueryData(["notices", undefined], notices);
+        queryClient.invalidateQueries({
+          queryKey: ["notices"],
+          predicate: (q) => q.queryKey[1] !== undefined
+        });
+        queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+      },
+      onAttendance: (records) => {
+        queryClient.setQueryData(["allAttendanceRecords"], records);
+        queryClient.invalidateQueries({ queryKey: ["attendance"] });
+        queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
+        queryClient.invalidateQueries({ queryKey: ["checkedDates"] });
+      },
+      onSystemSettings: (settings) => {
+        queryClient.setQueryData(["systemSettings"], settings);
+      }
+    });
+
+    return () => {
+      stop();
+    };
+  }, [enabled, queryClient]);
+}
+
+export function useRealtimeDatabaseState(autoConnect: boolean = true): RealtimeDatabaseState {
+  const [state, setState] = useState<RealtimeDatabaseState>(() => getRealtimeDatabaseState());
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const unsubState = subscribeRealtimeDatabaseState((nextState) => {
+      setState(nextState);
+    });
+
+    let stopStream: (() => void) | undefined;
+    if (autoConnect) {
+      stopStream = startRealtimePrimaryDatabase({
+        onDorms: (dorms) => queryClient.setQueryData(["dorms"], dorms),
+        onStudents: (students) => queryClient.setQueryData(["students", undefined], students),
+        onUsers: (users) => queryClient.setQueryData(["users"], users),
+        onNotices: (notices) => queryClient.setQueryData(["notices", undefined], notices),
+        onAttendance: (records) => queryClient.setQueryData(["allAttendanceRecords"], records),
+        onSystemSettings: (settings) => queryClient.setQueryData(["systemSettings"], settings)
+      });
+    }
+
+    return () => {
+      unsubState();
+      if (stopStream) stopStream();
+    };
+  }, [autoConnect, queryClient]);
+
+  return state;
+}

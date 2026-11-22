@@ -53,7 +53,8 @@ import {
   useUpdateStudentMutation,
   useUpdateSystemSettingsMutation,
   useUsersQuery,
-  useBatchSetAttendanceDateRangeMutation
+  useBatchSetAttendanceDateRangeMutation,
+  useRealtimePrimaryDatabaseSync
 } from "./services/useDormQueries";
 
 // Create TanStack Query Client
@@ -266,6 +267,9 @@ function MainAppContent() {
   const { data: singleDormAttendance } = useAttendanceQuery(selectedAttendanceDate, selectedDormId, canLoadAppData);
   const { data: allAttendanceRecords = [] } = useAllAttendanceRecordsQuery(canLoadAppData);
   const { data: reportData, isLoading: isLoadingReport } = useDailyReportQuery(selectedReportDate, canLoadAppData);
+
+  // Maintain live realtime onSnapshot connection to the primary Firestore database
+  useRealtimePrimaryDatabaseSync(dbConnectionState === "online" && canLoadAppData);
 
   // Keep active currentUser synced with latest Firestore/cached user profile (avatarUrl, gender, etc.)
   React.useEffect(() => {

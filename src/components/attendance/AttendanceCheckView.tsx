@@ -950,7 +950,7 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
         {/* Action Header Bar */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 flex flex-col gap-3">
-          {/* Row 1: Search Box & Counter */}
+          {/* Row 1: Search Box, Counter & Top Save Button */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
@@ -963,8 +963,27 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
               />
             </div>
 
-            <div className="text-xs font-bold text-gray-700 bg-white border border-gray-200 px-3.5 py-2 rounded-xl whitespace-nowrap shadow-2xs self-start sm:self-auto">
-              <span className="text-emerald-600">อยู่หอ {presentCount}</span> / <span className="text-rose-600">ออกหอพัก {absentCount}</span>
+            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+              <div className="text-xs font-bold text-gray-700 bg-white border border-gray-200 px-3.5 py-2 rounded-xl whitespace-nowrap shadow-2xs">
+                <span className="text-emerald-600">อยู่หอ {presentCount}</span> / <span className="text-rose-600">ออกหอพัก {absentCount}</span>
+              </div>
+              {canEditAttendance && !(isThisDormPaused && !isAdminOrStaff) && (
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="px-5 py-2 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-90 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  {isSaving ? (
+                    <span>กำลังบันทึก...</span>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>บันทึกการเช็คยอดประจำวัน</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1052,6 +1071,14 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Save Success Notification (Top visibility when clicking top Save button) */}
+        {saveSuccessMsg && (
+          <div className="p-3.5 border-b bg-emerald-50 text-emerald-800 border-emerald-200 flex items-center gap-2 text-xs font-bold animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{saveSuccessMsg}</span>
+          </div>
+        )}
 
         {/* Copy Yesterday Out Students Result Alert */}
         {copyNoticeMsg && (
@@ -1250,33 +1277,39 @@ export const AttendanceCheckView: React.FC<AttendanceCheckViewProps> = ({
             )}
           </div>
 
-          {isThisDormPaused && !isAdminOrStaff ? (
-            <div className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
-              <PauseCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>⛔ ระบบปิดการเช็คยอดชั่วคราว กรุณารอเจ้าหน้าที่เปิดระบบ</span>
+          <div className="flex flex-wrap items-center justify-end gap-2.5 w-full sm:w-auto">
+            <div className="text-xs font-bold text-gray-700 bg-white border border-gray-200 px-3.5 py-2.5 rounded-xl whitespace-nowrap shadow-2xs">
+              <span className="text-emerald-600">อยู่หอ {presentCount}</span> / <span className="text-rose-600">ออกหอพัก {absentCount}</span>
             </div>
-          ) : !canEditAttendance ? (
-            <div className="w-full sm:w-auto px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
-              <Lock className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>โหมดดูข้อมูลย้อนหลัง (เฉพาะผู้ดูแล/เจ้าหน้าที่ หรือครูหอพักในวันที่ปัจจุบันเท่านั้นที่สามารถแก้ไขได้)</span>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-90 disabled:opacity-50 text-white font-extrabold text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              {isSaving ? (
-                <span>กำลังบันทึก...</span>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>บันทึกการเช็คยอดประจำวัน</span>
-                </>
-              )}
-            </button>
-          )}
+
+            {isThisDormPaused && !isAdminOrStaff ? (
+              <div className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
+                <PauseCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>⛔ ระบบปิดการเช็คยอดชั่วคราว กรุณารอเจ้าหน้าที่เปิดระบบ</span>
+              </div>
+            ) : !canEditAttendance ? (
+              <div className="w-full sm:w-auto px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
+                <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>โหมดดูข้อมูลย้อนหลัง (เฉพาะผู้ดูแล/เจ้าหน้าที่ หรือครูหอพักในวันที่ปัจจุบันเท่านั้นที่สามารถแก้ไขได้)</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-[#A05AFF] to-[#9E58FF] hover:opacity-90 disabled:opacity-50 text-white font-extrabold text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {isSaving ? (
+                  <span>กำลังบันทึก...</span>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>บันทึกการเช็คยอดประจำวัน</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

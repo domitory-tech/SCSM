@@ -8,7 +8,9 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  writeBatch
+  writeBatch,
+  onSnapshot,
+  Unsubscribe
 } from "firebase/firestore";
 import {
   db,
@@ -2166,51 +2168,102 @@ function sanitizeSettingsForCloud(s: any): SystemSettings {
   return out as SystemSettings;
 }
 
-export interface DisplayedDatabaseSnapshot {
+export interface DirectUploadAnalysis {
+  dormsCount: number;
+  studentsCount: number;
+  usersCount: number;
+  noticesCount: number;
+  attendanceCount: number;
+  attendanceDatesCount: number;
+  hasSystemSettings: boolean;
+  totalRecords: number;
   dorms: Dormitory[];
   students: Student[];
-  users: UserProfile[];
+  users: any[];
   notices: Notice[];
   attendance: DailyAttendance[];
-  systemSettings: SystemSettings;
+  systemSettings: SystemSettings | null;
 }
 
-export function getDisplayedDatabaseSnapshot(liveData?: {
-  dorms?: Dormitory[];
-  students?: Student[];
-  users?: UserProfile[];
-  notices?: Notice[];
-  attendance?: DailyAttendance[];
-  systemSettings?: SystemSettings;
-}): DisplayedDatabaseSnapshot {
-  const cachedDorms = getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
-  const cachedStudents = getLocalCache<Student[]>(CACHE_KEYS.STUDENTS) || [];
-  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
-  const cachedNotices = getLocalCache<Notice[]>(CACHE_KEYS.NOTICES) || [];
-  const cachedAttendance = getLocalCache<DailyAttendance[]>(CACHE_KEYS.ATTENDANCE) || [];
-  const cachedSettings = getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
+export function analyzeDirectUploadJson(rawData: any): DirectUploadAnalysis {
+  const data = stripDangerousKeys(rawData);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("รูปแบบไฟล์ JSON ไม่ถูกต้อง ต้องเป็นอ็อบเจกต์ฐานข้อมูลของระบบ");
+  }
 
-  const dorms = mergeCloudWithUnsyncedLocal(liveData?.dorms || [], cachedDorms);
-  const students = mergeCloudWithUnsyncedLocal(liveData?.students || [], cachedStudents);
-  const users = mergeCloudWithUnsyncedLocal(
-    liveData?.users || [],
-    cachedUsers.length > 0 ? cachedUsers : DEFAULT_SYSTEM_USERS
+  const rawDorms = Array.isArray(data.dorms)
+    ? data.dorms
+    : Array.isArray(data.dormitories)
+    ? data.dormitories
+    : [];
+  const rawStudents = Array.isArray(data.students) ? data.students : [];
+  const rawUsers = Array.isArray(data.users) ? data.users : [];
+  const rawNotices = Array.isArray(data.notices) ? data.notices : [];
+  const rawAttendance = Array.isArray(data.attendance) ? data.attendance : [];
+  const hasSystemSettings = Boolean(
+    data.systemSettings && typeof data.systemSettings === "object" && !Array.isArray(data.systemSettings)
   );
-  const notices = mergeCloudWithUnsyncedLocal(liveData?.notices || [], cachedNotices);
-  const attendance = mergeCloudWithUnsyncedLocal(liveData?.attendance || [], cachedAttendance);
-  const systemSettings = sanitizeSettingsForCloud(liveData?.systemSettings || cachedSettings);
 
-  return { dorms, students, users, notices, attendance, systemSettings };
+  const dorms: Dormitory[] = rawDorms.map(sanitizeDormForCloud);
+  const students: Student[] = rawStudents.map((s: any, idx: number) => sanitizeStudentForCloud(s, idx));
+  const notices: Notice[] = rawNotices
+    .map((n: any) => sanitizeNoticeForCloud(n))
+    .filter((n: Notice | null): n is Notice => n !== null);
+  const attendance: DailyAttendance[] = rawAttendance
+    .map((a: any) => sanitizeAttendanceForCloud(a))
+    .filter((a: DailyAttendance | null): a is DailyAttendance => a !== null);
+  const systemSettings: SystemSettings | null = hasSystemSettings
+    ? sanitizeSettingsForCloud(data.systemSettings)
+    : null;
+
+  const attendanceDatesCount = new Set(attendance.map((a) => a.date).filter(Boolean)).size;
+  const totalRecords =
+    dorms.length +
+    students.length +
+    rawUsers.length +
+    notices.length +
+    attendance.length +
+    (hasSystemSettings ? 1 : 0);
+
+  if (totalRecords === 0) {
+    throw new Error("ไม่พบข้อมูลที่รองรับในไฟล์ JSON (dorms, students, users, notices, attendance, systemSettings)");
+  }
+
+  return {
+    dormsCount: dorms.length,
+    studentsCount: students.length,
+    usersCount: rawUsers.length,
+    noticesCount: notices.length,
+    attendanceCount: attendance.length,
+    attendanceDatesCount,
+    hasSystemSettings,
+    totalRecords,
+    dorms,
+    students,
+    users: rawUsers,
+    notices,
+    attendance,
+    systemSettings
+  };
 }
 
-export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
-  dorms?: Dormitory[];
-  students?: Student[];
-  users?: UserProfile[];
-  notices?: Notice[];
-  attendance?: DailyAttendance[];
-  systemSettings?: SystemSettings;
-}): Promise<{
+export interface DirectFirestoreUploadTargets {
+  dorms: boolean;
+  students: boolean;
+  users: boolean;
+  notices: boolean;
+  attendance: boolean;
+  systemSettings: boolean;
+}
+
+export interface DirectFirestoreUploadPayload {
+  data: any;
+  targets?: Partial<DirectFirestoreUploadTargets>;
+  mode?: "UPSERT" | "REPLACE";
+  onProgress?: (stepMessage: string) => void;
+}
+
+export interface DirectFirestoreUploadResult {
   success: boolean;
   message: string;
   uploadedCounts: {
@@ -2220,6 +2273,7 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
     notices: number;
     attendance: number;
     attendanceDates: number;
+    systemSettings: number;
   };
   verifiedCloudCounts: {
     dorms: number;
@@ -2228,17 +2282,53 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
     notices: number;
     attendance: number;
   };
-}> {
+}
+
+async function deleteCollectionDocsStrictly(collectionName: string): Promise<number> {
+  try {
+    const snap = await getDocsFromServer(collection(db, collectionName));
+    const ids = snap.docs.map((d) => d.id);
+    if (ids.length === 0) return 0;
+    const CHUNK_SIZE = 400;
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((id) => {
+        batch.delete(doc(db, collectionName, id));
+        deleted++;
+      });
+      await batch.commit();
+    }
+    return deleted;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, collectionName, true);
+    return 0;
+  }
+}
+
+export async function uploadDatasetDirectlyToFirestore(
+  payload: DirectFirestoreUploadPayload
+): Promise<DirectFirestoreUploadResult> {
+  await ensureAuthReady();
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
-    throw new Error("AUTH_REQUIRED: กรุณายืนยันตัวตนด้วยบัญชี Google (domitory@pcccr.ac.th) ก่อนอัพโหลดข้อมูลลงฐานข้อมูล");
+    throw new Error("AUTH_REQUIRED: กรุณายืนยันตัวตนด้วยบัญชี Google (domitory@pcccr.ac.th) ก่อนอัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลัก");
   }
 
-  const snapshot = getDisplayedDatabaseSnapshot(liveData);
-  const hashMap = { ...getAuthHashMap() };
+  const mode = payload.mode || "UPSERT";
+  const analysis = analyzeDirectUploadJson(payload.data);
+  const targets: DirectFirestoreUploadTargets = {
+    dorms: payload.targets?.dorms ?? analysis.dormsCount > 0,
+    students: payload.targets?.students ?? analysis.studentsCount > 0,
+    users: payload.targets?.users ?? analysis.usersCount > 0,
+    notices: payload.targets?.notices ?? analysis.noticesCount > 0,
+    attendance: payload.targets?.attendance ?? analysis.attendanceCount > 0,
+    systemSettings: payload.targets?.systemSettings ?? analysis.hasSystemSettings
+  };
 
-  // Preserve any existing passwordHash stored on Firestore user docs before full-doc overwrite
+  const hashMap = { ...getAuthHashMap() };
   try {
-    const existingUsersSnap = await getDocs(collection(db, "users"));
+    const existingUsersSnap = await getDocsFromServer(collection(db, "users"));
     existingUsersSnap.docs.forEach((d) => {
       const data = d.data();
       if (!hashMap[d.id] && typeof data?.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
@@ -2248,75 +2338,133 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
   } catch (_) {}
 
   const dormsMap = new Map<string, Dormitory>();
-  snapshot.dorms.forEach((d) => {
-    const clean = sanitizeDormForCloud(d);
-    dormsMap.set(clean.id, clean);
-  });
+  if (targets.dorms) {
+    analysis.dorms.forEach((d) => dormsMap.set(d.id, d));
+  }
 
-  const studentsToUpload = snapshot.students.map((s, idx) => sanitizeStudentForCloud(s, idx));
-  const noticesToUpload = snapshot.notices
-    .map((n) => sanitizeNoticeForCloud(n))
-    .filter((n): n is Notice => n !== null);
-  const attendanceToUpload = snapshot.attendance
-    .map((a) => sanitizeAttendanceForCloud(a))
-    .filter((a): a is DailyAttendance => a !== null);
+  const studentsToUpload = targets.students ? analysis.students : [];
+  const noticesToUpload = targets.notices ? analysis.notices : [];
+  const attendanceToUpload = targets.attendance ? analysis.attendance : [];
+  const usersToUpload = targets.users
+    ? analysis.users.map((u) => sanitizeUserForCloud(u, hashMap))
+    : [];
+  const userDirectoryToUpload = targets.users
+    ? usersToUpload.map((u) => sanitizeUserDirectoryForCloud(u, hashMap))
+    : [];
+  const userAuthToUpload = targets.users
+    ? usersToUpload.map((u) => sanitizeUserAuthForCloud(u, hashMap))
+    : [];
+  const settingsToUpload = targets.systemSettings && analysis.systemSettings
+    ? analysis.systemSettings
+    : null;
 
-  // Ensure every dormId referenced by students or attendance exists in dormsToUpload
-  // so Firestore rules `exists(/dorms/$(dormId))` checks always succeed
-  studentsToUpload.forEach((s) => {
-    if (!dormsMap.has(s.dormId)) {
-      dormsMap.set(s.dormId, sanitizeDormForCloud({ id: s.dormId, name: s.dormId, type: "male" }));
+  // Ensure every dormId referenced by uploaded students or attendance exists in Firestore
+  if (studentsToUpload.length > 0 || attendanceToUpload.length > 0) {
+    const existingCloudDormIds = new Set<string>();
+    if (mode !== "REPLACE" || !targets.dorms) {
+      try {
+        const existingDormsSnap = await getDocsFromServer(collection(db, "dorms"));
+        existingDormsSnap.docs.forEach((d) => existingCloudDormIds.add(d.id));
+      } catch (_) {}
     }
-  });
-  attendanceToUpload.forEach((a) => {
-    if (!dormsMap.has(a.dormId)) {
-      dormsMap.set(a.dormId, sanitizeDormForCloud({ id: a.dormId, name: a.dormId, type: "male" }));
-    }
-  });
+    studentsToUpload.forEach((s) => {
+      if (!dormsMap.has(s.dormId) && !existingCloudDormIds.has(s.dormId)) {
+        dormsMap.set(s.dormId, sanitizeDormForCloud({ id: s.dormId, name: s.dormId, type: "male" }));
+      }
+    });
+    attendanceToUpload.forEach((a) => {
+      if (!dormsMap.has(a.dormId) && !existingCloudDormIds.has(a.dormId)) {
+        dormsMap.set(a.dormId, sanitizeDormForCloud({ id: a.dormId, name: a.dormId, type: "male" }));
+      }
+    });
+  }
 
   const dormsToUpload = Array.from(dormsMap.values());
-  const usersToUpload = snapshot.users.map((u) => sanitizeUserForCloud(u, hashMap));
-  const userDirectoryToUpload = usersToUpload.map((u) => sanitizeUserDirectoryForCloud(u, hashMap));
-  const userAuthToUpload = usersToUpload.map((u) => sanitizeUserAuthForCloud(u, hashMap));
-  const settingsToUpload = sanitizeSettingsForCloud(snapshot.systemSettings);
 
-  // Use merge=false so stale legacy fields (e.g. old password, null, or unallowed keys) are cleanly replaced
-  // 1. Upload dorms FIRST (required by student and attendance exists() rules)
-  const dormCount = await commitChunkedSetDocs("dorms", dormsToUpload, "id", false);
-  // 2. Upload users & split login/auth collections
-  const userCount = await commitChunkedSetDocs("users", usersToUpload, "id", false);
-  await Promise.all([
-    commitChunkedSetDocs("user_directory", userDirectoryToUpload, "id", false),
-    commitChunkedSetDocs("user_auth", userAuthToUpload, "id", false)
-  ]);
-  hasSyncedUserSplitThisSession = true;
-  // 3. Upload students
-  const studentCount = await commitChunkedSetDocs("students", studentsToUpload, "id", false);
-  // 4. Upload notices
-  const noticeCount = await commitChunkedSetDocs("notices", noticesToUpload, "id", false);
-  // 5. Upload attendance records (highlight!)
-  const attendanceCount = await commitChunkedSetDocs("attendance", attendanceToUpload, "id", false);
-  // 6. Upload system settings & saved marker
+  // If REPLACE mode, clear target collections on Firestore in reverse dependency order
+  if (mode === "REPLACE") {
+    payload.onProgress?.("กำลังล้างข้อมูลเดิมในส่วนที่เลือกบน Firestore...");
+    if (targets.attendance) await deleteCollectionDocsStrictly("attendance");
+    if (targets.notices) await deleteCollectionDocsStrictly("notices");
+    if (targets.students) await deleteCollectionDocsStrictly("students");
+    if (targets.users) {
+      await deleteCollectionDocsStrictly("users");
+      await Promise.all([
+        deleteCollectionDocsStrictly("user_directory"),
+        deleteCollectionDocsStrictly("user_auth")
+      ]);
+    }
+    if (targets.dorms) await deleteCollectionDocsStrictly("dorms");
+  }
+
+  const mergeDocs = mode === "UPSERT";
+  let dormCount = 0;
+  let userCount = 0;
+  let studentCount = 0;
+  let noticeCount = 0;
+  let attendanceCount = 0;
+  let settingsCount = 0;
+
+  if (dormsToUpload.length > 0) {
+    payload.onProgress?.(`กำลังอัพโหลดข้อมูลหอพัก (${dormsToUpload.length} แห่ง)...`);
+    dormCount = await commitChunkedSetDocs("dorms", dormsToUpload, "id", mergeDocs);
+    if (mode === "REPLACE") setLocalCache(CACHE_KEYS.DORMS, dormsToUpload);
+  }
+
+  if (usersToUpload.length > 0) {
+    payload.onProgress?.(`กำลังอัพโหลดบัญชีผู้ใช้งาน (${usersToUpload.length} บัญชี)...`);
+    userCount = await commitChunkedSetDocs("users", usersToUpload, "id", mergeDocs);
+    await Promise.all([
+      commitChunkedSetDocs("user_directory", userDirectoryToUpload, "id", mergeDocs),
+      commitChunkedSetDocs("user_auth", userAuthToUpload, "id", mergeDocs)
+    ]);
+    hasSyncedUserSplitThisSession = true;
+    if (mode === "REPLACE") setLocalCache(CACHE_KEYS.USERS, usersToUpload.map(sanitizeUserForClient));
+  }
+
+  if (studentsToUpload.length > 0) {
+    payload.onProgress?.(`กำลังอัพโหลดรายชื่อนักเรียน (${studentsToUpload.length} คน)...`);
+    studentCount = await commitChunkedSetDocs("students", studentsToUpload, "id", mergeDocs);
+    if (mode === "REPLACE") setLocalCache(CACHE_KEYS.STUDENTS, studentsToUpload);
+  }
+
+  if (noticesToUpload.length > 0) {
+    payload.onProgress?.(`กำลังอัพโหลดเรื่องแจ้งอบรม (${noticesToUpload.length} เรื่อง)...`);
+    noticeCount = await commitChunkedSetDocs("notices", noticesToUpload, "id", mergeDocs);
+    if (mode === "REPLACE") setLocalCache(CACHE_KEYS.NOTICES, noticesToUpload);
+  }
+
+  if (attendanceToUpload.length > 0) {
+    payload.onProgress?.(`กำลังอัพโหลดบันทึกเช็คยอดนักเรียน (${attendanceToUpload.length} รายการ)...`);
+    attendanceCount = await commitChunkedSetDocs("attendance", attendanceToUpload, "id", mergeDocs);
+    if (mode === "REPLACE") setLocalCache(CACHE_KEYS.ATTENDANCE, attendanceToUpload);
+  }
+
+  if (settingsToUpload) {
+    payload.onProgress?.("กำลังอัพโหลดการตั้งค่าระบบ...");
+    try {
+      await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settingsToUpload), {
+        merge: mergeDocs
+      });
+      settingsCount = 1;
+      setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settingsToUpload);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, "system_settings/config", true);
+    }
+  }
+
   try {
-    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settingsToUpload));
     await setDoc(doc(db, "_system_status", "saved"), {
       lastSavedAt: new Date().toISOString(),
       status: "SAVED"
     });
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, "system_settings/config", true);
+    handleFirestoreError(err, OperationType.WRITE, "_system_status/saved", true);
   }
 
-  // Update local cache with sanitized dataset
-  setLocalCache(CACHE_KEYS.DORMS, dormsToUpload);
-  setLocalCache(CACHE_KEYS.STUDENTS, studentsToUpload);
-  setLocalCache(CACHE_KEYS.USERS, usersToUpload.map(sanitizeUserForClient));
-  setLocalCache(CACHE_KEYS.NOTICES, noticesToUpload);
-  setLocalCache(CACHE_KEYS.ATTENDANCE, attendanceToUpload);
-  setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settingsToUpload);
   invalidateFirestoreReadCache();
 
-  // Verify live cloud counts directly from Firestore
+  payload.onProgress?.("กำลังตรวจสอบข้อมูลล่าสุดจาก Firestore...");
   let verifiedCloudCounts = {
     dorms: dormCount,
     students: studentCount,
@@ -2326,11 +2474,11 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
   };
   try {
     const [dSnap, sSnap, uSnap, nSnap, aSnap] = await Promise.all([
-      getDocs(collection(db, "dorms")),
-      getDocs(collection(db, "students")),
-      getDocs(collection(db, "users")),
-      getDocs(collection(db, "notices")),
-      getDocs(collection(db, "attendance"))
+      getDocsFromServer(collection(db, "dorms")),
+      getDocsFromServer(collection(db, "students")),
+      getDocsFromServer(collection(db, "users")),
+      getDocsFromServer(collection(db, "notices")),
+      getDocsFromServer(collection(db, "attendance"))
     ]);
     verifiedCloudCounts = {
       dorms: dSnap.size,
@@ -2347,16 +2495,464 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
 
   return {
     success: true,
-    message: `อัพโหลดฐานข้อมูลชุดที่แสดงอยู่ตอนนี้ลง Firestore สำเร็จ! (เช็คยอดนักเรียน ${attendanceCount} รายการ / ${attendanceDates} วัน, นักเรียน ${studentCount} คน, หอพัก ${dormCount} แห่ง, เรื่องแจ้งอบรม ${noticeCount} เรื่อง, ผู้ใช้ ${userCount} บัญชี)`,
+    message: `อัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลัก (Firestore) สำเร็จ! (เช็คยอด ${attendanceCount} รายการ / ${attendanceDates} วัน, นักเรียน ${studentCount} คน, หอพัก ${dormCount} แห่ง, เรื่องแจ้งอบรม ${noticeCount} เรื่อง, ผู้ใช้ ${userCount} บัญชี)`,
     uploadedCounts: {
       dorms: dormCount,
       students: studentCount,
       users: userCount,
       notices: noticeCount,
       attendance: attendanceCount,
-      attendanceDates
+      attendanceDates,
+      systemSettings: settingsCount
     },
     verifiedCloudCounts
+  };
+}
+
+// ----------------------------------------------------------------------
+// Real-time Firestore Primary Database Subscription Engine (onSnapshot)
+// ----------------------------------------------------------------------
+export interface RealtimeDatabaseState {
+  status: "idle" | "connecting" | "connected" | "error";
+  lastSyncedAt: string | null;
+  lastUpdatedCollection: string | null;
+  error: string | null;
+  counts: {
+    dorms: number;
+    students: number;
+    users: number;
+    notices: number;
+    attendance: number;
+    attendanceDates: number;
+  };
+  collectionsSynced: {
+    dorms: boolean;
+    students: boolean;
+    users: boolean;
+    notices: boolean;
+    attendance: boolean;
+    systemSettings: boolean;
+  };
+}
+
+export interface RealtimeSyncCallbacks {
+  onDorms?: (dorms: Dormitory[]) => void;
+  onStudents?: (students: Student[]) => void;
+  onUsers?: (users: UserProfile[]) => void;
+  onNotices?: (notices: Notice[]) => void;
+  onAttendance?: (records: DailyAttendance[]) => void;
+  onSystemSettings?: (settings: SystemSettings) => void;
+}
+
+const initialRealtimeState = (): RealtimeDatabaseState => ({
+  status: "idle",
+  lastSyncedAt: null,
+  lastUpdatedCollection: null,
+  error: null,
+  counts: {
+    dorms: 0,
+    students: 0,
+    users: 0,
+    notices: 0,
+    attendance: 0,
+    attendanceDates: 0
+  },
+  collectionsSynced: {
+    dorms: false,
+    students: false,
+    users: false,
+    notices: false,
+    attendance: false,
+    systemSettings: false
+  }
+});
+
+let currentRealtimeState: RealtimeDatabaseState = initialRealtimeState();
+const realtimeStateListeners = new Set<(state: RealtimeDatabaseState) => void>();
+const realtimeSyncCallbackSet = new Set<RealtimeSyncCallbacks>();
+let activeRealtimeRefCount = 0;
+let activeRealtimeUnsubs: Unsubscribe[] = [];
+let activeUsersRealtimeUnsub: Unsubscribe | null = null;
+let activeAuthWatchUnsub: Unsubscribe | null = null;
+let hasActiveAdminUsersStream = false;
+
+function emitRealtimeState(partial?: Partial<RealtimeDatabaseState>) {
+  if (partial) {
+    currentRealtimeState = {
+      ...currentRealtimeState,
+      ...partial,
+      counts: partial.counts ? { ...currentRealtimeState.counts, ...partial.counts } : currentRealtimeState.counts,
+      collectionsSynced: partial.collectionsSynced
+        ? { ...currentRealtimeState.collectionsSynced, ...partial.collectionsSynced }
+        : currentRealtimeState.collectionsSynced
+    };
+  }
+  realtimeStateListeners.forEach((listener) => {
+    try {
+      listener(currentRealtimeState);
+    } catch {
+      // ignore subscriber errors
+    }
+  });
+}
+
+function formatRealtimeTime(): string {
+  try {
+    return new Date().toLocaleTimeString("th-TH", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+export function getRealtimeDatabaseState(): RealtimeDatabaseState {
+  return currentRealtimeState;
+}
+
+export function subscribeRealtimeDatabaseState(
+  listener: (state: RealtimeDatabaseState) => void
+): () => void {
+  realtimeStateListeners.add(listener);
+  listener(currentRealtimeState);
+  return () => {
+    realtimeStateListeners.delete(listener);
+  };
+}
+
+function attachAdminUsersStreamIfVerified() {
+  if (activeUsersRealtimeUnsub) {
+    activeUsersRealtimeUnsub();
+    activeUsersRealtimeUnsub = null;
+  }
+  hasActiveAdminUsersStream = false;
+
+  if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    return;
+  }
+
+  activeUsersRealtimeUnsub = onSnapshot(
+    collection(db, "users"),
+    (snap) => {
+      hasActiveAdminUsersStream = true;
+      const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+      recentCollectionReads.set("users", { timestamp: Date.now(), items: rawDocs });
+      const localHashes = getAuthHashMap();
+      rawDocs.forEach((d) => {
+        if (typeof d.data?.passwordHash === "string" && d.data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          setAuthHashForUser(d.id, d.data.passwordHash);
+        }
+      });
+      const updatedHashes = getAuthHashMap();
+      const users = rawDocs
+        .map((d) => {
+          const hasHash = Boolean(d.data?.passwordHash || updatedHashes[d.id] || localHashes[d.id] || d.data?.hasPassword);
+          return sanitizeUserForClient({ id: d.id, ...d.data, hasPassword: hasHash });
+        })
+        .sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
+
+      if (!snap.metadata.fromCache || users.length > 0) {
+        setLocalCache(CACHE_KEYS.USERS, users);
+      }
+
+      emitRealtimeState({
+        status: "connected",
+        lastSyncedAt: formatRealtimeTime(),
+        lastUpdatedCollection: "users",
+        error: null,
+        counts: { ...currentRealtimeState.counts, users: users.length },
+        collectionsSynced: { ...currentRealtimeState.collectionsSynced, users: true }
+      });
+
+      realtimeSyncCallbackSet.forEach((cb) => cb.onUsers?.(users));
+    },
+    (err) => {
+      hasActiveAdminUsersStream = false;
+      handleFirestoreError(err, OperationType.LIST, "users", false);
+      if (activeUsersRealtimeUnsub) {
+        activeUsersRealtimeUnsub();
+        activeUsersRealtimeUnsub = null;
+      }
+    }
+  );
+}
+
+function teardownRealtimeListeners() {
+  activeRealtimeUnsubs.forEach((unsub) => {
+    try {
+      unsub();
+    } catch {}
+  });
+  activeRealtimeUnsubs = [];
+  if (activeUsersRealtimeUnsub) {
+    try {
+      activeUsersRealtimeUnsub();
+    } catch {}
+    activeUsersRealtimeUnsub = null;
+  }
+  if (activeAuthWatchUnsub) {
+    try {
+      activeAuthWatchUnsub();
+    } catch {}
+    activeAuthWatchUnsub = null;
+  }
+  hasActiveAdminUsersStream = false;
+}
+
+export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks): () => void {
+  if (callbacks) {
+    realtimeSyncCallbackSet.add(callbacks);
+  }
+  activeRealtimeRefCount++;
+
+  if (activeRealtimeRefCount === 1) {
+    emitRealtimeState({ status: "connecting", error: null });
+
+    ensureAuthReady()
+      .then(() => {
+        if (activeRealtimeRefCount <= 0) return;
+
+        // 1. Dorms realtime stream
+        const unsubDorms = onSnapshot(
+          collection(db, "dorms"),
+          (snap) => {
+            const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+            recentCollectionReads.set("dorms", { timestamp: Date.now(), items: rawDocs });
+            const cloudDorms = rawDocs
+              .map((d) => ({ id: d.id, ...d.data } as Dormitory))
+              .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+            if (!snap.metadata.fromCache || cloudDorms.length > 0) {
+              setLocalCache(CACHE_KEYS.DORMS, cloudDorms);
+            }
+
+            emitRealtimeState({
+              status: "connected",
+              lastSyncedAt: formatRealtimeTime(),
+              lastUpdatedCollection: "dorms",
+              error: null,
+              counts: { ...currentRealtimeState.counts, dorms: cloudDorms.length },
+              collectionsSynced: { ...currentRealtimeState.collectionsSynced, dorms: true }
+            });
+            realtimeSyncCallbackSet.forEach((cb) => cb.onDorms?.(cloudDorms));
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.LIST, "dorms", false);
+            emitRealtimeState({ status: "error", error: err?.message || "ไม่สามารถเชื่อมต่อข้อมูลหอพักแบบเรียลไทม์ได้" });
+          }
+        );
+
+        // 2. Students realtime stream
+        const unsubStudents = onSnapshot(
+          collection(db, "students"),
+          (snap) => {
+            const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+            recentCollectionReads.set("students", { timestamp: Date.now(), items: rawDocs });
+            const cloudStudents = rawDocs
+              .map((d) => {
+                const raw = d.data;
+                const bedVal =
+                  raw.dormBed !== undefined && raw.dormBed !== null && String(raw.dormBed).trim() !== ""
+                    ? String(raw.dormBed).trim()
+                    : raw.bed !== undefined && raw.bed !== null
+                    ? String(raw.bed).trim()
+                    : "";
+                return {
+                  id: d.id,
+                  ...raw,
+                  studentId: formatStudentId(raw.studentId),
+                  grade: formatGrade(raw.grade),
+                  dormBed: bedVal,
+                  bed: bedVal
+                } as Student;
+              })
+              .sort((a, b) => (a.no || 0) - (b.no || 0));
+
+            if (!snap.metadata.fromCache || cloudStudents.length > 0) {
+              setLocalCache(CACHE_KEYS.STUDENTS, cloudStudents);
+            }
+
+            emitRealtimeState({
+              status: "connected",
+              lastSyncedAt: formatRealtimeTime(),
+              lastUpdatedCollection: "students",
+              error: null,
+              counts: { ...currentRealtimeState.counts, students: cloudStudents.length },
+              collectionsSynced: { ...currentRealtimeState.collectionsSynced, students: true }
+            });
+            realtimeSyncCallbackSet.forEach((cb) => cb.onStudents?.(cloudStudents));
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.LIST, "students", false);
+            emitRealtimeState({ status: "error", error: err?.message || "ไม่สามารถเชื่อมต่อข้อมูลนักเรียนแบบเรียลไทม์ได้" });
+          }
+        );
+
+        // 3. Notices realtime stream
+        const unsubNotices = onSnapshot(
+          collection(db, "notices"),
+          (snap) => {
+            const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+            recentCollectionReads.set("notices", { timestamp: Date.now(), items: rawDocs });
+            const cloudNotices = rawDocs
+              .map((d) => ({ id: d.id, ...d.data } as Notice))
+              .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+            if (!snap.metadata.fromCache || cloudNotices.length > 0) {
+              setLocalCache(CACHE_KEYS.NOTICES, cloudNotices);
+            }
+
+            emitRealtimeState({
+              status: "connected",
+              lastSyncedAt: formatRealtimeTime(),
+              lastUpdatedCollection: "notices",
+              error: null,
+              counts: { ...currentRealtimeState.counts, notices: cloudNotices.length },
+              collectionsSynced: { ...currentRealtimeState.collectionsSynced, notices: true }
+            });
+            realtimeSyncCallbackSet.forEach((cb) => cb.onNotices?.(cloudNotices));
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.LIST, "notices", false);
+            emitRealtimeState({ status: "error", error: err?.message || "ไม่สามารถเชื่อมต่อข้อมูลเรื่องแจ้งอบรมแบบเรียลไทม์ได้" });
+          }
+        );
+
+        // 4. Attendance realtime stream
+        const unsubAttendance = onSnapshot(
+          collection(db, "attendance"),
+          (snap) => {
+            const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+            recentCollectionReads.set("attendance", { timestamp: Date.now(), items: rawDocs });
+            const cloudAttendance = rawDocs.map((d) => ({ id: d.id, ...d.data } as DailyAttendance));
+
+            if (!snap.metadata.fromCache || cloudAttendance.length > 0) {
+              setLocalCache(CACHE_KEYS.ATTENDANCE, cloudAttendance);
+            }
+
+            const attendanceDates = new Set(cloudAttendance.map((a) => a.date).filter(Boolean)).size;
+            emitRealtimeState({
+              status: "connected",
+              lastSyncedAt: formatRealtimeTime(),
+              lastUpdatedCollection: "attendance",
+              error: null,
+              counts: {
+                ...currentRealtimeState.counts,
+                attendance: cloudAttendance.length,
+                attendanceDates
+              },
+              collectionsSynced: { ...currentRealtimeState.collectionsSynced, attendance: true }
+            });
+            realtimeSyncCallbackSet.forEach((cb) => cb.onAttendance?.(cloudAttendance));
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.LIST, "attendance", false);
+            emitRealtimeState({ status: "error", error: err?.message || "ไม่สามารถเชื่อมต่อข้อมูลการเช็คยอดแบบเรียลไทม์ได้" });
+          }
+        );
+
+        // 5. User directory realtime stream (always readable; admin /users stream upgrades it when authenticated)
+        const unsubUserDir = onSnapshot(
+          collection(db, "user_directory"),
+          (snap) => {
+            const rawDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+            recentCollectionReads.set("user_directory", { timestamp: Date.now(), items: rawDocs });
+            if (hasActiveAdminUsersStream) return;
+
+            const localHashes = getAuthHashMap();
+            const dirUsers = rawDocs
+              .map((d) => {
+                const hasHash = Boolean(localHashes[d.id] || d.data?.hasPassword);
+                return sanitizeUserForClient({ id: d.id, ...d.data, hasPassword: hasHash });
+              })
+              .sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
+
+            if (!snap.metadata.fromCache || dirUsers.length > 0) {
+              setLocalCache(CACHE_KEYS.USERS, dirUsers);
+            }
+
+            emitRealtimeState({
+              status: "connected",
+              lastSyncedAt: formatRealtimeTime(),
+              lastUpdatedCollection: "user_directory",
+              error: null,
+              counts: { ...currentRealtimeState.counts, users: dirUsers.length },
+              collectionsSynced: { ...currentRealtimeState.collectionsSynced, users: true }
+            });
+            realtimeSyncCallbackSet.forEach((cb) => cb.onUsers?.(dirUsers));
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.LIST, "user_directory", false);
+          }
+        );
+
+        // 6. System settings realtime stream
+        const unsubSettings = onSnapshot(
+          doc(db, "system_settings", "config"),
+          (snap) => {
+            if (snap.exists()) {
+              const cleanSettings = stripDangerousKeys({
+                ...DEFAULT_SYSTEM_SETTINGS,
+                ...snap.data()
+              }) as SystemSettings;
+              setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, cleanSettings);
+              emitRealtimeState({
+                status: "connected",
+                lastSyncedAt: formatRealtimeTime(),
+                lastUpdatedCollection: "system_settings",
+                error: null,
+                collectionsSynced: { ...currentRealtimeState.collectionsSynced, systemSettings: true }
+              });
+              realtimeSyncCallbackSet.forEach((cb) => cb.onSystemSettings?.(cleanSettings));
+            } else {
+              emitRealtimeState({
+                collectionsSynced: { ...currentRealtimeState.collectionsSynced, systemSettings: true }
+              });
+            }
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.GET, "system_settings/config", false);
+          }
+        );
+
+        activeRealtimeUnsubs = [
+          unsubDorms,
+          unsubStudents,
+          unsubNotices,
+          unsubAttendance,
+          unsubUserDir,
+          unsubSettings
+        ];
+
+        attachAdminUsersStreamIfVerified();
+        let lastVerifiedUid: string | null = auth.currentUser?.emailVerified ? auth.currentUser.uid : null;
+        activeAuthWatchUnsub = auth.onAuthStateChanged((fbUser) => {
+          const nextUid = fbUser?.emailVerified ? fbUser.uid : null;
+          if (nextUid !== lastVerifiedUid) {
+            lastVerifiedUid = nextUid;
+            attachAdminUsersStreamIfVerified();
+          }
+        });
+      })
+      .catch((err) => {
+        emitRealtimeState({
+          status: "error",
+          error: err?.message || "ไม่สามารถเริ่มการเชื่อมต่อ Realtime Firestore ได้"
+        });
+      });
+  }
+
+  return () => {
+    if (callbacks) {
+      realtimeSyncCallbackSet.delete(callbacks);
+    }
+    activeRealtimeRefCount = Math.max(0, activeRealtimeRefCount - 1);
+    if (activeRealtimeRefCount === 0) {
+      teardownRealtimeListeners();
+      currentRealtimeState = initialRealtimeState();
+    }
   };
 }
 

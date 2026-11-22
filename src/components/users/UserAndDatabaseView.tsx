@@ -39,11 +39,15 @@ import {
   syncLiveFirebaseDatabase,
   deleteSampleData,
   verifyAuthorizedAdminOrStaffPassword,
-  getDisplayedDatabaseSnapshot,
-  uploadCurrentDisplayedDatabaseToCloud,
+  analyzeDirectUploadJson,
+  uploadDatasetDirectlyToFirestore,
+  DirectUploadAnalysis,
+  DirectFirestoreUploadResult,
+  DirectFirestoreUploadTargets,
   invalidateFirestoreReadCache,
   DeleteSampleDataOptions
 } from "../../services/api";
+import { useRealtimeDatabaseState } from "../../services/useDormQueries";
 import {
   Key,
   User,
@@ -102,7 +106,8 @@ import {
   Eye,
   Wrench,
   PauseCircle,
-  PlayCircle
+  PlayCircle,
+  Radio
 } from "lucide-react";
 
 interface UserAndDatabaseViewProps {
@@ -553,29 +558,26 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     }
   };
 
-  // Central database sync & upload states
+  // Central database realtime & direct upload states
+  const realtimeDbState = useRealtimeDatabaseState(true);
   const [isInitializingDefaultDb, setIsInitializingDefaultDb] = useState<boolean>(false);
-  const [isUploadingCurrentDb, setIsUploadingCurrentDb] = useState<boolean>(false);
   const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string>(() => auth.currentUser?.email || "");
-  const [uploadCloudResult, setUploadCloudResult] = useState<{
-    message: string;
-    uploadedCounts: {
-      dorms: number;
-      students: number;
-      users: number;
-      notices: number;
-      attendance: number;
-      attendanceDates: number;
-    };
-    verifiedCloudCounts: {
-      dorms: number;
-      students: number;
-      users: number;
-      notices: number;
-      attendance: number;
-    };
-  } | null>(null);
-  const [uploadCloudError, setUploadCloudError] = useState<string | null>(null);
+  const [directUploadFile, setDirectUploadFile] = useState<File | null>(null);
+  const [directUploadRawJson, setDirectUploadRawJson] = useState<any | null>(null);
+  const [directUploadAnalysis, setDirectUploadAnalysis] = useState<DirectUploadAnalysis | null>(null);
+  const [directUploadTargets, setDirectUploadTargets] = useState<DirectFirestoreUploadTargets>({
+    dorms: true,
+    students: true,
+    users: true,
+    notices: true,
+    attendance: true,
+    systemSettings: true
+  });
+  const [directUploadMode, setDirectUploadMode] = useState<"UPSERT" | "REPLACE">("UPSERT");
+  const [directUploadProgress, setDirectUploadProgress] = useState<string>("");
+  const [isDirectUploading, setIsDirectUploading] = useState<boolean>(false);
+  const [directUploadResult, setDirectUploadResult] = useState<DirectFirestoreUploadResult | null>(null);
+  const [directUploadError, setDirectUploadError] = useState<string | null>(null);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
@@ -585,26 +587,44 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     return () => unsubscribe();
   }, []);
 
-  const displayedSnapshot = React.useMemo(
-    () =>
-      getDisplayedDatabaseSnapshot({
-        dorms,
-        students,
-        users: usersList && usersList.length > 0 ? usersList : undefined,
-        notices,
-        attendance: attendanceRecords,
-        systemSettings: settingsForm
-      }),
-    [dorms, students, usersList, notices, attendanceRecords, settingsForm]
-  );
+  // Keep local users table synced with realtime updates from App/Firestore
+  useEffect(() => {
+    if (usersList && usersList.length > 0) {
+      setUsers(usersList);
+    }
+  }, [usersList]);
 
-  const displayedAttendanceDatesCount = React.useMemo(
-    () => new Set(displayedSnapshot.attendance.map((a) => a.date).filter(Boolean)).size,
-    [displayedSnapshot.attendance]
+  const realtimeAttendanceDatesCount = React.useMemo(() => {
+    if (realtimeDbState.collectionsSynced.attendance) {
+      return realtimeDbState.counts.attendanceDates;
+    }
+    return new Set(attendanceRecords.map((a) => a.date).filter(Boolean)).size;
+  }, [realtimeDbState, attendanceRecords]);
+
+  const realtimeDisplayCounts = React.useMemo(
+    () => ({
+      attendance: realtimeDbState.collectionsSynced.attendance
+        ? realtimeDbState.counts.attendance
+        : attendanceRecords.length,
+      attendanceDates: realtimeAttendanceDatesCount,
+      students: realtimeDbState.collectionsSynced.students
+        ? realtimeDbState.counts.students
+        : students.length,
+      dorms: realtimeDbState.collectionsSynced.dorms
+        ? realtimeDbState.counts.dorms
+        : dorms.length,
+      notices: realtimeDbState.collectionsSynced.notices
+        ? realtimeDbState.counts.notices
+        : notices.length,
+      users: realtimeDbState.collectionsSynced.users
+        ? realtimeDbState.counts.users
+        : usersList.length || users.length
+    }),
+    [realtimeDbState, realtimeAttendanceDatesCount, attendanceRecords.length, students.length, dorms.length, notices.length, usersList.length, users.length]
   );
 
   const handleGoogleSignInForDb = async () => {
-    setUploadCloudError(null);
+    setDirectUploadError(null);
     const fbUser = await signInWithGoogleAndRefresh();
     setFirebaseAuthEmail(fbUser.email || "");
     invalidateFirestoreReadCache();
@@ -612,9 +632,69 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     return fbUser;
   };
 
-  const handleUploadDisplayedDatabase = async () => {
-    setUploadCloudError(null);
-    setUploadCloudResult(null);
+  const handleDirectUploadFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setDirectUploadError(null);
+    setDirectUploadResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(String(evt.target?.result || ""));
+        const analysis = analyzeDirectUploadJson(parsed);
+        setDirectUploadFile(file);
+        setDirectUploadRawJson(parsed);
+        setDirectUploadAnalysis(analysis);
+        setDirectUploadTargets({
+          dorms: analysis.dormsCount > 0,
+          students: analysis.studentsCount > 0,
+          users: analysis.usersCount > 0,
+          notices: analysis.noticesCount > 0,
+          attendance: analysis.attendanceCount > 0,
+          systemSettings: analysis.hasSystemSettings
+        });
+        showNotification(
+          "success",
+          `ตรวจสอบไฟล์ "${file.name}" สำเร็จ: พบข้อมูลรวม ${analysis.totalRecords} รายการ พร้อมอัพโหลดเข้าสู่ Firestore โดยตรง`
+        );
+      } catch (err: any) {
+        setDirectUploadFile(null);
+        setDirectUploadRawJson(null);
+        setDirectUploadAnalysis(null);
+        const errMsg = err?.message || "ไฟล์ JSON ไม่ถูกต้องหรือไม่ใช่รูปแบบข้อมูลของระบบ";
+        setDirectUploadError(errMsg);
+        showNotification("error", errMsg);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearDirectUploadFile = () => {
+    setDirectUploadFile(null);
+    setDirectUploadRawJson(null);
+    setDirectUploadAnalysis(null);
+    setDirectUploadError(null);
+    setDirectUploadResult(null);
+    setDirectUploadProgress("");
+  };
+
+  const handleExecuteDirectUpload = async () => {
+    if (!directUploadRawJson || !directUploadAnalysis) {
+      setDirectUploadError("กรุณาเลือกไฟล์ข้อมูล JSON ก่อนอัพโหลดเข้าสู่ฐานข้อมูลหลัก");
+      return;
+    }
+
+    const hasAnyTarget = Object.values(directUploadTargets).some(Boolean);
+    if (!hasAnyTarget) {
+      setDirectUploadError("กรุณาเลือกประเภทข้อมูลที่ต้องการอัพโหลดอย่างน้อย 1 รายการ");
+      return;
+    }
+
+    setDirectUploadError(null);
+    setDirectUploadResult(null);
 
     try {
       if (!auth.currentUser || !auth.currentUser.emailVerified) {
@@ -628,26 +708,21 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           : authErr?.code === "auth/popup-closed-by-user"
           ? "ยกเลิกการเข้าสู่ระบบด้วย Google กรุณากดอัพโหลดและเลือกบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
           : authErr?.message || "ไม่สามารถยืนยันตัวตนด้วยบัญชี Google ได้";
-      setUploadCloudError(errMsg);
+      setDirectUploadError(errMsg);
       showNotification("error", errMsg);
       return;
     }
 
-    setIsUploadingCurrentDb(true);
+    setIsDirectUploading(true);
+    setDirectUploadProgress("กำลังเตรียมข้อมูลและตรวจสอบสิทธิ์การเขียนลง Firestore...");
     try {
-      const res = await uploadCurrentDisplayedDatabaseToCloud({
-        dorms,
-        students,
-        users: usersList && usersList.length > 0 ? usersList : users,
-        notices,
-        attendance: attendanceRecords,
-        systemSettings: settingsForm
+      const res = await uploadDatasetDirectlyToFirestore({
+        data: directUploadRawJson,
+        targets: directUploadTargets,
+        mode: directUploadMode,
+        onProgress: (stepMsg) => setDirectUploadProgress(stepMsg)
       });
-      setUploadCloudResult({
-        message: res.message,
-        uploadedCounts: res.uploadedCounts,
-        verifiedCloudCounts: res.verifiedCloudCounts
-      });
+      setDirectUploadResult(res);
       invalidateFirestoreReadCache();
       await queryClient.invalidateQueries();
       showNotification("success", res.message);
@@ -655,13 +730,15 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       await loadUsersList();
     } catch (err: any) {
       const rawMsg = String(err?.message || err || "");
-      const friendlyMsg = rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-        ? "ไม่มีสิทธิ์เขียนลงฐานข้อมูล กรุณาเข้าสู่ระบบ Google ด้วยบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
-        : rawMsg || "เกิดข้อผิดพลาดในการอัพโหลดฐานข้อมูลลง Firestore";
-      setUploadCloudError(friendlyMsg);
+      const friendlyMsg =
+        rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+          ? "ไม่มีสิทธิ์เขียนลงฐานข้อมูล กรุณาเข้าสู่ระบบ Google ด้วยบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : rawMsg || "เกิดข้อผิดพลาดในการอัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลัก";
+      setDirectUploadError(friendlyMsg);
       showNotification("error", friendlyMsg);
     } finally {
-      setIsUploadingCurrentDb(false);
+      setIsDirectUploading(false);
+      setDirectUploadProgress("");
     }
   };
 
@@ -3365,18 +3442,33 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                {/* Upload Currently Displayed Dataset to Primary Cloud Database (Firestore) */}
-                <div className="p-5 rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/60 space-y-4 md:col-span-3 shadow-xs">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                {/* Direct Upload to Primary Cloud Database (Firestore) + Realtime Primary Database View */}
+                <div className="p-5 rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/60 space-y-5 md:col-span-3 shadow-xs">
+                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                     <div className="flex items-start gap-3">
                       <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
                         <CloudUpload className="w-6 h-6" />
                       </div>
-                      <div>
+                      <div className="space-y-1">
                         <h4 className="font-extrabold text-gray-900 text-sm md:text-base flex flex-wrap items-center gap-2">
-                          <span>อัพโหลดฐานข้อมูลชุดที่แสดงอยู่ตอนนี้ลงฐานข้อมูลกลาง (Firestore)</span>
+                          <span>อัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลักโดยตรง (Firestore)</span>
+                          {realtimeDbState.status === "connected" ? (
+                            <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                              <span>Realtime Connected{realtimeDbState.lastSyncedAt ? ` (${realtimeDbState.lastSyncedAt})` : ""}</span>
+                            </span>
+                          ) : realtimeDbState.status === "error" ? (
+                            <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-rose-300">
+                              <span>Realtime ขัดข้อง</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>กำลังเชื่อมต่อ Realtime...</span>
+                            </span>
+                          )}
                           {firebaseAuthEmail ? (
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
+                            <span className="bg-teal-100 text-teal-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-teal-300">
                               ✓ Google Auth: {firebaseAuthEmail}
                             </span>
                           ) : (
@@ -3385,32 +3477,32 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                             </span>
                           )}
                         </h4>
-                        <p className="text-xs text-gray-600 mt-1">
-                          อัพโหลดข้อมูลทั้งหมดที่แสดงอยู่ในระบบตอนนี้เข้าสู่ Firestore โดยเรียงลำดับความสมบูรณ์ของข้อมูลหอพัก บัญชีผู้ใช้ นักเรียน เรื่องแจ้งอบรม และบันทึกการเช็คยอดนักเรียนทั้งหมด
+                        <p className="text-xs text-gray-600 leading-relaxed">
+                          เลือกไฟล์ข้อมูล (.json) เพื่อตรวจสอบและอัพโหลดเข้าสู่ฐานข้อมูลหลัก Firestore โดยตรง พร้อมคงการแสดงข้อมูลทั้งหมดในฐานข้อมูลแบบเรียลไทม์ผ่านการเชื่อมต่อ Realtime
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={handleUploadDisplayedDatabase}
-                        disabled={isUploadingCurrentDb}
-                        className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-60 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md"
-                      >
-                        {isUploadingCurrentDb ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>กำลังอัพโหลดลง Firestore...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CloudUpload className="w-4 h-4" />
-                            <span>อัพโหลดชุดข้อมูลปัจจุบันลงฐานข้อมูล</span>
-                          </>
-                        )}
-                      </button>
-                      {firebaseAuthEmail && firebaseAuthEmail.toLowerCase() !== "domitory@pcccr.ac.th" && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {!firebaseAuthEmail ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await handleGoogleSignInForDb();
+                              showNotification("success", "เชื่อมต่อบัญชี Google สำหรับเขียนข้อมูลลง Firestore สำเร็จ");
+                            } catch (e: any) {
+                              const errMsg = e?.message || "ยืนยันตัวตนด้วย Google ไม่สำเร็จ";
+                              setDirectUploadError(errMsg);
+                              showNotification("error", errMsg);
+                            }
+                          }}
+                          className="px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                        >
+                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                          <span>ยืนยันสิทธิ์ Google</span>
+                        </button>
+                      ) : firebaseAuthEmail.toLowerCase() !== "domitory@pcccr.ac.th" ? (
                         <button
                           type="button"
                           onClick={async () => {
@@ -3418,74 +3510,342 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                               await handleGoogleSignInForDb();
                             } catch (e: any) {
                               const msg = e?.message || "เปลี่ยนบัญชี Google ไม่สำเร็จ";
-                              setUploadCloudError(msg);
+                              setDirectUploadError(msg);
                               showNotification("error", msg);
                             }
                           }}
-                          className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                          className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                         >
                           สลับบัญชี Google
                         </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Realtime Live Database Summary Grid (Connected directly to Firestore onSnapshot) */}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                        <Radio className="w-4 h-4 text-emerald-600" />
+                        <span>ข้อมูลทั้งหมดในฐานข้อมูลหลัก (เชื่อมต่อแบบ Realtime)</span>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-500">
+                        DB: {FIREBASE_DATABASE_ID}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                      <div className="p-3 rounded-xl bg-purple-50 border-2 border-purple-200">
+                        <div className="text-[11px] font-bold text-purple-800">ข้อมูลเช็คยอดนักเรียน</div>
+                        <div className="text-lg font-black text-purple-900 mt-0.5">
+                          {realtimeDisplayCounts.attendance} <span className="text-xs font-bold">รายการ</span>
+                        </div>
+                        <div className="text-[10px] font-semibold text-purple-700">
+                          ครอบคลุม {realtimeDisplayCounts.attendanceDates} วัน
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white border border-slate-200">
+                        <div className="text-[11px] font-bold text-slate-500">รายชื่อนักเรียน</div>
+                        <div className="text-lg font-black text-slate-900 mt-0.5">
+                          {realtimeDisplayCounts.students} <span className="text-xs font-bold">คน</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">ทุกหอพัก</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white border border-slate-200">
+                        <div className="text-[11px] font-bold text-slate-500">หอพักนักเรียน</div>
+                        <div className="text-lg font-black text-slate-900 mt-0.5">
+                          {realtimeDisplayCounts.dorms} <span className="text-xs font-bold">แห่ง</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">โครงสร้างหอพัก</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white border border-slate-200">
+                        <div className="text-[11px] font-bold text-slate-500">เรื่องแจ้งอบรม</div>
+                        <div className="text-lg font-black text-slate-900 mt-0.5">
+                          {realtimeDisplayCounts.notices} <span className="text-xs font-bold">เรื่อง</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">ประกาศประจำวัน</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white border border-slate-200">
+                        <div className="text-[11px] font-bold text-slate-500">บัญชีผู้ใช้งาน</div>
+                        <div className="text-lg font-black text-slate-900 mt-0.5">
+                          {realtimeDisplayCounts.users} <span className="text-xs font-bold">บัญชี</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">สิทธิ์การเข้าถึง</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct JSON File Upload Panel */}
+                  <div className="bg-white/90 rounded-2xl border border-emerald-200 p-4 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h5 className="text-xs md:text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                          <FileJson className="w-4 h-4 text-emerald-600" />
+                          <span>เลือกไฟล์ชุดข้อมูล (.json) เพื่ออัพโหลดเข้าสู่ Firestore โดยตรง</span>
+                        </h5>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          รองรับไฟล์ database.json หรือไฟล์สำรองข้อมูลระบบ (เขียนลงฐานข้อมูลหลักโดยตรงและอัปเดตหน้าจอทันทีแบบ Realtime)
+                        </p>
+                      </div>
+                      {directUploadFile && (
+                        <button
+                          type="button"
+                          onClick={handleClearDirectUploadFile}
+                          disabled={isDirectUploading}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer self-start sm:self-auto disabled:opacity-50"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>ยกเลิกไฟล์ที่เลือก</span>
+                        </button>
                       )}
                     </div>
+
+                    {!directUploadAnalysis ? (
+                      <label className="block border-2 border-dashed border-emerald-300 hover:border-emerald-500 bg-emerald-50/40 hover:bg-emerald-50/80 rounded-xl p-5 text-center transition-all cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".json,application/json"
+                          onChange={handleDirectUploadFileSelect}
+                          className="hidden"
+                        />
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                            <CloudUpload className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-xs md:text-sm font-extrabold text-emerald-800">
+                              คลิกเพื่อเลือกไฟล์ข้อมูล (.json) สำหรับอัพโหลดเข้าสู่ฐานข้อมูลหลักโดยตรง
+                            </span>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              ระบบจะตรวจสอบโครงสร้างและจำนวนรายการให้ดูก่อนยืนยันอัพโหลดลง Firestore
+                            </p>
+                          </div>
+                        </div>
+                      </label>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50/70 border border-emerald-200 rounded-xl px-3.5 py-2.5">
+                          <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-950">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>ไฟล์ที่เลือก: {directUploadFile?.name}</span>
+                            <span className="text-[11px] font-semibold text-emerald-700">
+                              ({directUploadFile ? `${(directUploadFile.size / 1024).toFixed(1)} KB` : ""})
+                            </span>
+                          </div>
+                          <label className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer">
+                            <span>เปลี่ยนไฟล์</span>
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={handleDirectUploadFileSelect}
+                              disabled={isDirectUploading}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {/* Collection Selection */}
+                        <div className="space-y-2">
+                          <div className="text-xs font-bold text-slate-800">
+                            เลือกชุดข้อมูลจากไฟล์ที่ต้องการอัพโหลดเข้าสู่ Firestore:
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.dorms ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${directUploadAnalysis.dormsCount === 0 ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.dorms}
+                                disabled={directUploadAnalysis.dormsCount === 0 || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, dorms: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">หอพัก</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">{directUploadAnalysis.dormsCount} แห่ง</div>
+                              </div>
+                            </label>
+
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.students ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${directUploadAnalysis.studentsCount === 0 ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.students}
+                                disabled={directUploadAnalysis.studentsCount === 0 || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, students: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">นักเรียน</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">{directUploadAnalysis.studentsCount} คน</div>
+                              </div>
+                            </label>
+
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.attendance ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${directUploadAnalysis.attendanceCount === 0 ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.attendance}
+                                disabled={directUploadAnalysis.attendanceCount === 0 || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, attendance: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">เช็คยอด</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">
+                                  {directUploadAnalysis.attendanceCount} รายการ ({directUploadAnalysis.attendanceDatesCount} วัน)
+                                </div>
+                              </div>
+                            </label>
+
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.notices ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${directUploadAnalysis.noticesCount === 0 ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.notices}
+                                disabled={directUploadAnalysis.noticesCount === 0 || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, notices: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">เรื่องอบรม</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">{directUploadAnalysis.noticesCount} เรื่อง</div>
+                              </div>
+                            </label>
+
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.users ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${directUploadAnalysis.usersCount === 0 ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.users}
+                                disabled={directUploadAnalysis.usersCount === 0 || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, users: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">ผู้ใช้งาน</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">{directUploadAnalysis.usersCount} บัญชี</div>
+                              </div>
+                            </label>
+
+                            <label className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 cursor-pointer transition-colors ${
+                              directUploadTargets.systemSettings ? "border-emerald-500 bg-emerald-50/60" : "border-slate-200 bg-slate-50/50"
+                            } ${!directUploadAnalysis.hasSystemSettings ? "opacity-50 cursor-not-allowed" : ""}`}>
+                              <input
+                                type="checkbox"
+                                checked={directUploadTargets.systemSettings}
+                                disabled={!directUploadAnalysis.hasSystemSettings || isDirectUploading}
+                                onChange={(e) => setDirectUploadTargets((prev) => ({ ...prev, systemSettings: e.target.checked }))}
+                                className="mt-0.5 text-emerald-600 rounded"
+                              />
+                              <div>
+                                <div className="font-bold text-slate-800">ตั้งค่าระบบ</div>
+                                <div className="text-[11px] font-extrabold text-emerald-700">
+                                  {directUploadAnalysis.hasSystemSettings ? "มีข้อมูล" : "ไม่มี"}
+                                </div>
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Upload Strategy */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <label className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer ${
+                            directUploadMode === "UPSERT" ? "border-emerald-600 bg-emerald-50/50" : "border-slate-200 bg-white"
+                          }`}>
+                            <input
+                              type="radio"
+                              name="directUploadMode"
+                              value="UPSERT"
+                              checked={directUploadMode === "UPSERT"}
+                              disabled={isDirectUploading}
+                              onChange={() => setDirectUploadMode("UPSERT")}
+                              className="mt-0.5 text-emerald-600"
+                            />
+                            <div>
+                              <strong className="text-xs font-bold text-slate-900 block">ผสานและอัปเดตข้อมูลตรงกัน (Merge / Upsert)</strong>
+                              <span className="text-[11px] text-slate-500 block">
+                                เพิ่มข้อมูลใหม่และเขียนทับเฉพาะรายการที่มี ID ตรงกัน โดยไม่ลบข้อมูลอื่นบน Firestore
+                              </span>
+                            </div>
+                          </label>
+
+                          <label className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer ${
+                            directUploadMode === "REPLACE" ? "border-amber-600 bg-amber-50/50" : "border-slate-200 bg-white"
+                          }`}>
+                            <input
+                              type="radio"
+                              name="directUploadMode"
+                              value="REPLACE"
+                              checked={directUploadMode === "REPLACE"}
+                              disabled={isDirectUploading}
+                              onChange={() => setDirectUploadMode("REPLACE")}
+                              className="mt-0.5 text-amber-600"
+                            />
+                            <div>
+                              <strong className="text-xs font-bold text-amber-900 block">ล้างข้อมูลเดิมในส่วนที่เลือกแล้วเขียนใหม่ทั้งหมด (Replace)</strong>
+                              <span className="text-[11px] text-amber-700 block">
+                                ลบข้อมูลเก่าในตารางที่เลือกบน Firestore ก่อน แล้วอัพโหลดข้อมูลจากไฟล์ชุดใหม่เข้าไปแทน
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+
+                        {/* Execute Direct Upload Button */}
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+                          <div className="text-[11px] text-slate-600 font-medium">
+                            {directUploadProgress ? (
+                              <span className="text-emerald-700 font-bold flex items-center gap-1.5">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                                <span>{directUploadProgress}</span>
+                              </span>
+                            ) : (
+                              <span>ข้อมูลจะถูกส่งตรงเข้าสู่ Firestore และแสดงผลแบบ Realtime ทันที</span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleExecuteDirectUpload}
+                            disabled={isDirectUploading || !Object.values(directUploadTargets).some(Boolean)}
+                            className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-60 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shrink-0"
+                          >
+                            {isDirectUploading ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>กำลังอัพโหลดเข้าสู่ Firestore...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CloudUpload className="w-4 h-4" />
+                                <span>อัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลักโดยตรง</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Currently Displayed Dataset Summary Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-                    <div className="p-3 rounded-xl bg-purple-50 border-2 border-purple-200">
-                      <div className="text-[11px] font-bold text-purple-800">ข้อมูลเช็คยอดนักเรียน</div>
-                      <div className="text-lg font-black text-purple-900 mt-0.5">
-                        {displayedSnapshot.attendance.length} <span className="text-xs font-bold">รายการ</span>
-                      </div>
-                      <div className="text-[10px] font-semibold text-purple-700">
-                        ครอบคลุม {displayedAttendanceDatesCount} วัน
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200">
-                      <div className="text-[11px] font-bold text-slate-500">รายชื่อนักเรียน</div>
-                      <div className="text-lg font-black text-slate-900 mt-0.5">
-                        {displayedSnapshot.students.length} <span className="text-xs font-bold">คน</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500">ทุกหอพัก</div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200">
-                      <div className="text-[11px] font-bold text-slate-500">หอพักนักเรียน</div>
-                      <div className="text-lg font-black text-slate-900 mt-0.5">
-                        {displayedSnapshot.dorms.length} <span className="text-xs font-bold">แห่ง</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500">โครงสร้างหอพัก</div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200">
-                      <div className="text-[11px] font-bold text-slate-500">เรื่องแจ้งอบรม</div>
-                      <div className="text-lg font-black text-slate-900 mt-0.5">
-                        {displayedSnapshot.notices.length} <span className="text-xs font-bold">เรื่อง</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500">ประกาศประจำวัน</div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200">
-                      <div className="text-[11px] font-bold text-slate-500">บัญชีผู้ใช้งาน</div>
-                      <div className="text-lg font-black text-slate-900 mt-0.5">
-                        {displayedSnapshot.users.length} <span className="text-xs font-bold">บัญชี</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500">สิทธิ์การเข้าถึง</div>
-                    </div>
-                  </div>
-
-                  {uploadCloudError && (
+                  {directUploadError && (
                     <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{uploadCloudError}</span>
+                      <span>{directUploadError}</span>
                     </div>
                   )}
 
-                  {uploadCloudResult && (
+                  {directUploadResult && (
                     <div className="p-3.5 rounded-xl bg-emerald-100/70 border border-emerald-300 text-xs text-emerald-950 space-y-1">
                       <div className="font-extrabold flex items-center gap-1.5 text-emerald-900">
                         <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>{uploadCloudResult.message}</span>
+                        <span>{directUploadResult.message}</span>
                       </div>
                       <div className="text-[11px] text-emerald-800 font-semibold">
-                        ตรวจสอบยอดบน Firestore จริงแล้ว: เช็คยอดนักเรียน {uploadCloudResult.verifiedCloudCounts.attendance} รายการ • นักเรียน {uploadCloudResult.verifiedCloudCounts.students} คน • หอพัก {uploadCloudResult.verifiedCloudCounts.dorms} แห่ง • เรื่องแจ้งอบรม {uploadCloudResult.verifiedCloudCounts.notices} เรื่อง • ผู้ใช้ {uploadCloudResult.verifiedCloudCounts.users} บัญชี
+                        ตรวจสอบยอดบน Firestore จริงแล้ว: เช็คยอดนักเรียน {directUploadResult.verifiedCloudCounts.attendance} รายการ • นักเรียน {directUploadResult.verifiedCloudCounts.students} คน • หอพัก {directUploadResult.verifiedCloudCounts.dorms} แห่ง • เรื่องแจ้งอบรม {directUploadResult.verifiedCloudCounts.notices} เรื่อง • ผู้ใช้ {directUploadResult.verifiedCloudCounts.users} บัญชี
                       </div>
                     </div>
                   )}
