@@ -54,11 +54,12 @@ export function recordLastDbSave() {
   }
 }
 
-export function useUsersQuery() {
+export function useUsersQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["users"],
     queryFn: fetchUsers,
     staleTime: 1000 * 60 * 2, // 2 minutes
+    enabled,
   });
 }
 
@@ -98,11 +99,12 @@ export function useDeleteUserMutation() {
   });
 }
 
-export function useDormsQuery() {
+export function useDormsQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["dorms"],
     queryFn: fetchDorms,
     staleTime: 1000 * 60 * 5, // 5 minutes
+    enabled,
   });
 }
 
@@ -129,11 +131,12 @@ export function useUpdateDormMutation() {
   });
 }
 
-export function useStudentsQuery(params?: { dormId?: string; grade?: string; room?: number }) {
+export function useStudentsQuery(params?: { dormId?: string; grade?: string; room?: number }, enabled: boolean = true) {
   return useQuery({
     queryKey: ["students", params],
     queryFn: () => fetchStudents(params),
     staleTime: 1000 * 60 * 2,
+    enabled,
   });
 }
 
@@ -224,11 +227,12 @@ export function useBatchTransferStudentsMutation() {
   });
 }
 
-export function useNoticesQuery(date?: string) {
+export function useNoticesQuery(date?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["notices", date],
     queryFn: () => fetchNotices(date),
     staleTime: 1000 * 30, // 30 seconds
+    enabled,
   });
 }
 
@@ -265,19 +269,21 @@ export function useDeleteNoticeMutation() {
   });
 }
 
-export function useAttendanceQuery(date: string, dormId?: string) {
+export function useAttendanceQuery(date: string, dormId?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["attendance", date, dormId],
     queryFn: () => fetchAttendance(date, dormId),
     staleTime: 1000 * 15, // 15 seconds
+    enabled,
   });
 }
 
-export function useAllAttendanceRecordsQuery() {
+export function useAllAttendanceRecordsQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["allAttendanceRecords"],
     queryFn: fetchAllAttendanceRecords,
     staleTime: 1000 * 30, // 30 seconds
+    enabled,
   });
 }
 
@@ -335,11 +341,12 @@ export function useBatchSetAttendanceDateRangeMutation() {
   });
 }
 
-export function useDailyReportQuery(date?: string) {
+export function useDailyReportQuery(date?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["dailyReport", date],
     queryFn: () => fetchDailyReport(date),
     staleTime: 1000 * 30,
+    enabled,
   });
 }
 
@@ -350,11 +357,12 @@ export function useExportGoogleSheetsMutation() {
   });
 }
 
-export function useSystemSettingsQuery() {
+export function useSystemSettingsQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["systemSettings"],
     queryFn: fetchSystemSettings,
     staleTime: 1000 * 60 * 10, // 10 minutes
+    enabled,
   });
 }
 

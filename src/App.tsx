@@ -21,15 +21,11 @@ import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusM
 import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { sanitizeUserForClient, stripDangerousKeys } from "./utils/security";
-import { AlertTriangle, Check, Copy, Database, LogIn, RefreshCw, X } from "lucide-react";
+import { Loader2, RefreshCw, WifiOff } from "lucide-react";
 import {
   auth,
-  subscribeFirestoreAccessIssue,
-  signInWithGoogleAndRefresh,
-  getCurrentHostname,
-  FIREBASE_PROJECT_ID,
-  FIREBASE_DATABASE_ID,
-  FirestoreAccessIssue
+  checkFirebaseConnection,
+  subscribeFirestoreAccessIssue
 } from "./lib/firebase";
 import { invalidateFirestoreReadCache } from "./services/api";
 import {
@@ -73,7 +69,12 @@ const queryClient = new QueryClient({
 const EMPTY_TODAY_ATTENDANCE: Record<string, DailyAttendance> = {};
 
 function MainAppContent() {
-  const { data: dbSettings } = useSystemSettingsQuery();
+  const [dbConnectionState, setDbConnectionState] = useState<"checking" | "online" | "offline">(() =>
+    typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "checking"
+  );
+  const [isRetryingConnection, setIsRetryingConnection] = useState<boolean>(false);
+
+  const { data: dbSettings } = useSystemSettingsQuery(dbConnectionState === "online");
   const updateSystemSettingsMutation = useUpdateSystemSettingsMutation();
 
   // System Settings State
@@ -132,18 +133,53 @@ function MainAppContent() {
   // System Maintenance Auto Popup State (Shown 1 time per day)
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState<boolean>(false);
 
-  // Firestore Access Issue Banner State (only visible when Firestore access is actively blocked)
-  const [accessIssue, setAccessIssue] = useState<FirestoreAccessIssue | null>(null);
-  const [dismissedIssueKey, setDismissedIssueKey] = useState<string | null>(null);
-  const [isConnectingCloud, setIsConnectingCloud] = useState<boolean>(false);
-  const [cloudConnectError, setCloudConnectError] = useState<string | null>(null);
-  const [copiedDomainHost, setCopiedDomainHost] = useState<boolean>(false);
+  const verifyDatabaseConnectivity = React.useCallback(async (showSpinner: boolean = false) => {
+    if (showSpinner) {
+      setIsRetryingConnection(true);
+    }
+    try {
+      const status = await checkFirebaseConnection();
+      if (status.isConnected) {
+        if (status.settings) {
+          const cleanSettings = stripDangerousKeys({
+            ...DEFAULT_SYSTEM_SETTINGS,
+            ...status.settings
+          }) as SystemSettings;
+          setSystemSettings(cleanSettings);
+          try {
+            localStorage.setItem("dorm_system_settings", JSON.stringify(cleanSettings));
+          } catch {}
+          queryClient.setQueryData(["systemSettings"], cleanSettings);
+        }
+        setDbConnectionState("online");
+        invalidateFirestoreReadCache();
+        queryClient.invalidateQueries();
+      } else {
+        setDbConnectionState("offline");
+      }
+    } finally {
+      if (showSpinner) {
+        setIsRetryingConnection(false);
+      }
+    }
+  }, []);
 
   React.useEffect(() => {
+    verifyDatabaseConnectivity(false);
+
+    const handleOnline = () => {
+      verifyDatabaseConnectivity(true);
+    };
+    const handleOffline = () => {
+      setDbConnectionState("offline");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
     const unsubIssue = subscribeFirestoreAccessIssue((issue) => {
-      setAccessIssue(issue);
-      if (!issue) {
-        setCloudConnectError(null);
+      if (issue?.code === "OFFLINE") {
+        setDbConnectionState("offline");
       }
     });
 
@@ -158,31 +194,12 @@ function MainAppContent() {
     });
 
     return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       unsubIssue();
       unsubAuth();
     };
-  }, []);
-
-  const handleConnectFirestoreGoogle = async () => {
-    setIsConnectingCloud(true);
-    setCloudConnectError(null);
-    try {
-      await signInWithGoogleAndRefresh();
-      invalidateFirestoreReadCache();
-      await queryClient.invalidateQueries();
-      setDismissedIssueKey(null);
-    } catch (err: any) {
-      setCloudConnectError(err?.message || "ไม่สามารถเชื่อมต่อบัญชี Google ได้");
-    } finally {
-      setIsConnectingCloud(false);
-    }
-  };
-
-  const handleRetryFirestoreSync = async () => {
-    setCloudConnectError(null);
-    invalidateFirestoreReadCache();
-    await queryClient.invalidateQueries();
-  };
+  }, [verifyDatabaseConnectivity]);
 
   // Active check state
   const [selectedDormId, setSelectedDormId] = useState<string>("dorm-1");
@@ -199,11 +216,21 @@ function MainAppContent() {
     }
   }, [activeTab, currentUser, systemSettings.navigationPermissions]);
 
+  // Login Gate Policy:
+  // - While checking initial database connectivity (without an active logged-in session), wait briefly so we don't flash protected UI
+  // - If offline (cannot connect to Firestore database): require users to pass login before entering the app
+  // - If online (connected to Firestore database): follow admin Visitor Access Mode (systemSettings.guestRequiresLogin)
+  const isCheckingInitialConnection = !currentUser && dbConnectionState === "checking";
+  const isLoginGateActive =
+    !currentUser &&
+    (dbConnectionState === "offline" ||
+      (dbConnectionState === "online" && Boolean(systemSettings.guestRequiresLogin)));
+  const canLoadAppData = !isCheckingInitialConnection && !isLoginGateActive;
+
   // Auto trigger popup for system maintenance notice (Once per day, only after entering the app)
-  const isLoginGateActive = Boolean(systemSettings.guestRequiresLogin) && !currentUser;
   React.useEffect(() => {
     if (
-      !isLoginGateActive &&
+      canLoadAppData &&
       systemSettings.showMaintenancePopup &&
       Boolean(systemSettings.maintenanceMessage?.trim())
     ) {
@@ -216,7 +243,7 @@ function MainAppContent() {
         console.error(e);
       }
     }
-  }, [isLoginGateActive, systemSettings.showMaintenancePopup, systemSettings.maintenanceMessage, todayStr]);
+  }, [canLoadAppData, systemSettings.showMaintenancePopup, systemSettings.maintenanceMessage, todayStr]);
 
   const handleCloseMaintenanceModal = () => {
     try {
@@ -231,14 +258,14 @@ function MainAppContent() {
   const [selectedReportDate, setSelectedReportDate] = useState<string>(todayStr);
 
   // TanStack Query Hooks
-  const { data: dorms = [], isLoading: isLoadingDorms } = useDormsQuery();
-  const { data: students = [], isLoading: isLoadingStudents } = useStudentsQuery();
-  const { data: users = [] } = useUsersQuery();
-  const { data: notices = [] } = useNoticesQuery();
-  const { data: todayAttendanceAll } = useAttendanceQuery(todayStr);
-  const { data: singleDormAttendance } = useAttendanceQuery(selectedAttendanceDate, selectedDormId);
-  const { data: allAttendanceRecords = [] } = useAllAttendanceRecordsQuery();
-  const { data: reportData, isLoading: isLoadingReport } = useDailyReportQuery(selectedReportDate);
+  const { data: dorms = [], isLoading: isLoadingDorms } = useDormsQuery(canLoadAppData);
+  const { data: students = [], isLoading: isLoadingStudents } = useStudentsQuery(undefined, canLoadAppData);
+  const { data: users = [] } = useUsersQuery(canLoadAppData);
+  const { data: notices = [] } = useNoticesQuery(undefined, canLoadAppData);
+  const { data: todayAttendanceAll } = useAttendanceQuery(todayStr, undefined, canLoadAppData);
+  const { data: singleDormAttendance } = useAttendanceQuery(selectedAttendanceDate, selectedDormId, canLoadAppData);
+  const { data: allAttendanceRecords = [] } = useAllAttendanceRecordsQuery(canLoadAppData);
+  const { data: reportData, isLoading: isLoadingReport } = useDailyReportQuery(selectedReportDate, canLoadAppData);
 
   const resolvedTodayAttendance = React.useMemo<Record<string, DailyAttendance>>(() => {
     if (todayAttendanceAll && typeof todayAttendanceAll === "object" && !("records" in todayAttendanceAll)) {
@@ -336,13 +363,36 @@ function MainAppContent() {
     handleSelectTab("reports");
   };
 
-  // If guestRequiresLogin is enabled and user is not logged in, render ONLY the centered login box
+  if (isCheckingInitialConnection) {
+    return (
+      <div className="min-h-screen w-full bg-gradient-to-br from-[#f2f4f9] via-purple-50/70 to-teal-50/50 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white rounded-3xl max-w-sm w-full p-8 shadow-xl border border-slate-100 flex flex-col items-center text-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#A05AFF] to-[#1BCFB4] text-white flex items-center justify-center shadow-md">
+            <Loader2 className="w-7 h-7 animate-spin" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-extrabold text-slate-800">
+              {systemSettings.systemNameTh || "ระบบบริหารจัดการหอพักนักเรียน"}
+            </h2>
+            <p className="text-xs text-slate-500 font-medium">
+              กำลังตรวจสอบการเชื่อมต่อฐานข้อมูลกลาง...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If system is offline or guestRequiresLogin is enabled and user is not logged in, render ONLY the centered login box
   if (isLoginGateActive) {
     return (
       <LoginModal
         isOpen={true}
         standalone={true}
         systemSettings={systemSettings}
+        dbConnectionState={dbConnectionState}
+        onRetryConnection={() => verifyDatabaseConnectivity(true)}
+        isRetryingConnection={isRetryingConnection}
         onClose={() => {}}
         currentUser={null}
         onLogin={(user) => {
@@ -405,128 +455,34 @@ function MainAppContent() {
         {/* Right Side Column: Main Content Area + Bottom Footer */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#f2f4f9]">
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-6">
-          {accessIssue &&
-            dismissedIssueKey !== `${accessIssue.code}:${accessIssue.hostname || ""}` && (
-              <div className="mb-5 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-4 shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                      {accessIssue.code === "UNAUTHORIZED_DOMAIN" ? (
-                        <AlertTriangle className="w-5 h-5" />
-                      ) : (
-                        <Database className="w-5 h-5" />
-                      )}
-                    </div>
-                    <div className="space-y-1.5 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-extrabold text-amber-950">
-                          {accessIssue.code === "UNAUTHORIZED_DOMAIN"
-                            ? "โดเมนนี้ยังไม่ได้รับอนุญาตให้เชื่อมต่อ Firebase Authentication"
-                            : accessIssue.code === "AUTH_REQUIRED"
-                            ? "ยังไม่ได้เชื่อมต่อฐานข้อมูล Firestore (ต้องยืนยันตัวตนด้วย Google)"
-                            : accessIssue.code === "PERMISSION_DENIED"
-                            ? "บัญชี Google ปัจจุบันไม่มีสิทธิ์อ่าน/เขียนข้อมูลบางส่วนบน Firestore"
-                            : "ไม่สามารถเชื่อมต่อฐานข้อมูล Firestore ได้ชั่วคราว"}
-                        </h3>
-                        {getCurrentHostname() && (
-                          <span className="text-[11px] font-mono bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
-                            {getCurrentHostname()}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-amber-900 leading-relaxed">
-                        {cloudConnectError || accessIssue.message}
-                      </p>
-
-                      {accessIssue.code === "UNAUTHORIZED_DOMAIN" && (
-                        <div className="mt-2 p-3 rounded-xl bg-white border border-amber-200 text-xs text-slate-700 space-y-1.5">
-                          <div className="font-bold text-slate-900">
-                            วิธีแก้ไขเพื่อให้ระบบบน GitHub Pages เรียกใช้ฐานข้อมูล Firestore ได้:
-                          </div>
-                          <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
-                            <li>
-                              เปิด Firebase Console โปรเจกต์{" "}
-                              <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-indigo-700">
-                                {FIREBASE_PROJECT_ID}
-                              </code>{" "}
-                              (ฐานข้อมูล{" "}
-                              <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-700">
-                                {FIREBASE_DATABASE_ID}
-                              </code>
-                              )
-                            </li>
-                            <li>
-                              ไปที่เมนู <strong>Authentication &rarr; Settings &rarr; Authorized domains &rarr; Add domain</strong>
-                            </li>
-                            <li className="flex flex-wrap items-center gap-1.5">
-                              <span>เพิ่มโดเมน:</span>
-                              <code className="bg-amber-100 text-amber-950 px-2 py-0.5 rounded font-mono font-bold">
-                                {accessIssue.hostname || getCurrentHostname()}
-                              </code>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const host = accessIssue.hostname || getCurrentHostname();
-                                  if (host && navigator.clipboard) {
-                                    navigator.clipboard.writeText(host);
-                                    setCopiedDomainHost(true);
-                                    setTimeout(() => setCopiedDomainHost(false), 2000);
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold cursor-pointer"
-                              >
-                                {copiedDomainHost ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                                <span>{copiedDomainHost ? "คัดลอกแล้ว" : "คัดลอกโดเมน"}</span>
-                              </button>
-                            </li>
-                          </ol>
-                        </div>
-                      )}
-
-                      {accessIssue.code === "AUTH_REQUIRED" && (
-                        <p className="text-[11px] text-amber-800">
-                          ฐานข้อมูลกลางปกป้องข้อมูลนักเรียนด้วยการยืนยันตัวตน Google (หากเปิดบน GitHub Pages หรืออุปกรณ์ใหม่ กรุณากดเชื่อมต่อ Google หรือหากพบแจ้งเตือน Unauthorized Domain ให้เพิ่มโดเมนของ GitHub Pages ใน Firebase Console)
-                        </p>
-                      )}
-                    </div>
+          {dbConnectionState === "offline" && (
+            <div className="mb-5 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <WifiOff className="w-5 h-5" />
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleConnectFirestoreGoogle}
-                      disabled={isConnectingCloud}
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <LogIn className="w-3.5 h-3.5" />
-                      <span>
-                        {isConnectingCloud
-                          ? "กำลังเชื่อมต่อ Google..."
-                          : "เชื่อมต่อฐานข้อมูล Firestore (Google)"}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRetryFirestoreSync}
-                      className="px-3 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>ลองโหลดใหม่</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDismissedIssueKey(`${accessIssue.code}:${accessIssue.hostname || ""}`)
-                      }
-                      aria-label="ปิดการแจ้งเตือนนี้"
-                      className="p-2 rounded-xl bg-white/80 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                  <div className="space-y-0.5 min-w-0">
+                    <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
+                      <span>ระบบกำลังทำงานในโหมดออฟไลน์ (Offline Mode)</span>
+                    </h3>
+                    <p className="text-xs text-amber-900 leading-relaxed">
+                      ไม่สามารถเชื่อมต่อฐานข้อมูลกลาง Firestore ได้ชั่วคราว กำลังใช้งานข้อมูลจากหน่วยความจำภายในเครื่อง
+                    </p>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => verifyDatabaseConnectivity(true)}
+                  disabled={isRetryingConnection}
+                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
+                  <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ตรวจสอบการเชื่อมต่ออีกครั้ง"}</span>
+                </button>
               </div>
-            )}
+            </div>
+          )}
           {effectiveTab === "dashboard" && (
             <DashboardView
               reportData={reportData}
@@ -773,6 +729,9 @@ function MainAppContent() {
         currentUser={currentUser}
         targetTabName={targetTabPrompt}
         systemSettings={systemSettings}
+        dbConnectionState={dbConnectionState}
+        onRetryConnection={() => verifyDatabaseConnectivity(true)}
+        isRetryingConnection={isRetryingConnection}
         onLogin={(user) => {
           setSessionUser(user);
           setCurrentUser(user);

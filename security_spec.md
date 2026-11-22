@@ -2,7 +2,7 @@
 
 ## 1. Data Invariants
 1. **Default-Deny Catch-All**: Any collection not explicitly matched is denied for both read and write (`allow read, write: if false;`).
-2. **Email Verification & Bootstrapped Admin**: All reads and writes require `request.auth != null && request.auth.token.email_verified == true`. Admin privilege (`isAdmin()`) requires verified email matching the bootstrapped admin (`domitory@pcccr.ac.th`) or an admin entry in `/admins/{uid}` or `/users/{uid}` with `roleLevel == 1`.
+2. **Write Authentication & Bootstrapped Admin**: All writes (`create`, `update`, `delete`) and sensitive PII reads (`/users/{userId}`, `/admins/{adminId}`) require `request.auth != null && request.auth.token.email_verified == true`. Non-PII display collections (`/dorms`, `/students`, `/notices`, `/attendance`), `/system_settings/config`, and `/_system_status/saved` allow public read access so visitors can access the site directly without Google Sign-In. Admin privilege (`isAdmin()`) requires verified email matching the bootstrapped admin (`domitory@pcccr.ac.th`) or an admin entry in `/admins/{uid}` or `/users/{uid}` with `roleLevel == 1`.
 3. **Referential Integrity**: Every `/students/{studentId}` and `/attendance/{attendanceId}` document created must reference an existing `/dorms/{dormId}` document (`exists(...)`).
 4. **Immutability**:
    - On `/attendance/{attendanceId}` updates: `id`, `date`, and `dormId` must remain immutable.
@@ -11,7 +11,7 @@
 6. **Strict Field Allowlists & Bounds**: Every entity validation helper uses `keys().hasOnly([...])`, required-key checks `keys().hasAll([...])`, ID regex `^[a-zA-Z0-9_\\-]+$`, date regex `^\\d{4}-\\d{2}-\\d{2}$`, and explicit `.size()` bounds on all strings and arrays.
 
 ## 2. "Dirty Dozen" Attack Payloads (Expected: PERMISSION_DENIED)
-1. Unauthenticated read of `/dorms/dorm-1` (`request.auth == null`).
+1. Unauthenticated write to `/dorms/dorm-1` or unauthenticated read of `/users/user-admin` (`request.auth == null`).
 2. Unverified email spoofing admin (`email: "domitory@pcccr.ac.th", email_verified: false`).
 3. Shadow field injection on `/attendance/2026-11-20_dorm-1` adding `"isApproved": true`.
 4. Plaintext credential injection on `/users/user-1` containing `"password": "secret123"`.

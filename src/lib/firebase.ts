@@ -108,19 +108,13 @@ export function classifyFirestoreError(
     lowerMsg.includes("permission-denied");
 
   if (isPermDenied) {
-    if (!auth.currentUser || !auth.currentUser.emailVerified) {
-      setFirestoreAccessIssue({
-        code: "AUTH_REQUIRED",
-        message: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อเชื่อมต่อและโหลดข้อมูลจากฐานข้อมูล Firestore",
-        hostname,
-        path: path || undefined
-      });
+    // Non-admin/visitor sessions intentionally cannot read /users (PII protection);
+    // do not treat that as a global Firestore connection failure.
+    if (isRestrictedUserCollection) {
       return;
     }
 
-    // Non-admin users are intentionally blocked from listing the /users collection (PII protection);
-    // do not treat that as a global Firestore connection failure.
-    if (isRestrictedUserCollection) {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
       return;
     }
 
@@ -285,6 +279,7 @@ export interface CloudConnectionStatus {
   lastChecked: string | null;
   error: string | null;
   latencyMs: number | null;
+  settings?: Record<string, any> | null;
 }
 
 export type FirebaseConnectionStatus = CloudConnectionStatus;
@@ -306,15 +301,30 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 10000): 
   });
 }
 
-// Check connection to central cloud database safely
+// Check live connection to central cloud database from server safely
 export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> {
   const startTime = Date.now();
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const offlineMsg = "ไม่สามารถเชื่อมต่อฐานข้อมูล Firestore ได้เนื่องจากอุปกรณ์ออฟไลน์";
+    setFirestoreAccessIssue({
+      code: "OFFLINE",
+      message: offlineMsg,
+      hostname: getCurrentHostname(),
+      path: "system_settings/config"
+    });
+    return {
+      isConnected: false,
+      lastChecked: new Date().toLocaleTimeString("th-TH"),
+      error: offlineMsg,
+      latencyMs: null,
+      settings: null
+    };
+  }
+
   try {
     await ensureAuthReady();
     const testDocRef = doc(db, "system_settings", "config");
-    const pingTask = getDoc(testDocRef);
-
-    await withTimeout(pingTask, 8000);
+    const snap = await withTimeout(getDocFromServer(testDocRef), 8000);
 
     const latency = Date.now() - startTime;
     setFirestoreAccessIssue(null);
@@ -322,7 +332,8 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
       isConnected: true,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
       error: null,
-      latencyMs: latency
+      latencyMs: latency,
+      settings: snap.exists() ? (snap.data() as Record<string, any>) : null
     };
   } catch (err: any) {
     console.warn("Cloud database ping attempt failed:", err?.message || err);
@@ -331,7 +342,8 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
       isConnected: false,
       lastChecked: new Date().toLocaleTimeString("th-TH"),
       error: err?.message || "Failed to reach central database in time",
-      latencyMs: null
+      latencyMs: null,
+      settings: null
     };
   }
 }

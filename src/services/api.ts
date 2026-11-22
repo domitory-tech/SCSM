@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   setDoc,
   updateDoc,
@@ -1318,31 +1319,13 @@ export async function restoreDatabase(rawData: any) {
 export async function syncLiveFirebaseDatabase() {
   try {
     await ensureAuthReady();
-    if (!auth.currentUser || !auth.currentUser.emailVerified) {
-      setFirestoreAccessIssue({
-        code: "AUTH_REQUIRED",
-        message: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อซิงค์ข้อมูลจากฐานข้อมูลกลาง Firestore",
-        hostname: typeof window !== "undefined" ? window.location.hostname : ""
-      });
-      return {
-        success: false,
-        message: "ยังไม่ได้ยืนยันตัวตนด้วย Google Auth — กรุณากด 'เข้าสู่ระบบ / ยืนยันสิทธิ์ด้วย Google' เพื่อเชื่อมต่อฐานข้อมูล Firestore",
-        counts: {
-          dorms: (getLocalCache<any[]>(CACHE_KEYS.DORMS) || []).length,
-          students: (getLocalCache<any[]>(CACHE_KEYS.STUDENTS) || []).length,
-          users: (getLocalCache<any[]>(CACHE_KEYS.USERS) || []).length,
-          notices: (getLocalCache<any[]>(CACHE_KEYS.NOTICES) || []).length,
-          attendance: (getLocalCache<any[]>(CACHE_KEYS.ATTENDANCE) || []).length
-        }
-      };
-    }
 
     const [dormsSnap, studentsSnap, noticesSnap, attSnap, sysSnap] = await Promise.all([
       withTimeout(getDocs(collection(db, "dorms")), 15000),
       withTimeout(getDocs(collection(db, "students")), 15000),
       withTimeout(getDocs(collection(db, "notices")), 15000),
       withTimeout(getDocs(collection(db, "attendance")), 15000),
-      withTimeout(getDoc(doc(db, "system_settings", "config")), 10000)
+      withTimeout(getDocFromServer(doc(db, "system_settings", "config")), 10000)
     ]);
 
     let users: UserProfile[] = [];
@@ -2384,8 +2367,11 @@ export async function bulkSetHomeBreakAllDorms(
 // ----------------------------------------------------------------------
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   try {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
+    }
     await ensureAuthReady();
-    const snap = await withTimeout(getDoc(doc(db, "system_settings", "config")), 10000);
+    const snap = await withTimeout(getDocFromServer(doc(db, "system_settings", "config")), 8000);
     if (snap.exists()) {
       const settings = snap.data() as SystemSettings;
       setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settings);
