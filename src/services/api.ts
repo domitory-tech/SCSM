@@ -4,6 +4,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -525,17 +526,215 @@ export async function batchTransferStudentsDorm(
 }
 
 // ----------------------------------------------------------------------
-// Users API (Central Cloud Database with Local Cache & PBKDF2 Credential Hashing)
+// Users API (Central Cloud Database with Split Non-PII Directory & Auth Verifier)
 // ----------------------------------------------------------------------
-export async function fetchUsers(): Promise<UserProfile[]> {
+let hasSyncedUserSplitThisSession = false;
+
+function updateCachedUserPasswordFlag(userId: string, hasPassword: boolean): void {
+  const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
+  if (!cached || cached.length === 0) return;
+  let changed = false;
+  const next = cached.map((u) => {
+    if (u.id === userId && Boolean(u.hasPassword) !== hasPassword) {
+      changed = true;
+      return sanitizeUserForClient({ ...u, hasPassword });
+    }
+    return u;
+  });
+  if (changed) {
+    setLocalCache(CACHE_KEYS.USERS, next);
+  }
+}
+
+async function syncSingleUserSplitDocs(
+  userPayload: Record<string, any>,
+  hashMap: Record<string, string>
+): Promise<void> {
+  if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+  const dirPayload = sanitizeUserDirectoryForCloud(userPayload, hashMap);
+  const authPayload = sanitizeUserAuthForCloud(userPayload, hashMap);
+  const id = dirPayload.id;
+  await Promise.all([
+    setDoc(doc(db, "user_directory", id), cleanFirestoreData(dirPayload)),
+    setDoc(doc(db, "user_auth", id), cleanFirestoreData(authPayload))
+  ]);
+}
+
+async function ensureUserSplitCollectionsSynced(
+  rawUserDocs: Array<{ id: string; data: Record<string, any> }>,
+  hashMap: Record<string, string>
+): Promise<void> {
+  if (hasSyncedUserSplitThisSession) return;
+  if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+  hasSyncedUserSplitThisSession = true;
+  try {
+    const dirSnap = await withTimeout(getDocsFromServer(collection(db, "user_directory")), 8000);
+    const existingDirMap = new Map<string, Record<string, any>>();
+    dirSnap.docs.forEach((d) => existingDirMap.set(d.id, d.data()));
+
+    const dirToSync: Record<string, any>[] = [];
+    const authToSync: Record<string, any>[] = [];
+
+    for (const uDoc of rawUserDocs) {
+      const mergedUser = { id: uDoc.id, ...uDoc.data };
+      const expectedDir = sanitizeUserDirectoryForCloud(mergedUser, hashMap);
+      const expectedAuth = sanitizeUserAuthForCloud(mergedUser, hashMap);
+      const existingDir = existingDirMap.get(uDoc.id);
+
+      const needsDirSync =
+        !existingDir ||
+        Boolean(existingDir.hasPassword) !== Boolean(expectedDir.hasPassword) ||
+        existingDir.name !== expectedDir.name ||
+        existingDir.role !== expectedDir.role ||
+        existingDir.roleLevel !== expectedDir.roleLevel ||
+        (existingDir.avatarUrl || "") !== (expectedDir.avatarUrl || "");
+
+      if (needsDirSync) {
+        dirToSync.push(expectedDir);
+        authToSync.push(expectedAuth);
+      } else if (expectedDir.hasPassword) {
+        try {
+          const authDoc = await withTimeout(getDocFromServer(doc(db, "user_auth", uDoc.id)), 5000);
+          const authData = authDoc.exists() ? authDoc.data() : null;
+          if (
+            !authData ||
+            Boolean(authData.hasPassword) !== Boolean(expectedAuth.hasPassword) ||
+            authData.passwordHash !== expectedAuth.passwordHash
+          ) {
+            authToSync.push(expectedAuth);
+          }
+        } catch {
+          // Ignore individual check errors
+        }
+      }
+    }
+
+    if (dirToSync.length > 0) {
+      await commitChunkedSetDocs("user_directory", dirToSync, "id", false);
+    }
+    if (authToSync.length > 0) {
+      await commitChunkedSetDocs("user_auth", authToSync, "id", false);
+    }
+  } catch (e) {
+    hasSyncedUserSplitThisSession = false;
+    console.warn("Background user split-collection sync skipped:", e);
+  }
+}
+
+export interface PrimaryDbPasswordStatus {
+  hasPassword: boolean;
+  checkedFromCloud: boolean;
+}
+
+export async function checkUserPasswordStatusFromPrimaryDb(
+  userId: string
+): Promise<PrimaryDbPasswordStatus> {
+  if (!userId) return { hasPassword: false, checkedFromCloud: false };
+  const localHashes = getAuthHashMap();
+  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+  const cachedUser = cachedUsers.find((u) => u.id === userId);
+  const localFallback = Boolean(localHashes[userId] || cachedUser?.hasPassword);
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { hasPassword: localFallback, checkedFromCloud: false };
+  }
+
+  let anyCloudSucceeded = false;
+  try {
+    await ensureAuthReady();
+
+    // 1. Check isolated credential status document (/user_auth/{userId}) from primary server
+    try {
+      const authSnap = await withTimeout(getDocFromServer(doc(db, "user_auth", userId)), 6000);
+      anyCloudSucceeded = true;
+      if (authSnap.exists()) {
+        const data = authSnap.data() as Record<string, any>;
+        if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          setAuthHashForUser(userId, data.passwordHash);
+          updateCachedUserPasswordFlag(userId, true);
+          return { hasPassword: true, checkedFromCloud: true };
+        }
+        if (data.hasPassword === true) {
+          updateCachedUserPasswordFlag(userId, true);
+          return { hasPassword: true, checkedFromCloud: true };
+        }
+      }
+    } catch {
+      // Continue checking other primary sources
+    }
+
+    // 2. Check non-PII login directory (/user_directory/{userId}) from primary server
+    try {
+      const dirSnap = await withTimeout(getDocFromServer(doc(db, "user_directory", userId)), 6000);
+      anyCloudSucceeded = true;
+      if (dirSnap.exists()) {
+        const data = dirSnap.data() as Record<string, any>;
+        if (data.hasPassword === true) {
+          updateCachedUserPasswordFlag(userId, true);
+          return { hasPassword: true, checkedFromCloud: true };
+        }
+      }
+    } catch {
+      // Continue checking /users if signed in
+    }
+
+    // 3. If signed in as verified owner/admin, check /users/{userId} from primary server
+    if (auth.currentUser?.emailVerified) {
+      try {
+        const userSnap = await withTimeout(getDocFromServer(doc(db, "users", userId)), 6000);
+        anyCloudSucceeded = true;
+        if (userSnap.exists()) {
+          const data = userSnap.data() as Record<string, any>;
+          if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+            setAuthHashForUser(userId, data.passwordHash);
+            updateCachedUserPasswordFlag(userId, true);
+            return { hasPassword: true, checkedFromCloud: true };
+          }
+          if (data.hasPassword === true) {
+            updateCachedUserPasswordFlag(userId, true);
+            return { hasPassword: true, checkedFromCloud: true };
+          }
+        }
+      } catch {
+        // Non-admin/non-owner cannot read /users/{userId}
+      }
+    }
+
+    if (anyCloudSucceeded) {
+      return { hasPassword: Boolean(localHashes[userId]), checkedFromCloud: true };
+    }
+  } catch {
+    // Fall through to local fallback
+  }
+
+  return { hasPassword: localFallback, checkedFromCloud: false };
+}
+
+export async function fetchUsers(forceFresh: boolean = false): Promise<UserProfile[]> {
+  const shouldForceFresh = forceFresh === true;
+  if (shouldForceFresh) {
+    invalidateFirestoreReadCache("users");
+    invalidateFirestoreReadCache("user_directory");
+  }
+
   const localHashes = getAuthHashMap();
   const hydrateSafeUser = (u: any): UserProfile => {
     const hasHash = Boolean(u?.passwordHash || localHashes[u?.id] || u?.hasPassword);
     return sanitizeUserForClient({ ...u, hasPassword: hasHash });
   };
 
+  // 1. Try reading full /users collection (succeeds for verified Admin; silently falls back for other devices/users)
   try {
-    const docs = await readCollectionCached("users", 10000);
+    await ensureAuthReady();
+    let docs: Array<{ id: string; data: Record<string, any> }> = [];
+    if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+      const snap = await withTimeout(getDocsFromServer(collection(db, "users")), 10000);
+      docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+      recentCollectionReads.set("users", { timestamp: Date.now(), items: docs });
+    } else {
+      docs = await readCollectionCached("users", 10000);
+    }
+
     if (docs.length > 0) {
       // Cache password hashes strictly in internal hash store, never exposed in returned UserProfile objects
       docs.forEach((d) => {
@@ -543,21 +742,75 @@ export async function fetchUsers(): Promise<UserProfile[]> {
           setAuthHashForUser(d.id, d.data.passwordHash);
         }
       });
+      // Mirror existing /users documents to non-PII /user_directory and /user_auth for cross-device logins
+      ensureUserSplitCollectionsSynced(docs, getAuthHashMap()).catch(() => {});
+
       const users = docs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
       const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
       setLocalCache(CACHE_KEYS.USERS, sorted);
       return sorted;
     }
-    const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
-    if (cached && cached.length > 0) return cached.map(hydrateSafeUser);
-    const defaultSafe = DEFAULT_SYSTEM_USERS.map(hydrateSafeUser);
-    setLocalCache(CACHE_KEYS.USERS, defaultSafe);
-    return defaultSafe;
-  } catch (err: any) {
-    console.warn("fetchUsers offline fallback:", err?.message || err);
-    const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
-    return (cached && cached.length > 0 ? cached : DEFAULT_SYSTEM_USERS).map(hydrateSafeUser);
+  } catch {
+    // Expected on devices without Admin Google Sign-In; proceed to public non-PII /user_directory
   }
+
+  // 2. Read non-PII /user_directory from primary Firestore database (accessible across all devices)
+  try {
+    await ensureAuthReady();
+    let dirDocs: Array<{ id: string; data: Record<string, any> }> = [];
+    if (shouldForceFresh && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+      const snap = await withTimeout(getDocsFromServer(collection(db, "user_directory")), 10000);
+      dirDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+      recentCollectionReads.set("user_directory", { timestamp: Date.now(), items: dirDocs });
+    } else {
+      dirDocs = await readCollectionCached("user_directory", 10000);
+    }
+
+    if (dirDocs.length > 0) {
+      const users = dirDocs.map((d) => hydrateSafeUser({ id: d.id, ...d.data }));
+      const sorted = users.sort((a, b) => (a.roleLevel || 3) - (b.roleLevel || 3));
+      setLocalCache(CACHE_KEYS.USERS, sorted);
+      return sorted;
+    }
+  } catch (err: any) {
+    console.warn("fetchUsers user_directory fallback:", err?.message || err);
+  }
+
+  // 3. Fallback list: still verify each account's password status against /user_auth/{id} on primary DB if online
+  const cached = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS);
+  const baseList = (cached && cached.length > 0 ? cached : DEFAULT_SYSTEM_USERS).map(hydrateSafeUser);
+
+  if (typeof navigator === "undefined" || navigator.onLine !== false) {
+    try {
+      const checks = await Promise.allSettled(
+        baseList.map(async (u) => {
+          const status = await checkUserPasswordStatusFromPrimaryDb(u.id);
+          return { id: u.id, hasPassword: status.hasPassword };
+        })
+      );
+      const statusMap = new Map<string, boolean>();
+      checks.forEach((res) => {
+        if (res.status === "fulfilled") {
+          statusMap.set(res.value.id, res.value.hasPassword);
+        }
+      });
+      const updated = baseList.map((u) => ({
+        ...u,
+        hasPassword: Boolean(statusMap.get(u.id) || u.hasPassword)
+      }));
+      if (cached && cached.length > 0) {
+        setLocalCache(CACHE_KEYS.USERS, updated);
+      }
+      return updated;
+    } catch {
+      // Return baseList below
+    }
+  }
+
+  if (!cached || cached.length === 0) {
+    setLocalCache(CACHE_KEYS.USERS, baseList);
+  }
+  return baseList;
 }
 
 export async function verifyUserPasswordById(userId: string, enteredPassword: string): Promise<boolean> {
@@ -565,18 +818,46 @@ export async function verifyUserPasswordById(userId: string, enteredPassword: st
   const hashMap = getAuthHashMap();
   let storedHash = hashMap[userId];
 
-  if (!storedHash) {
+  // Always check primary database for the latest password hash when online (handles cross-device logins & password updates)
+  if (typeof navigator === "undefined" || navigator.onLine !== false) {
     try {
       await ensureAuthReady();
-      const snap = await withTimeout(getDoc(doc(db, "users", userId)), 6000);
-      if (snap.exists()) {
-        const data = snap.data() as Record<string, any>;
-        if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
-          storedHash = data.passwordHash;
-          setAuthHashForUser(userId, storedHash);
+      let foundCloudHash: string | undefined;
+
+      try {
+        const authSnap = await withTimeout(getDocFromServer(doc(db, "user_auth", userId)), 6000);
+        if (authSnap.exists()) {
+          const data = authSnap.data() as Record<string, any>;
+          if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+            foundCloudHash = data.passwordHash;
+          }
+        }
+      } catch {
+        // Fallback to /users/{userId} if authenticated
+      }
+
+      if (!foundCloudHash && auth.currentUser?.emailVerified) {
+        try {
+          const userSnap = await withTimeout(getDocFromServer(doc(db, "users", userId)), 6000);
+          if (userSnap.exists()) {
+            const data = userSnap.data() as Record<string, any>;
+            if (typeof data.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+              foundCloudHash = data.passwordHash;
+            }
+          }
+        } catch {
+          // Non-admin/non-owner cannot read /users/{userId}
         }
       }
-    } catch (_) {}
+
+      if (foundCloudHash) {
+        storedHash = foundCloudHash;
+        setAuthHashForUser(userId, foundCloudHash);
+        updateCachedUserPasswordFlag(userId, true);
+      }
+    } catch {
+      // Use local hash fallback when offline
+    }
   }
 
   return verifyPassword(enteredPassword, storedHash);
@@ -614,15 +895,18 @@ export async function setupFirstTimePassword(userId: string, newPassword: string
     throw new Error("รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
   }
 
-  const users = await fetchUsers();
+  const users = await fetchUsers(true);
   const targetUser = users.find((u) => u.id === userId) || DEFAULT_SYSTEM_USERS.find((u) => u.id === userId);
   if (!targetUser) {
     throw new Error("ไม่พบบัญชีผู้ใช้งานที่ระบุ");
   }
 
+  // Strictly verify directly against primary database before permitting initial password creation
+  const primaryStatus = await checkUserPasswordStatusFromPrimaryDb(userId);
   const hashMap = getAuthHashMap();
-  if (hashMap[userId] || targetUser.hasPassword) {
-    throw new Error("บัญชีนี้ตั้งค่ารหัสผ่านไว้แล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านเดิม");
+  if (primaryStatus.hasPassword || hashMap[userId] || targetUser.hasPassword) {
+    updateCachedUserPasswordFlag(userId, true);
+    throw new Error("บัญชีนี้ตั้งค่ารหัสผ่านไว้แล้วในฐานข้อมูลหลัก กรุณาเข้าสู่ระบบด้วยรหัสผ่านเดิม");
   }
 
   const passwordHash = await hashPassword(newPassword);
@@ -631,13 +915,17 @@ export async function setupFirstTimePassword(userId: string, newPassword: string
   const hashMapAfter = getAuthHashMap();
   const fullUserPayload = sanitizeUserForCloud({ ...targetUser, hasPassword: true, passwordHash }, hashMapAfter);
   try {
+    await ensureAuthReady();
     await setDoc(doc(db, "users", userId), cleanFirestoreData(fullUserPayload));
+    await syncSingleUserSplitDocs(fullUserPayload, hashMapAfter);
   } catch (e) {
     console.warn("Saved initial password hash offline locally:", e);
   }
 
   const updatedSafe = sanitizeUserForClient({ ...targetUser, hasPassword: true });
   updateLocalCacheList(CACHE_KEYS.USERS, updatedSafe, "UPSERT");
+  invalidateFirestoreReadCache("users");
+  invalidateFirestoreReadCache("user_directory");
   return updatedSafe;
 }
 
@@ -662,6 +950,7 @@ export async function addUser(
     ? (sanitizeSafeImageUrl(cleanInput.avatarUrl) || "")
     : "";
 
+  const hashMap = getAuthHashMap();
   const dbPayload = sanitizeUserForCloud(
     {
       ...cleanInput,
@@ -676,12 +965,13 @@ export async function addUser(
       hasPassword: Boolean(passwordHash),
       ...(passwordHash ? { passwordHash } : {})
     },
-    getAuthHashMap()
+    hashMap
   );
 
   try {
     await ensureAuthReady();
     await setDoc(doc(db, "users", id), cleanFirestoreData(dbPayload));
+    await syncSingleUserSplitDocs(dbPayload, hashMap);
   } catch (e: any) {
     if (options?.requireCloudSync) {
       handleFirestoreError(e, OperationType.CREATE, `users/${id}`, false);
@@ -692,6 +982,8 @@ export async function addUser(
 
   const safeUser = sanitizeUserForClient(dbPayload);
   updateLocalCacheList(CACHE_KEYS.USERS, safeUser, "UPSERT");
+  invalidateFirestoreReadCache("users");
+  invalidateFirestoreReadCache("user_directory");
   return safeUser;
 }
 
@@ -762,8 +1054,10 @@ export async function updateUser(
     if (cleanInput.gender === undefined && rawMerged.gender !== "male" && rawMerged.gender !== "female") {
       delete rawMerged.gender;
     }
-    merged = sanitizeUserForCloud(rawMerged, getAuthHashMap());
+    const latestHashMap = getAuthHashMap();
+    merged = sanitizeUserForCloud(rawMerged, latestHashMap);
     await setDoc(docRef, cleanFirestoreData(merged));
+    await syncSingleUserSplitDocs(merged, latestHashMap);
   } catch (e: any) {
     if (options?.requireCloudSync) {
       handleFirestoreError(e, OperationType.WRITE, `users/${id}`, false);
@@ -774,12 +1068,19 @@ export async function updateUser(
 
   const safeUser = sanitizeUserForClient(merged);
   updateLocalCacheList(CACHE_KEYS.USERS, safeUser, "UPSERT");
+  invalidateFirestoreReadCache("users");
+  invalidateFirestoreReadCache("user_directory");
   return safeUser;
 }
 
 export async function deleteUser(id: string) {
   try {
-    await deleteDoc(doc(db, "users", id));
+    await ensureAuthReady();
+    await Promise.allSettled([
+      deleteDoc(doc(db, "users", id)),
+      deleteDoc(doc(db, "user_directory", id)),
+      deleteDoc(doc(db, "user_auth", id))
+    ]);
   } catch (e) {
     console.warn("Deleted user offline locally:", e);
   }
@@ -791,6 +1092,8 @@ export async function deleteUser(id: string) {
   }
 
   updateLocalCacheList(CACHE_KEYS.USERS, { id } as any, "DELETE");
+  invalidateFirestoreReadCache("users");
+  invalidateFirestoreReadCache("user_directory");
   return { success: true };
 }
 
@@ -802,10 +1105,12 @@ export async function changeUserPassword(
     throw new Error("รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
   }
 
-  const existingHash = getAuthHashMap()[id];
-  if (!payload.isAdminOverride && existingHash) {
-    if (!payload.oldPassword || !(await verifyUserPasswordById(id, payload.oldPassword))) {
-      throw new Error("รหัสผ่านเดิมไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง");
+  if (!payload.isAdminOverride) {
+    const status = await checkUserPasswordStatusFromPrimaryDb(id);
+    if (status.hasPassword) {
+      if (!payload.oldPassword || !(await verifyUserPasswordById(id, payload.oldPassword))) {
+        throw new Error("รหัสผ่านเดิมไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง");
+      }
     }
   }
 
@@ -824,11 +1129,13 @@ export async function changeUserPassword(
         baseRecord = { id, ...snap.data() };
       }
     }
+    const latestHashMap = getAuthHashMap();
     const fullPayload = sanitizeUserForCloud(
       { ...(baseRecord || { id }), id, hasPassword: true, passwordHash },
-      getAuthHashMap()
+      latestHashMap
     );
     await setDoc(docRef, cleanFirestoreData(fullPayload));
+    await syncSingleUserSplitDocs(fullPayload, latestHashMap);
   } catch (e) {
     console.warn("Changed password offline locally:", e);
   }
@@ -837,6 +1144,8 @@ export async function changeUserPassword(
     cachedUsers[idx] = sanitizeUserForClient({ ...cachedUsers[idx], hasPassword: true });
     setLocalCache(CACHE_KEYS.USERS, cachedUsers);
   }
+  invalidateFirestoreReadCache("users");
+  invalidateFirestoreReadCache("user_directory");
 
   return { success: true, message: "เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว" };
 }
@@ -1030,7 +1339,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
     setLocalCache(CACHE_KEYS.DORMS, []);
   }
 
-  // 3. Delete Users
+  // 3. Delete Users (and split collections user_directory / user_auth)
   if (target === "ALL" || target === "USERS") {
     try {
       const snap = await getDocs(collection(db, "users"));
@@ -1044,6 +1353,10 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
       const ids = docsToDelete.map((d) => d.id);
       if (ids.length > 0) {
         deletedCounts.users = await commitChunkedDeleteDocs("users", ids);
+        await Promise.allSettled([
+          commitChunkedDeleteDocs("user_directory", ids),
+          commitChunkedDeleteDocs("user_auth", ids)
+        ]);
       }
     } catch (e) {
       console.warn("Cleared users offline:", e);
@@ -1087,7 +1400,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
 }
 
 export async function clearDatabase() {
-  const collections = ["dorms", "students", "users", "notices", "attendance"];
+  const collections = ["dorms", "students", "users", "user_directory", "notices", "attendance"];
   let totalDeleted = 0;
   for (const colName of collections) {
     try {
@@ -1095,6 +1408,9 @@ export async function clearDatabase() {
       const ids = snap.docs.map((d) => d.id);
       if (ids.length > 0) {
         totalDeleted += await commitChunkedDeleteDocs(colName, ids);
+        if (colName === "users") {
+          await commitChunkedDeleteDocs("user_auth", ids).catch(() => {});
+        }
       }
     } catch (e) {
       console.warn(`Could not clear ${colName} in primary database (offline):`, e);
@@ -1481,9 +1797,15 @@ export async function restoreDatabase(rawData: any) {
   if (Array.isArray(data.users) && data.users.length > 0) {
     const hashMap = getAuthHashMap();
     const cleanUsers = data.users.map((u: any) => sanitizeUserForCloud(u, hashMap));
+    const cleanDirectory = cleanUsers.map((u: any) => sanitizeUserDirectoryForCloud(u, hashMap));
+    const cleanAuth = cleanUsers.map((u: any) => sanitizeUserAuthForCloud(u, hashMap));
     setLocalCache(CACHE_KEYS.USERS, cleanUsers.map(sanitizeUserForClient));
     try {
       restoredCount += await commitChunkedSetDocs("users", cleanUsers, "id", false);
+      await Promise.allSettled([
+        commitChunkedSetDocs("user_directory", cleanDirectory, "id", false),
+        commitChunkedSetDocs("user_auth", cleanAuth, "id", false)
+      ]);
     } catch (e) { console.warn("Restored users offline:", e); }
   }
   if (Array.isArray(data.notices) && data.notices.length > 0) {
@@ -1531,11 +1853,29 @@ export async function syncLiveFirebaseDatabase() {
     let users: UserProfile[] = [];
     try {
       const usersSnap = await withTimeout(getDocs(collection(db, "users")), 10000);
-      users = usersSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() }));
+      const rawDocs = usersSnap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+      rawDocs.forEach((d) => {
+        if (typeof d.data?.passwordHash === "string" && d.data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          setAuthHashForUser(d.id, d.data.passwordHash);
+        }
+      });
+      hasSyncedUserSplitThisSession = false;
+      ensureUserSplitCollectionsSynced(rawDocs, getAuthHashMap()).catch(() => {});
+      users = rawDocs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data }));
       setLocalCache(CACHE_KEYS.USERS, users);
-    } catch (userErr) {
-      // Non-admin Google accounts are restricted from listing /users
-      users = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+    } catch {
+      // Non-admin Google accounts read non-PII /user_directory
+      try {
+        const dirSnap = await withTimeout(getDocs(collection(db, "user_directory")), 10000);
+        users = dirSnap.docs.map((d) => sanitizeUserForClient({ id: d.id, ...d.data() }));
+        if (users.length > 0) {
+          setLocalCache(CACHE_KEYS.USERS, users);
+        } else {
+          users = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+        }
+      } catch {
+        users = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+      }
     }
 
     const dorms = dormsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -1693,6 +2033,34 @@ function sanitizeUserForCloud(u: any, hashMap: Record<string, string>): Record<s
       : (typeof hashMap[id] === "string" && hashMap[id].startsWith("pbkdf2_sha256$") && hashMap[id].length <= 512
           ? hashMap[id]
           : undefined);
+  if (hashCandidate) {
+    payload.passwordHash = hashCandidate;
+    payload.hasPassword = true;
+  }
+  return payload;
+}
+
+function sanitizeUserDirectoryForCloud(u: any, hashMap: Record<string, string>): Record<string, any> {
+  const full = sanitizeUserForCloud(u, hashMap);
+  delete full.phone;
+  delete full.passwordHash;
+  delete full.password;
+  return full;
+}
+
+function sanitizeUserAuthForCloud(u: any, hashMap: Record<string, string>): Record<string, any> {
+  const id = sanitizeIdForRule(u?.id, "user");
+  const hashCandidate =
+    (typeof u?.passwordHash === "string" && u.passwordHash.startsWith("pbkdf2_sha256$") && u.passwordHash.length <= 512)
+      ? u.passwordHash
+      : (typeof hashMap[id] === "string" && hashMap[id].startsWith("pbkdf2_sha256$") && hashMap[id].length <= 512
+          ? hashMap[id]
+          : undefined);
+  const payload: Record<string, any> = {
+    id,
+    hasPassword: Boolean(hashCandidate || u?.hasPassword),
+    updatedAt: new Date().toISOString().slice(0, 64)
+  };
   if (hashCandidate) {
     payload.passwordHash = hashCandidate;
     payload.hasPassword = true;
@@ -1908,13 +2276,20 @@ export async function uploadCurrentDisplayedDatabaseToCloud(liveData?: {
 
   const dormsToUpload = Array.from(dormsMap.values());
   const usersToUpload = snapshot.users.map((u) => sanitizeUserForCloud(u, hashMap));
+  const userDirectoryToUpload = usersToUpload.map((u) => sanitizeUserDirectoryForCloud(u, hashMap));
+  const userAuthToUpload = usersToUpload.map((u) => sanitizeUserAuthForCloud(u, hashMap));
   const settingsToUpload = sanitizeSettingsForCloud(snapshot.systemSettings);
 
   // Use merge=false so stale legacy fields (e.g. old password, null, or unallowed keys) are cleanly replaced
   // 1. Upload dorms FIRST (required by student and attendance exists() rules)
   const dormCount = await commitChunkedSetDocs("dorms", dormsToUpload, "id", false);
-  // 2. Upload users
+  // 2. Upload users & split login/auth collections
   const userCount = await commitChunkedSetDocs("users", usersToUpload, "id", false);
+  await Promise.all([
+    commitChunkedSetDocs("user_directory", userDirectoryToUpload, "id", false),
+    commitChunkedSetDocs("user_auth", userAuthToUpload, "id", false)
+  ]);
+  hasSyncedUserSplitThisSession = true;
   // 3. Upload students
   const studentCount = await commitChunkedSetDocs("students", studentsToUpload, "id", false);
   // 4. Upload notices

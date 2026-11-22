@@ -143,6 +143,44 @@ service cloud.firestore {
         (!('hasPassword' in data) || data.hasPassword is bool);
     }
 
+    function isValidUserDirectory(data) {
+      return !('password' in data) &&
+        !('passwordHash' in data) &&
+        !('phone' in data) &&
+        !('email' in data) &&
+        data.keys().hasAll(['id', 'name', 'role', 'hasPassword']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'role', 'roleLevel', 'roleCategory', 'roleCategoryName',
+          'roleLabel', 'gender', 'dormId', 'dormPosition', 'allowedDormIds',
+          'avatarUrl', 'hasPassword'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.role in ['ADMIN_OFFICER', 'HEAD_TEACHER', 'DORM_TEACHER', 'DEPUTY_DIRECTOR', 'SYSTEM_ADMIN', 'GUEST'] &&
+        data.hasPassword is bool &&
+        (!('roleLevel' in data) || data.roleLevel in [1, 2, 3, 4]) &&
+        (!('roleCategory' in data) || data.roleCategory in ['ADMIN', 'STAFF', 'DORM_TEACHER', 'GUEST']) &&
+        (!('roleCategoryName' in data) || (data.roleCategoryName is string && data.roleCategoryName.size() <= 80)) &&
+        (!('roleLabel' in data) || (data.roleLabel is string && data.roleLabel.size() <= 160)) &&
+        (!('gender' in data) || data.gender in ['male', 'female']) &&
+        (!('dormId' in data) || (data.dormId is string && data.dormId.size() <= 128)) &&
+        (!('dormPosition' in data) || (data.dormPosition is string && data.dormPosition.size() <= 80)) &&
+        (!('allowedDormIds' in data) || (data.allowedDormIds is list && data.allowedDormIds.size() <= 20 && (data.allowedDormIds.size() == 0 || data.allowedDormIds[0] is string))) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 65536));
+    }
+
+    function isValidUserAuth(data) {
+      return !('password' in data) &&
+        !('phone' in data) &&
+        !('email' in data) &&
+        data.keys().hasAll(['id', 'hasPassword']) &&
+        data.keys().hasOnly(['id', 'hasPassword', 'passwordHash', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.hasPassword is bool &&
+        (!('passwordHash' in data) || (data.passwordHash is string && data.passwordHash.size() > 0 && data.passwordHash.size() <= 512 && data.passwordHash.matches('^pbkdf2_sha256\\$.+$'))) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
     function isValidNotice(data) {
       return data.keys().hasAll(['id', 'title', 'date']) &&
         data.keys().hasOnly(['id', 'date', 'title', 'topics', 'createdBy', 'createdAt']) &&
@@ -253,6 +291,45 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'gender', 'avatarUrl', 'passwordHash', 'hasPassword'])
           )
         );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /user_directory/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if request.time != null;
+      allow create: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserDirectory(incoming()) &&
+        isAdmin();
+      allow update: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserDirectory(incoming()) &&
+        (!('id' in existing()) || incoming().id == existing().id) &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().roleLevel == existing().roleLevel &&
+            incoming().roleCategory == existing().roleCategory &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'gender', 'avatarUrl', 'hasPassword'])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /user_auth/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserAuth(incoming()) &&
+        (isAdmin() || isOwner(userId));
+      allow update: if isValidId(userId) &&
+        isEmailVerified() &&
+        isValidUserAuth(incoming()) &&
+        (!('id' in existing()) || incoming().id == existing().id) &&
+        (isAdmin() || isOwner(userId));
       allow delete: if isValidId(userId) && isAdmin();
     }
 

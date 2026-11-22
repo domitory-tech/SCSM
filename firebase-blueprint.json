@@ -71,6 +71,42 @@
       },
       "required": ["id", "name", "role"]
     },
+    "UserDirectoryEntry": {
+      "title": "UserDirectoryEntry",
+      "description": "Non-PII public login directory entry exposing role metadata and hasPassword status without phone or credential hashes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN_OFFICER", "HEAD_TEACHER", "DORM_TEACHER", "DEPUTY_DIRECTOR", "SYSTEM_ADMIN", "GUEST"]
+        },
+        "roleLevel": { "type": "number", "enum": [1, 2, 3, 4] },
+        "roleCategory": { "type": "string", "enum": ["ADMIN", "STAFF", "DORM_TEACHER", "GUEST"] },
+        "roleCategoryName": { "type": "string", "maxLength": 80 },
+        "roleLabel": { "type": "string", "maxLength": 160 },
+        "gender": { "type": "string", "enum": ["male", "female"] },
+        "dormId": { "type": "string", "maxLength": 128 },
+        "dormPosition": { "type": "string", "maxLength": 80 },
+        "allowedDormIds": { "type": "array" },
+        "avatarUrl": { "type": "string", "maxLength": 65536 },
+        "hasPassword": { "type": "boolean" }
+      },
+      "required": ["id", "name", "role", "hasPassword"]
+    },
+    "UserAuthStatus": {
+      "title": "UserAuthStatus",
+      "description": "Isolated per-user password status and PBKDF2-SHA256 credential verifier (no PII, list disabled)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hasPassword": { "type": "boolean" },
+        "passwordHash": { "type": "string", "maxLength": 512, "pattern": "^pbkdf2_sha256\\$.+$" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "hasPassword"]
+    },
     "Notice": {
       "title": "Notice",
       "description": "Dormitory announcements and orientation notices",
@@ -166,7 +202,15 @@
     },
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "Collection of user profiles"
+      "description": "Collection of private user profiles (PII isolated)"
+    },
+    "/user_directory/{userId}": {
+      "schema": "UserDirectoryEntry",
+      "description": "Non-PII login directory showing user accounts and whether initial password has been configured"
+    },
+    "/user_auth/{userId}": {
+      "schema": "UserAuthStatus",
+      "description": "Isolated per-user password status and PBKDF2-SHA256 verifier (single-doc get only, list disabled)"
     },
     "/profile_avatars/{avatarId}": {
       "schema": "ProfileAvatar",

@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { UserProfile, SystemSettings } from "../../types";
-import { fetchUsers, verifyUserPasswordById, setupFirstTimePassword } from "../../services/api";
+import {
+  fetchUsers,
+  verifyUserPasswordById,
+  setupFirstTimePassword,
+  checkUserPasswordStatusFromPrimaryDb
+} from "../../services/api";
 import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 import { getDirectImageUrl } from "../../utils/dateUtils";
 import { getUserAvatarUrl } from "../../utils/avatarUtils";
@@ -22,7 +27,8 @@ import {
   Sparkles,
   UserCheck,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 
 interface LoginModalProps {
@@ -60,6 +66,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [selectedUserId, setSelectedUserId] = useState<string>("user-admin");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
+  const [isCheckingPasswordStatus, setIsCheckingPasswordStatus] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
@@ -67,7 +74,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       let cancelled = false;
       setIsLoadingUsers(true);
       ensureAuthReady()
-        .then(() => fetchUsers())
+        .then(() => fetchUsers(true))
         .then((users) => {
           if (cancelled) return;
           if (users && users.length > 0) {
@@ -91,12 +98,46 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   }, [isOpen, standalone]);
 
-  if (!isOpen && !standalone) return null;
-
   // Filter users strictly by selected Role Level (ระดับสิทธิ์ 1, 2, 3, 4)
   const filteredUsers = usersList.filter((u) => u.roleLevel === selectedLevel);
   const activeUserToLogin =
     filteredUsers.find((u) => u.id === selectedUserId) || filteredUsers[0];
+  const activeUserId = activeUserToLogin?.id || "";
+
+  // Verify live password status directly against the primary database whenever an account is selected
+  useEffect(() => {
+    if ((!isOpen && !standalone) || !activeUserId) {
+      setIsCheckingPasswordStatus(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsCheckingPasswordStatus(true);
+    checkUserPasswordStatusFromPrimaryDb(activeUserId)
+      .then((status) => {
+        if (cancelled) return;
+        if (status.hasPassword) {
+          setConfirmInitialPassword("");
+        }
+        setUsersList((prev) =>
+          prev.map((u) =>
+            u.id === activeUserId ? { ...u, hasPassword: status.hasPassword } : u
+          )
+        );
+      })
+      .catch((err) => {
+        console.warn("checkUserPasswordStatusFromPrimaryDb error:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setIsCheckingPasswordStatus(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, standalone, activeUserId]);
+
+  if (!isOpen && !standalone) return null;
 
   const handleLevelSelect = (level: 1 | 2 | 3 | 4) => {
     setSelectedLevel(level);
@@ -121,8 +162,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setIsSubmitting(true);
     setLoginError(null);
     try {
-      // Initial first-time password creation when an account does not yet have a password configured
-      if (!activeUserToLogin.hasPassword) {
+      // Re-verify live password status from primary database before login/setup
+      const liveStatus = await checkUserPasswordStatusFromPrimaryDb(activeUserToLogin.id);
+      const effectiveHasPassword = liveStatus.hasPassword || Boolean(activeUserToLogin.hasPassword);
+      if (liveStatus.hasPassword !== Boolean(activeUserToLogin.hasPassword)) {
+        setUsersList((prev) =>
+          prev.map((u) =>
+            u.id === activeUserToLogin.id ? { ...u, hasPassword: liveStatus.hasPassword } : u
+          )
+        );
+      }
+
+      // Initial first-time password creation ONLY when primary database confirms no password is set yet
+      if (!effectiveHasPassword) {
         if (!isValidPasswordStrength(password)) {
           setLoginError("กรุณาตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร");
           return;
@@ -152,14 +204,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         return;
       }
 
-      onLogin(sanitizeUserForClient(activeUserToLogin));
+      onLogin(sanitizeUserForClient({ ...activeUserToLogin, hasPassword: true }));
       setPassword("");
       setConfirmInitialPassword("");
       if (!standalone) {
         onClose();
       }
     } catch (err: any) {
-      setLoginError(err?.message || "ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่อีกครั้ง");
+      const errMsg = err?.message || "ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่อีกครั้ง";
+      if (errMsg.includes("ตั้งค่ารหัสผ่านไว้แล้ว")) {
+        setUsersList((prev) =>
+          prev.map((u) => (u.id === activeUserToLogin.id ? { ...u, hasPassword: true } : u))
+        );
+        setConfirmInitialPassword("");
+      }
+      setLoginError(errMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -462,7 +521,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                               >
                                 ระดับ {u.roleLevel}
                               </span>
-                              {needsInitialPassword && (
+                              {needsInitialPassword && !(isSelected && isCheckingPasswordStatus) && (
                                 <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
                                   ตั้งรหัสผ่านครั้งแรก
                                 </span>
@@ -488,85 +547,94 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       {/* Password input box directly UNDER selected user name */}
                       {isSelected && (
                         <div className="px-4 pb-4 pt-2 border-t border-[#A05AFF]/15 bg-white/80 backdrop-blur-xs space-y-3 animate-fade-in">
-                          {needsInitialPassword && (
-                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-semibold">
-                              บัญชีนี้ยังไม่ได้ตั้งค่ารหัสผ่านส่วนตัว กรุณากำหนดรหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร) เพื่อใช้งานอย่างปลอดภัย
+                          {isCheckingPasswordStatus ? (
+                            <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-800 font-semibold flex items-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-[#A05AFF] shrink-0" />
+                              <span>กำลังตรวจสอบสถานะรหัสผ่านจากฐานข้อมูลหลัก...</span>
                             </div>
-                          )}
+                          ) : (
+                            <>
+                              {needsInitialPassword && (
+                                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-semibold">
+                                  บัญชีนี้ยังไม่ได้ตั้งค่ารหัสผ่านส่วนตัว กรุณากำหนดรหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร) เพื่อใช้งานอย่างปลอดภัย
+                                </div>
+                              )}
 
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                                <Lock className="w-3.5 h-3.5 text-[#A05AFF]" />
-                                <span>
-                                  {needsInitialPassword
-                                    ? `กำหนดรหัสผ่านใหม่สำหรับ ${u.name}`
-                                    : `รหัสผ่านเข้าสู่ระบบสำหรับ ${u.name}`}
-                                </span>
-                              </label>
-                            </div>
+                              <div>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                    <Lock className="w-3.5 h-3.5 text-[#A05AFF]" />
+                                    <span>
+                                      {needsInitialPassword
+                                        ? `กำหนดรหัสผ่านใหม่สำหรับ ${u.name}`
+                                        : `รหัสผ่านเข้าสู่ระบบสำหรับ ${u.name}`}
+                                    </span>
+                                  </label>
+                                </div>
 
-                            <div className="relative">
-                              <input
-                                type={showPassword ? "text" : "password"}
-                                placeholder={needsInitialPassword ? "ตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร..." : "กรอกรหัสผ่าน..."}
-                                value={password}
-                                onChange={(e) => {
-                                  setPassword(e.target.value);
-                                  setLoginError(null);
-                                }}
-                                autoFocus
-                                className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] focus:bg-white focus:border-transparent outline-none transition-all shadow-xs"
-                              />
-                              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                <div className="relative">
+                                  <input
+                                    type={showPassword ? "text" : "password"}
+                                    placeholder={needsInitialPassword ? "ตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร..." : "กรอกรหัสผ่าน..."}
+                                    value={password}
+                                    onChange={(e) => {
+                                      setPassword(e.target.value);
+                                      setLoginError(null);
+                                    }}
+                                    autoFocus
+                                    className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] focus:bg-white focus:border-transparent outline-none transition-all shadow-xs"
+                                  />
+                                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                    title={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+                                  >
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                  </button>
+                                </div>
+
+                                {needsInitialPassword && (
+                                  <div className="relative mt-2.5">
+                                    <input
+                                      type={showPassword ? "text" : "password"}
+                                      placeholder="ยืนยันรหัสผ่านใหม่อีกครั้ง..."
+                                      value={confirmInitialPassword}
+                                      onChange={(e) => {
+                                        setConfirmInitialPassword(e.target.value);
+                                        setLoginError(null);
+                                      }}
+                                      className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] focus:bg-white focus:border-transparent outline-none transition-all shadow-xs"
+                                    />
+                                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                  </div>
+                                )}
+
+                                {loginError && (
+                                  <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                                    <span>{loginError}</span>
+                                  </div>
+                                )}
+                              </div>
+
                               <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                                title={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+                                type="submit"
+                                disabled={isSubmitting || isCheckingPasswordStatus}
+                                className="w-full py-2.5 bg-gradient-to-r from-[#A05AFF] via-[#8E3CFF] to-[#1BCFB4] hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
                               >
-                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                <KeyRound className="w-4 h-4" />
+                                <span>
+                                  {isSubmitting
+                                    ? "กำลังตรวจสอบข้อมูล..."
+                                    : needsInitialPassword
+                                    ? `บันทึกรหัสผ่านและเข้าสู่ระบบ (${u.name})`
+                                    : `ยืนยันเข้าสู่ระบบ (${u.name})`}
+                                </span>
                               </button>
-                            </div>
-
-                            {needsInitialPassword && (
-                              <div className="relative mt-2.5">
-                                <input
-                                  type={showPassword ? "text" : "password"}
-                                  placeholder="ยืนยันรหัสผ่านใหม่อีกครั้ง..."
-                                  value={confirmInitialPassword}
-                                  onChange={(e) => {
-                                    setConfirmInitialPassword(e.target.value);
-                                    setLoginError(null);
-                                  }}
-                                  className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-[#A05AFF] focus:bg-white focus:border-transparent outline-none transition-all shadow-xs"
-                                />
-                                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                              </div>
-                            )}
-
-                            {loginError && (
-                              <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
-                                <AlertTriangle className="w-4 h-4 shrink-0" />
-                                <span>{loginError}</span>
-                              </div>
-                            )}
-                          </div>
-
-                          <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="w-full py-2.5 bg-gradient-to-r from-[#A05AFF] via-[#8E3CFF] to-[#1BCFB4] hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#A05AFF]/25 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
-                          >
-                            <KeyRound className="w-4 h-4" />
-                            <span>
-                              {isSubmitting
-                                ? "กำลังตรวจสอบข้อมูล..."
-                                : needsInitialPassword
-                                ? `บันทึกรหัสผ่านและเข้าสู่ระบบ (${u.name})`
-                                : `ยืนยันเข้าสู่ระบบ (${u.name})`}
-                            </span>
-                          </button>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

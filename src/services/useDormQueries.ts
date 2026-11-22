@@ -57,7 +57,7 @@ export function recordLastDbSave() {
 export function useUsersQuery(enabled: boolean = true) {
   return useQuery({
     queryKey: ["users"],
-    queryFn: fetchUsers,
+    queryFn: () => fetchUsers(),
     staleTime: 1000 * 60 * 2, // 2 minutes
     enabled,
   });
