@@ -1,6 +1,7 @@
 import { UserProfile } from "../types";
 
 // Default system roles (passwords are configured securely on first login or by an administrator)
+// Users without a custom avatarUrl automatically use the system gender-based sample avatar.
 export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
   {
     id: "user-admin",
@@ -11,9 +12,10 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategoryName: "ผู้ดูแล",
     roleLabel: "ผู้ดูแลระบบสูงสุด (Admin)",
     phone: "081-234-5678",
+    gender: "male",
     dormPosition: "ผู้ดูแลระบบ",
     hasPassword: false,
-    avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
+    avatarUrl: ""
   },
   {
     id: "user-staff",
@@ -24,9 +26,10 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategoryName: "เจ้าหน้าที่",
     roleLabel: "เจ้าหน้าที่ประสานงานหอพัก",
     phone: "089-876-5432",
+    gender: "male",
     dormPosition: "เจ้าหน้าที่ส่วนกลาง",
     hasPassword: false,
-    avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
+    avatarUrl: ""
   },
   {
     id: "user-teacher",
@@ -36,9 +39,10 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategory: "DORM_TEACHER",
     roleCategoryName: "ครูหอพัก",
     roleLabel: "ครูประจำหอพัก",
+    gender: "female",
     dormPosition: "ครูประจำหอพัก",
     hasPassword: false,
-    avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
+    avatarUrl: ""
   },
   {
     id: "user-guest",
@@ -48,9 +52,10 @@ export const DEFAULT_SYSTEM_USERS: UserProfile[] = [
     roleCategory: "GUEST",
     roleCategoryName: "ผู้เยี่ยมชม",
     roleLabel: "ผู้เยี่ยมชมทั่วไป (Visitor)",
+    gender: "male",
     dormPosition: "ผู้เยี่ยมชม",
     hasPassword: false,
-    avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80"
+    avatarUrl: ""
   }
 ];
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { UserProfile, SystemSettings } from "../../types";
 import { DEFAULT_SYSTEM_SETTINGS, getDirectImageUrl } from "../../utils/dateUtils";
 import { isMenuAccessible } from "../../utils/permissionUtils";
+import { getUserAvatarUrl } from "../../utils/avatarUtils";
 import {
   BarChart3,
   CheckCircle2,
@@ -348,7 +349,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <img
-                  src={currentUser.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"}
+                  src={getUserAvatarUrl(currentUser)}
                   alt={currentUser.name}
                   className="w-8 h-8 rounded-full object-cover border border-white ring-2 ring-[#A05AFF]/30 shrink-0"
                 />
@@ -570,7 +571,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <img
-                  src={currentUser.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"}
+                  src={getUserAvatarUrl(currentUser)}
                   alt={currentUser.name}
                   className="w-8 h-8 rounded-full object-cover border border-white ring-2 ring-[#A05AFF]/40 shrink-0"
                 />

@@ -123,7 +123,7 @@ service cloud.firestore {
         data.keys().hasAll(['id', 'name', 'role']) &&
         data.keys().hasOnly([
           'id', 'name', 'role', 'roleLevel', 'roleCategory', 'roleCategoryName',
-          'roleLabel', 'phone', 'dormId', 'dormPosition', 'allowedDormIds',
+          'roleLabel', 'phone', 'gender', 'dormId', 'dormPosition', 'allowedDormIds',
           'avatarUrl', 'passwordHash', 'hasPassword'
         ]) &&
         isValidId(data.id) &&
@@ -134,10 +134,11 @@ service cloud.firestore {
         (!('roleCategoryName' in data) || (data.roleCategoryName is string && data.roleCategoryName.size() <= 80)) &&
         (!('roleLabel' in data) || (data.roleLabel is string && data.roleLabel.size() <= 160)) &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('gender' in data) || data.gender in ['male', 'female']) &&
         (!('dormId' in data) || (data.dormId is string && data.dormId.size() <= 128)) &&
         (!('dormPosition' in data) || (data.dormPosition is string && data.dormPosition.size() <= 80)) &&
         (!('allowedDormIds' in data) || (data.allowedDormIds is list && data.allowedDormIds.size() <= 20 && (data.allowedDormIds.size() == 0 || data.allowedDormIds[0] is string))) &&
-        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 32768)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 65536)) &&
         (!('passwordHash' in data) || (data.passwordHash is string && data.passwordHash.size() <= 512)) &&
         (!('hasPassword' in data) || data.hasPassword is bool);
     }
@@ -209,6 +210,17 @@ service cloud.firestore {
         (!('status' in data) || (data.status is string && data.status.size() <= 40));
     }
 
+    function isValidProfileAvatar(data) {
+      return data.keys().hasAll(['id', 'imageUrl']) &&
+        data.keys().hasOnly(['id', 'imageUrl', 'label', 'uploadedBy', 'ownerUid', 'uploadedAt']) &&
+        isValidId(data.id) &&
+        data.imageUrl is string && data.imageUrl.size() > 0 && data.imageUrl.size() <= 65536 &&
+        (!('label' in data) || (data.label is string && data.label.size() <= 120)) &&
+        (!('uploadedBy' in data) || (data.uploadedBy is string && data.uploadedBy.size() <= 120)) &&
+        (!('ownerUid' in data) || (data.ownerUid is string && data.ownerUid.size() <= 128)) &&
+        (!('uploadedAt' in data) || (data.uploadedAt is string && data.uploadedAt.size() <= 64));
+    }
+
     // ------------------------------------------------------------------
     // Collection Rules
     // ------------------------------------------------------------------
@@ -238,7 +250,7 @@ service cloud.firestore {
             incoming().role == existing().role &&
             incoming().roleLevel == existing().roleLevel &&
             incoming().roleCategory == existing().roleCategory &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'passwordHash', 'hasPassword'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'gender', 'avatarUrl', 'passwordHash', 'hasPassword'])
           )
         );
       allow delete: if isValidId(userId) && isAdmin();
@@ -308,6 +320,30 @@ service cloud.firestore {
       allow list: if false;
       allow create, update: if isValidId(statusId) && statusId == 'saved' && isEmailVerified() && isValidSystemStatus(incoming()) && isStaffOrAdmin();
       allow delete: if false;
+    }
+
+    match /profile_avatars/{avatarId} {
+      allow get: if isValidId(avatarId);
+      allow list: if request.time != null;
+      allow create: if isValidId(avatarId) &&
+        isEmailVerified() &&
+        isValidProfileAvatar(incoming()) &&
+        (
+          isStaffOrAdmin() ||
+          ('ownerUid' in incoming() && incoming().ownerUid == request.auth.uid)
+        );
+      allow update: if isValidId(avatarId) &&
+        isEmailVerified() &&
+        isValidProfileAvatar(incoming()) &&
+        (!('id' in existing()) || incoming().id == existing().id) &&
+        (
+          isAdmin() ||
+          (isStaffOrAdmin() && (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid)) ||
+          ('ownerUid' in existing() && existing().ownerUid == request.auth.uid && incoming().ownerUid == existing().ownerUid)
+        );
+      allow delete: if isValidId(avatarId) &&
+        isEmailVerified() &&
+        isStaffOrAdmin();
     }
   }
 }

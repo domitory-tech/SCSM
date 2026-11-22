@@ -61,10 +61,11 @@
         "roleCategoryName": { "type": "string", "maxLength": 80 },
         "roleLabel": { "type": "string", "maxLength": 160 },
         "phone": { "type": "string", "maxLength": 40 },
+        "gender": { "type": "string", "enum": ["male", "female"] },
         "dormId": { "type": "string", "maxLength": 128 },
         "dormPosition": { "type": "string", "maxLength": 80 },
         "allowedDormIds": { "type": "array" },
-        "avatarUrl": { "type": "string", "maxLength": 32768 },
+        "avatarUrl": { "type": "string", "maxLength": 65536 },
         "passwordHash": { "type": "string", "maxLength": 512 },
         "hasPassword": { "type": "boolean" }
       },
@@ -138,6 +139,20 @@
         "lastSavedAt": { "type": "string", "maxLength": 64 },
         "status": { "type": "string", "maxLength": 40 }
       }
+    },
+    "ProfileAvatar": {
+      "title": "ProfileAvatar",
+      "description": "Uploaded profile pictures stored directly in Firestore for selection and deletion",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "imageUrl": { "type": "string", "maxLength": 65536 },
+        "label": { "type": "string", "maxLength": 120 },
+        "uploadedBy": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "uploadedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "imageUrl"]
     }
   },
   "firestore": {
@@ -152,6 +167,10 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Collection of user profiles"
+    },
+    "/profile_avatars/{avatarId}": {
+      "schema": "ProfileAvatar",
+      "description": "Collection of uploaded profile pictures stored in Firestore"
     },
     "/notices/{noticeId}": {
       "schema": "Notice",

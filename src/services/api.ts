@@ -28,6 +28,7 @@ import {
   Dormitory,
   DormTeacher,
   Notice,
+  ProfileAvatarItem,
   Student,
   StudentAttendanceRecord,
   SystemSettings,
@@ -75,6 +76,7 @@ export const CACHE_KEYS = {
   DORMS: "dorm_cache_dorms",
   STUDENTS: "dorm_cache_students",
   USERS: "dorm_cache_users",
+  PROFILE_AVATARS: "dorm_cache_profile_avatars",
   NOTICES: "dorm_cache_notices",
   ATTENDANCE: "dorm_cache_attendance_v2",
   SYSTEM_SETTINGS: "dorm_system_settings"
@@ -170,6 +172,7 @@ export function updateLocalCacheList<T extends { id: string }>(
   if (key === CACHE_KEYS.DORMS) invalidateFirestoreReadCache("dorms");
   else if (key === CACHE_KEYS.STUDENTS) invalidateFirestoreReadCache("students");
   else if (key === CACHE_KEYS.USERS) invalidateFirestoreReadCache("users");
+  else if (key === CACHE_KEYS.PROFILE_AVATARS) invalidateFirestoreReadCache("profile_avatars");
   else if (key === CACHE_KEYS.NOTICES) invalidateFirestoreReadCache("notices");
   else if (key === CACHE_KEYS.ATTENDANCE) invalidateFirestoreReadCache("attendance");
 
@@ -639,7 +642,8 @@ export async function setupFirstTimePassword(userId: string, newPassword: string
 }
 
 export async function addUser(
-  userData: Partial<UserProfile> & { password?: string }
+  userData: Partial<UserProfile> & { password?: string },
+  options?: { requireCloudSync?: boolean }
 ): Promise<UserProfile> {
   const cleanInput = stripDangerousKeys(userData);
   const id = cleanInput.id || `user-${Date.now()}`;
@@ -654,28 +658,35 @@ export async function addUser(
     setAuthHashForUser(id, passwordHash);
   }
 
-  const dbPayload: Record<string, any> = {
-    ...cleanInput,
-    id,
-    name: (cleanInput.name || "ผู้ใช้งานใหม่").trim().slice(0, 120),
-    role: cleanInput.role || "DORM_TEACHER",
-    roleLevel: cleanInput.roleLevel || 3,
-    roleCategory: cleanInput.roleCategory || "DORM_TEACHER",
-    roleCategoryName: cleanInput.roleCategoryName || "ครูหอพัก",
-    roleLabel: cleanInput.roleLabel || "ครูประจำหอพัก",
-    avatarUrl:
-      sanitizeSafeImageUrl(cleanInput.avatarUrl) ||
-      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    hasPassword: Boolean(passwordHash)
-  };
-  delete dbPayload.password;
-  if (passwordHash) {
-    dbPayload.passwordHash = passwordHash;
-  }
+  const cleanAvatar = typeof cleanInput.avatarUrl === "string" && cleanInput.avatarUrl.trim()
+    ? (sanitizeSafeImageUrl(cleanInput.avatarUrl) || "")
+    : "";
+
+  const dbPayload = sanitizeUserForCloud(
+    {
+      ...cleanInput,
+      id,
+      name: (cleanInput.name || "ผู้ใช้งานใหม่").trim().slice(0, 120),
+      role: cleanInput.role || "DORM_TEACHER",
+      roleLevel: cleanInput.roleLevel || 3,
+      roleCategory: cleanInput.roleCategory || "DORM_TEACHER",
+      roleCategoryName: cleanInput.roleCategoryName || "ครูหอพัก",
+      roleLabel: cleanInput.roleLabel || "ครูประจำหอพัก",
+      avatarUrl: cleanAvatar.length <= 65536 ? cleanAvatar : "",
+      hasPassword: Boolean(passwordHash),
+      ...(passwordHash ? { passwordHash } : {})
+    },
+    getAuthHashMap()
+  );
 
   try {
+    await ensureAuthReady();
     await setDoc(doc(db, "users", id), cleanFirestoreData(dbPayload));
-  } catch (e) {
+  } catch (e: any) {
+    if (options?.requireCloudSync) {
+      handleFirestoreError(e, OperationType.CREATE, `users/${id}`, false);
+      throw e;
+    }
     console.warn("Saved user offline locally:", e);
   }
 
@@ -686,7 +697,8 @@ export async function addUser(
 
 export async function updateUser(
   id: string,
-  userData: Partial<UserProfile> & { password?: string }
+  userData: Partial<UserProfile> & { password?: string },
+  options?: { requireCloudSync?: boolean; baseUser?: UserProfile }
 ): Promise<UserProfile> {
   const cleanInput = stripDangerousKeys(userData);
   const docRef = doc(db, "users", id);
@@ -700,7 +712,24 @@ export async function updateUser(
   delete dbUpdate.password;
 
   if (cleanInput.avatarUrl !== undefined) {
-    dbUpdate.avatarUrl = sanitizeSafeImageUrl(cleanInput.avatarUrl) || cleanInput.avatarUrl;
+    const trimmedAvatar = typeof cleanInput.avatarUrl === "string" ? cleanInput.avatarUrl.trim() : "";
+    if (!trimmedAvatar) {
+      dbUpdate.avatarUrl = "";
+    } else {
+      const safeAvatar = sanitizeSafeImageUrl(trimmedAvatar) || "";
+      if (safeAvatar.length > 65536) {
+        throw new Error("ขนาดรูปโปรไฟล์ใหญ่เกินขีดจำกัดของ Firestore กรุณาเลือกรูปขนาดเล็กลง");
+      }
+      dbUpdate.avatarUrl = safeAvatar;
+    }
+  }
+
+  if (cleanInput.gender !== undefined) {
+    if (cleanInput.gender === "male" || cleanInput.gender === "female") {
+      dbUpdate.gender = cleanInput.gender;
+    } else {
+      delete dbUpdate.gender;
+    }
   }
 
   if (rawPassword) {
@@ -710,15 +739,36 @@ export async function updateUser(
     setAuthHashForUser(id, newHash);
   }
 
-  let merged: any = dbUpdate;
+  const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+  const fallbackBase =
+    options?.baseUser ||
+    cachedUsers.find((u) => u.id === id) ||
+    DEFAULT_SYSTEM_USERS.find((u) => u.id === id);
+
+  const hashMap = getAuthHashMap();
+  let merged: Record<string, any> = sanitizeUserForCloud(
+    fallbackBase ? { ...fallbackBase, ...dbUpdate, id } : { ...dbUpdate, id },
+    hashMap
+  );
+
   try {
+    await ensureAuthReady();
     const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      merged = { ...snap.data(), ...dbUpdate };
-      delete merged.password;
+    const baseData = snap.exists()
+      ? { ...(fallbackBase || {}), ...snap.data() }
+      : (fallbackBase || {});
+    const rawMerged: Record<string, any> = { ...baseData, ...dbUpdate, id };
+    delete rawMerged.password;
+    if (cleanInput.gender === undefined && rawMerged.gender !== "male" && rawMerged.gender !== "female") {
+      delete rawMerged.gender;
     }
-    await setDoc(docRef, cleanFirestoreData(merged), { merge: true });
-  } catch (e) {
+    merged = sanitizeUserForCloud(rawMerged, getAuthHashMap());
+    await setDoc(docRef, cleanFirestoreData(merged));
+  } catch (e: any) {
+    if (options?.requireCloudSync) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${id}`, false);
+      throw e;
+    }
     console.warn("Updated user offline locally:", e);
   }
 
@@ -766,12 +816,19 @@ export async function changeUserPassword(
   const existingUser = cachedUsers.find((u) => u.id === id) || DEFAULT_SYSTEM_USERS.find((u) => u.id === id);
   const docRef = doc(db, "users", id);
   try {
-    if (existingUser) {
-      const fullPayload = sanitizeUserForCloud({ ...existingUser, hasPassword: true, passwordHash }, getAuthHashMap());
-      await setDoc(docRef, cleanFirestoreData(fullPayload));
-    } else {
-      await setDoc(docRef, { passwordHash, hasPassword: true }, { merge: true });
+    await ensureAuthReady();
+    let baseRecord: Record<string, any> | undefined = existingUser ? { ...existingUser } : undefined;
+    if (!baseRecord) {
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        baseRecord = { id, ...snap.data() };
+      }
     }
+    const fullPayload = sanitizeUserForCloud(
+      { ...(baseRecord || { id }), id, hasPassword: true, passwordHash },
+      getAuthHashMap()
+    );
+    await setDoc(docRef, cleanFirestoreData(fullPayload));
   } catch (e) {
     console.warn("Changed password offline locally:", e);
   }
@@ -782,6 +839,149 @@ export async function changeUserPassword(
   }
 
   return { success: true, message: "เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว" };
+}
+
+// ----------------------------------------------------------------------
+// Profile Avatars Gallery API (/profile_avatars in Firestore)
+// ----------------------------------------------------------------------
+export async function fetchProfileAvatars(): Promise<ProfileAvatarItem[]> {
+  try {
+    const docs = await readCollectionCached("profile_avatars", 10000);
+    const items: ProfileAvatarItem[] = docs
+      .map((d) => {
+        const rawUrl = typeof d.data?.imageUrl === "string" ? d.data.imageUrl.trim() : "";
+        const safeUrl = rawUrl ? sanitizeSafeImageUrl(rawUrl) : "";
+        if (!safeUrl || safeUrl.length > 65536) return null;
+        return {
+          id: sanitizeIdForRule(d.id, "avatar"),
+          imageUrl: safeUrl,
+          ...(typeof d.data?.label === "string" && d.data.label.trim()
+            ? { label: d.data.label.trim().slice(0, 120) }
+            : {}),
+          ...(typeof d.data?.uploadedBy === "string" && d.data.uploadedBy.trim()
+            ? { uploadedBy: d.data.uploadedBy.trim().slice(0, 120) }
+            : {}),
+          ...(typeof d.data?.ownerUid === "string" && d.data.ownerUid.trim()
+            ? { ownerUid: d.data.ownerUid.trim().slice(0, 128) }
+            : {}),
+          ...(typeof d.data?.uploadedAt === "string" && d.data.uploadedAt.trim()
+            ? { uploadedAt: d.data.uploadedAt.trim().slice(0, 64) }
+            : {})
+        } as ProfileAvatarItem;
+      })
+      .filter((x): x is ProfileAvatarItem => x !== null)
+      .sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
+
+    setLocalCache(CACHE_KEYS.PROFILE_AVATARS, items);
+    return items;
+  } catch (err: any) {
+    console.warn("fetchProfileAvatars fallback:", err?.message || err);
+    return getLocalCache<ProfileAvatarItem[]>(CACHE_KEYS.PROFILE_AVATARS) || [];
+  }
+}
+
+export async function saveProfileAvatarToLibrary(input: {
+  imageUrl: string;
+  label?: string;
+  uploadedBy?: string;
+}): Promise<ProfileAvatarItem> {
+  const trimmedUrl = typeof input.imageUrl === "string" ? input.imageUrl.trim() : "";
+  const safeUrl = sanitizeSafeImageUrl(trimmedUrl) || "";
+  if (!safeUrl) {
+    throw new Error("URL หรือไฟล์รูปภาพไม่ถูกต้อง");
+  }
+  if (safeUrl.length > 65536) {
+    throw new Error("ขนาดรูปภาพใหญ่เกินขีดจำกัดของ Firestore กรุณาเลือกรูปขนาดเล็กลง");
+  }
+
+  await ensureAuthReady();
+  if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    throw new Error("AUTH_REQUIRED: กรุณาเชื่อมต่อบัญชี Google ก่อนบันทึกรูปภาพลง Firestore");
+  }
+
+  // Check if an identical image already exists in Firestore library
+  try {
+    invalidateFirestoreReadCache("profile_avatars");
+    const existing = await fetchProfileAvatars();
+    const matched = existing.find((item) => item.imageUrl === safeUrl);
+    if (matched) {
+      return matched;
+    }
+  } catch {
+    // Proceed to create
+  }
+
+  const id = `avatar-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const payload: ProfileAvatarItem = {
+    id,
+    imageUrl: safeUrl,
+    ...(input.label?.trim() ? { label: input.label.trim().slice(0, 120) } : {}),
+    ...(input.uploadedBy?.trim() ? { uploadedBy: input.uploadedBy.trim().slice(0, 120) } : {}),
+    ownerUid: String(auth.currentUser.uid).slice(0, 128),
+    uploadedAt: new Date().toISOString().slice(0, 64)
+  };
+
+  try {
+    await setDoc(doc(db, "profile_avatars", id), cleanFirestoreData(payload));
+  } catch (e: any) {
+    handleFirestoreError(e, OperationType.CREATE, `profile_avatars/${id}`, false);
+    throw e;
+  }
+
+  updateLocalCacheList(CACHE_KEYS.PROFILE_AVATARS, payload, "UPSERT");
+  return payload;
+}
+
+export async function deleteProfileAvatarsFromLibrary(
+  targets: Array<{ id?: string; imageUrl: string }>,
+  knownUsers: UserProfile[] = []
+): Promise<{ deletedDocs: number; clearedUsers: number }> {
+  await ensureAuthReady();
+  if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    throw new Error("AUTH_REQUIRED: กรุณาเชื่อมต่อบัญชี Google ก่อนลบรูปภาพออกจาก Firestore");
+  }
+
+  const targetIds = Array.from(
+    new Set(
+      targets
+        .map((t) => (typeof t.id === "string" ? t.id.trim() : ""))
+        .filter((id) => Boolean(id) && !id.startsWith("user-avatar-"))
+    )
+  );
+  const targetUrls = new Set(targets.map((t) => t.imageUrl.trim()).filter(Boolean));
+
+  let deletedDocs = 0;
+  for (const avatarId of targetIds) {
+    try {
+      await deleteDoc(doc(db, "profile_avatars", avatarId));
+      deletedDocs++;
+      updateLocalCacheList(CACHE_KEYS.PROFILE_AVATARS, { id: avatarId } as ProfileAvatarItem, "DELETE");
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.DELETE, `profile_avatars/${avatarId}`, false);
+      throw e;
+    }
+  }
+
+  // Clear matching avatarUrl on any Firestore users referencing deleted image(s)
+  let clearedUsers = 0;
+  if (targetUrls.size > 0) {
+    const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
+    const userMap = new Map<string, UserProfile>();
+    [...cachedUsers, ...knownUsers].forEach((u) => {
+      if (u?.id) userMap.set(u.id, u);
+    });
+
+    for (const u of userMap.values()) {
+      if (u.avatarUrl && targetUrls.has(u.avatarUrl.trim())) {
+        await updateUser(u.id, { avatarUrl: "" }, { requireCloudSync: true, baseUser: u });
+        clearedUsers++;
+      }
+    }
+  }
+
+  invalidateFirestoreReadCache("profile_avatars");
+  invalidateFirestoreReadCache("users");
+  return { deletedDocs, clearedUsers };
 }
 
 // ----------------------------------------------------------------------
@@ -1470,6 +1670,7 @@ function sanitizeUserForCloud(u: any, hashMap: Record<string, string>): Record<s
   if (u?.roleCategoryName) payload.roleCategoryName = String(u.roleCategoryName).trim().slice(0, 80);
   if (u?.roleLabel) payload.roleLabel = String(u.roleLabel).trim().slice(0, 160);
   if (u?.phone) payload.phone = String(u.phone).trim().slice(0, 40);
+  if (u?.gender === "male" || u?.gender === "female") payload.gender = u.gender;
   if (u?.dormId) payload.dormId = String(u.dormId).trim().slice(0, 128);
   if (u?.dormPosition) payload.dormPosition = String(u.dormPosition).trim().slice(0, 80);
   if (Array.isArray(u?.allowedDormIds)) {
@@ -1477,8 +1678,14 @@ function sanitizeUserForCloud(u: any, hashMap: Record<string, string>): Record<s
       .filter((x: any) => typeof x === "string" && x.trim().length > 0)
       .slice(0, 20);
   }
-  if (typeof u?.avatarUrl === "string" && u.avatarUrl.trim().length > 0 && u.avatarUrl.length <= 32768) {
-    payload.avatarUrl = u.avatarUrl;
+  if (typeof u?.avatarUrl === "string") {
+    const trimmedAvatar = u.avatarUrl.trim();
+    if (trimmedAvatar.length === 0) {
+      payload.avatarUrl = "";
+    } else {
+      const safeAvatar = sanitizeSafeImageUrl(trimmedAvatar) || "";
+      payload.avatarUrl = safeAvatar.length <= 65536 ? safeAvatar : "";
+    }
   }
   const hashCandidate =
     (typeof u?.passwordHash === "string" && u.passwordHash.startsWith("pbkdf2_sha256$") && u.passwordHash.length <= 512)

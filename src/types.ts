@@ -12,12 +12,22 @@ export interface UserProfile {
   roleCategoryName: string; // "ผู้ดูแล", "เจ้าหน้าที่", "ครูหอพัก", "ผู้เยี่ยมชม"
   roleLabel: string;
   phone?: string;
+  gender?: "male" | "female";
   dormId?: string; // Primary Dorm ID
   dormPosition?: DormPosition; // ตำแหน่งประจำหอพัก (ครูประธานหอพัก, ครูรองประธานหอพัก, ครูหัวหน้าหอพัก, ครูประจำหอพัก)
   allowedDormIds?: string[]; // Dormitories this user is allowed to check student lists for
   avatarUrl?: string;
   passwordHash?: string;
   hasPassword?: boolean;
+}
+
+export interface ProfileAvatarItem {
+  id: string;
+  imageUrl: string;
+  label?: string;
+  uploadedBy?: string;
+  ownerUid?: string;
+  uploadedAt?: string;
 }
 
 export interface DormTeacher {

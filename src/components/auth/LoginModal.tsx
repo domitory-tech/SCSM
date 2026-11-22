@@ -3,6 +3,7 @@ import { UserProfile, SystemSettings } from "../../types";
 import { fetchUsers, verifyUserPasswordById, setupFirstTimePassword } from "../../services/api";
 import { DEFAULT_SYSTEM_USERS } from "../../data/userProfiles";
 import { getDirectImageUrl } from "../../utils/dateUtils";
+import { getUserAvatarUrl } from "../../utils/avatarUtils";
 import { isValidPasswordStrength, sanitizeUserForClient } from "../../utils/security";
 import { ensureAuthReady } from "../../lib/firebase";
 import {
@@ -267,7 +268,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="mx-6 mt-5 p-4 bg-purple-50/80 border border-[#A05AFF]/20 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div className="flex items-center gap-3">
             <img
-              src={getDirectImageUrl(currentUser.avatarUrl || "") || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(currentUser.name)}`}
+              src={getUserAvatarUrl(currentUser)}
               alt={currentUser.name}
               className="w-11 h-11 rounded-full object-cover ring-2 ring-[#A05AFF]"
             />
@@ -433,7 +434,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                         <div className="flex items-center gap-3">
                           <div className="relative">
                             <img
-                              src={getDirectImageUrl(u.avatarUrl || "") || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(u.name)}`}
+                              src={getUserAvatarUrl(u)}
                               alt={u.name}
                               className={`w-11 h-11 rounded-full object-cover shrink-0 transition-all ${
                                 isSelected ? "ring-2 ring-[#A05AFF] scale-105" : "ring-1 ring-slate-200"

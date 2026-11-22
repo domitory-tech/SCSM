@@ -267,6 +267,21 @@ function MainAppContent() {
   const { data: allAttendanceRecords = [] } = useAllAttendanceRecordsQuery(canLoadAppData);
   const { data: reportData, isLoading: isLoadingReport } = useDailyReportQuery(selectedReportDate, canLoadAppData);
 
+  // Keep active currentUser synced with latest Firestore/cached user profile (avatarUrl, gender, etc.)
+  React.useEffect(() => {
+    if (!currentUser || !users || users.length === 0) return;
+    const latest = users.find((u) => u.id === currentUser.id);
+    if (!latest) return;
+    const avatarChanged = (latest.avatarUrl || "") !== (currentUser.avatarUrl || "");
+    const genderChanged = latest.gender !== currentUser.gender;
+    const nameChanged = latest.name !== currentUser.name;
+    if (avatarChanged || genderChanged || nameChanged) {
+      const safe = sanitizeUserForClient(latest);
+      setCurrentUser(safe);
+      setSessionUser(safe);
+    }
+  }, [users, currentUser]);
+
   const resolvedTodayAttendance = React.useMemo<Record<string, DailyAttendance>>(() => {
     if (todayAttendanceAll && typeof todayAttendanceAll === "object" && !("records" in todayAttendanceAll)) {
       return todayAttendanceAll as Record<string, DailyAttendance>;

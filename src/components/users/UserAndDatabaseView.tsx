@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { UserProfile, UserRole, Dormitory, Student, Notice, DailyAttendance, SystemSettings, DormPosition, RoleNavigationPermissions } from "../../types";
+import { UserProfile, UserRole, Dormitory, Student, Notice, DailyAttendance, SystemSettings, DormPosition, RoleNavigationPermissions, ProfileAvatarItem } from "../../types";
 import { NavigationPermissionsTab } from "./NavigationPermissionsTab";
 import { DEFAULT_SYSTEM_SETTINGS, formatThaiFullDate, getDirectImageUrl, getTodayDateString, formatThaiMonthString, formatThaiDateRange } from "../../utils/dateUtils";
 import { compressImageFile, compressDataUrlIfNeeded } from "../../utils/imageUtils";
+import {
+  getUserAvatarUrl,
+  getDefaultAvatarByGender,
+  inferUserGender,
+  hasCustomAvatar,
+  getGenderLabel
+} from "../../utils/avatarUtils";
 import { isValidPasswordStrength, sanitizeSafeImageUrl } from "../../utils/security";
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
@@ -19,6 +26,9 @@ import {
   updateUser,
   deleteUser,
   changeUserPassword,
+  fetchProfileAvatars,
+  saveProfileAvatarToLibrary,
+  deleteProfileAvatarsFromLibrary,
   clearDatabase,
   clearAttendanceDatabase,
   clearStudentsDatabase,
@@ -94,7 +104,6 @@ import {
   PauseCircle,
   PlayCircle
 } from "lucide-react";
-import { uploadImageToGoogleDrive } from "../../services/googleDrive";
 
 interface UserAndDatabaseViewProps {
   currentUser: UserProfile | null;
@@ -109,51 +118,13 @@ interface UserAndDatabaseViewProps {
   onUserUpdated?: (updatedUser: UserProfile) => void;
 }
 
-const GOOGLE_DRIVE_AVATAR_FOLDER_URL = "https://drive.google.com/drive/folders/1K7PFEk9ylOYLBtMHFijwPkzB3Xl13UfQ?usp=sharing";
-
-const PRESET_AVATARS = [
-  // 1. Male Suit + Red Tie + Blue Circle BG (ผู้บริหาร/ผู้ดูแล)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%23D0E3FF"/><path d="M18 90 C 22 65, 35 60, 50 60 C 65 60, 78 65, 82 90 Z" fill="%233B6C8C"/><polygon points="50,60 41,75 50,85 59,75" fill="%23FFFFFF"/><polygon points="38,60 50,75 41,75" fill="%23E2E8F0"/><polygon points="62,60 50,75 59,75" fill="%23E2E8F0"/><polygon points="50,72 45,80 50,95 55,80" fill="%23E56B6F"/><polygon points="46,72 54,72 52,78 48,78" fill="%23C94A4E"/><rect x="43" y="48" width="14" height="16" rx="3" fill="%23FCD3C1"/><path d="M32 30 Q32 18 50 18 Q68 18 68 30 V42 Q68 56 50 56 Q32 56 32 42 Z" fill="%23FCD3C1"/><circle cx="31" cy="38" r="4" fill="%23F8B195"/><circle cx="69" cy="38" r="4" fill="%23F8B195"/><path d="M31 30 Q32 16 50 15 Q68 16 69 30 Q62 20 50 24 Q38 22 31 30 Z" fill="%232C4C64"/><path d="M64 22 C 68 24, 69 28, 68 32 C 66 26, 62 23, 64 22 Z" fill="%232C4C64"/></svg>`,
-  // 2. Female Yellow Shirt + Pink Circle BG (เจ้าหน้าที่/ครูหอพัก)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%23FF4D6D"/><path d="M16 85 C 20 62, 35 58, 50 58 C 65 58, 80 62, 84 85 Z" fill="%23F59E0B"/><polygon points="50,82 33,58 43,58" fill="%23FFFFFF"/><polygon points="50,82 67,58 57,58" fill="%23FFFFFF"/><polygon points="50,82 43,58 50,66 57,58" fill="%23F3F4F6"/><rect x="42" y="46" width="16" height="18" rx="4" fill="%23FCD3C1"/><path d="M42 54 C 46 58, 54 58, 58 54 L58 64 L42 64 Z" fill="%23F8B195" opacity="0.4"/><path d="M22 32 C 22 18, 32 10, 50 10 C 68 10, 78 18, 78 32 V 68 C 78 68, 72 72, 68 62 L 68 35 C 68 18, 32 18, 32 35 L 32 62 C 28 72, 22 68, 22 68 Z" fill="%232D3748"/><path d="M33 30 C 33 18, 67 18, 67 30 V 42 C 67 55, 33 55, 33 42 Z" fill="%23FCD3C1"/><circle cx="31" cy="38" r="3.5" fill="%23F8B195"/><circle cx="69" cy="38" r="3.5" fill="%23F8B195"/><path d="M31 30 C 32 15, 68 15, 69 30 C 60 18, 52 35, 31 30 Z" fill="%232D3748"/></svg>`,
-  // 3. User ID Card + Green Checkmark Badge (บัตรประจำตัวผู้ใช้)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="12" y="8" width="76" height="84" rx="8" fill="%23F1F5F9" stroke="%23E2E8F0" stroke-width="2"/><path d="M12 16 C 12 11.5, 15.5 8, 20 8 L 80 8 C 84.5 8, 88 11.5, 88 16 V 24 H 12 Z" fill="%230088FF"/><circle cx="64" cy="16" r="2" fill="%23FFFFFF"/><circle cx="72" cy="16" r="2" fill="%23FFFFFF"/><circle cx="80" cy="16" r="2" fill="%23FFFFFF"/><circle cx="30" cy="42" r="18" fill="%23FBBF24"/><circle cx="30" cy="37" r="7" fill="%23475569"/><path d="M18 51 C 18 44, 23 42, 30 42 C 37 42, 42 44, 42 51 Z" fill="%230088FF"/><rect x="52" y="32" width="24" height="8" rx="4" fill="%2300D2FF"/><rect x="52" y="46" width="24" height="8" rx="4" fill="%2300D2FF"/><rect x="20" y="64" width="46" height="4" rx="2" fill="%2364748B"/><rect x="20" y="72" width="46" height="4" rx="2" fill="%2364748B"/><rect x="20" y="80" width="46" height="4" rx="2" fill="%2364748B"/><circle cx="76" cy="74" r="16" fill="%2310B981"/><polyline points="68,74 74,80 84,68" fill="none" stroke="%23FFFFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  // 4. Male Suit + Orange Tie (เจ้าหน้าที่)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M16 92 C 20 62, 34 56, 50 56 C 66 56, 80 62, 84 92 Z" fill="%232B3A67"/><polygon points="50,56 36,70 50,82 64,70" fill="%23FFFFFF"/><polygon points="36,56 50,70 36,70" fill="%23CBD5E1"/><polygon points="64,56 50,70 64,70" fill="%23CBD5E1"/><polygon points="50,68 44,76 50,92 56,76" fill="%23FF4D4D"/><polygon points="46,68 54,68 52,74 48,74" fill="%23D63031"/><rect x="42" y="44" width="16" height="16" rx="3" fill="%23F8C291"/><path d="M30 26 C 30 14, 70 14, 70 26 V 40 C 70 54, 30 54, 30 40 Z" fill="%23F8C291"/><circle cx="28" cy="36" r="4" fill="%23E59866"/><circle cx="72" cy="36" r="4" fill="%23E59866"/><path d="M28 26 C 28 10, 68 8, 68 18 C 68 18, 64 8, 48 8 C 34 8, 28 18, 28 26 Z" fill="%234A312C"/><path d="M28 26 C 30 16, 48 18, 68 18 C 66 12, 50 10, 28 26 Z" fill="%2336221D"/></svg>`,
-  // 5. Monitor Screen + User + Green Gear (ผู้ดูแลระบบ)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M34 94 L66 94 L60 84 L40 84 Z" fill="%230088FF"/><rect x="46" y="80" width="8" height="8" fill="%230088FF"/><rect x="6" y="6" width="68" height="74" rx="8" fill="%230088FF"/><rect x="10" y="10" width="60" height="66" rx="6" fill="%23EBF5FF"/><path d="M10 16 C 10 12.5, 12.5 10, 16 10 L 64 10 C 67.5 10, 70 12.5, 70 16 V 20 H 10 Z" fill="%23FF0055"/><circle cx="34" cy="24" r="10" fill="%233B82F6"/><path d="M20 48 C 20 38, 26 36, 34 36 C 42 36, 48 38, 48 48 Z" fill="%23FBBF24"/><polygon points="34,36 30,42 38,42" fill="%23FFFFFF"/><rect x="18" y="54" width="32" height="3" rx="1.5" fill="%2364748B"/><rect x="18" y="60" width="24" height="3" rx="1.5" fill="%2364748B"/><g transform="translate(74, 52)"><circle cx="0" cy="0" r="18" fill="%2322C55E"/><path d="M-4 -22 H4 V22 H-4 Z" fill="%2322C55E"/><path d="M-22 -4 V4 H22 V-4 Z" fill="%2322C55E"/><path d="M-15 -15 L15 15 M-15 15 L15 -15" stroke="%2322C55E" stroke-width="8" stroke-linecap="round"/><circle cx="0" cy="0" r="14" fill="%2322C55E"/><circle cx="0" cy="0" r="7" fill="%23FFFFFF"/></g></svg>`,
-  // 6. Gear Wheel + User Circle (ผู้ดูแลระบบ)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M 42 4 L 58 4 L 59 14 C 64 16, 68 18, 72 21 L 81 14 L 92 25 L 85 34 C 88 38, 90 42, 92 47 L 102 48 L 102 64 L 92 65 C 90 70, 88 74, 85 78 L 92 87 L 81 98 L 72 91 C 68 94, 64 96, 59 98 L 58 108 L 42 108 L 41 98 C 36 96, 32 94, 28 91 L 19 98 L 8 87 L 15 78 C 12 74, 10 70, 8 65 L -2 64 L -2 48 L 8 47 C 10 42, 12 38, 15 34 L 8 25 L 19 14 L 28 21 C 32 18, 36 16, 41 14 Z" fill="%23475569" transform="scale(0.85) translate(8, 8)"/><circle cx="50" cy="50" r="30" fill="%23DCEFFE"/><circle cx="50" cy="42" r="10" fill="%23FF7A70"/><path d="M28 68 C 28 56, 36 54, 50 54 C 64 54, 72 56, 72 68 Z" fill="%232563EB"/></svg>`,
-  // 7. Support Operator with Headset (เจ้าหน้าที่บริการ)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="8" y="4" width="60" height="76" rx="8" fill="%23E2E8F0"/><rect x="14" y="24" width="12" height="12" rx="3" fill="%23FCD34D"/><rect x="30" y="26" width="30" height="4" rx="2" fill="%2394A3B8"/><rect x="30" y="32" width="22" height="4" rx="2" fill="%2394A3B8"/><rect x="14" y="44" width="30" height="4" rx="2" fill="%2394A3B8"/><rect x="14" y="52" width="24" height="4" rx="2" fill="%2394A3B8"/><rect x="14" y="60" width="18" height="4" rx="2" fill="%2394A3B8"/><path d="M38 96 C 42 76, 52 74, 68 74 C 84 74, 94 76, 98 96 Z" fill="%23F59E0B"/><polygon points="68,74 60,82 76,82" fill="%23FFFFFF"/><rect x="62" y="62" width="12" height="14" rx="3" fill="%23FCD3C1"/><path d="M52 42 C 52 30, 84 30, 84 42 V 56 C 84 68, 52 68, 52 56 Z" fill="%23FCD3C1"/><circle cx="50" cy="50" r="3" fill="%23F8B195"/><circle cx="86" cy="50" r="3" fill="%23F8B195"/><path d="M50 42 C 50 26, 86 26, 86 42 C 80 32, 70 30, 50 42 Z" fill="%238D5B4C"/><path d="M46 50 C 46 30, 90 30, 90 50" fill="none" stroke="%237C3AED" stroke-width="4" stroke-linecap="round"/><rect x="42" y="44" width="8" height="12" rx="4" fill="%237C3AED"/><rect x="86" y="44" width="8" height="12" rx="4" fill="%237C3AED"/><path d="M88 52 L 76 68 H 70" fill="none" stroke="%2394A3B8" stroke-width="3" stroke-linecap="round"/><circle cx="68" cy="68" r="3" fill="%23475569"/></svg>`,
-  // 8. Female Navy Suit + White Collar (ครูหอพัก/ผู้บริหาร)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M18 92 C 22 62, 34 56, 50 56 C 66 56, 78 62, 82 92 Z" fill="%232D3A60"/><polygon points="50,78 36,56 46,56" fill="%23FFFFFF"/><polygon points="50,78 64,56 54,56" fill="%23FFFFFF"/><polygon points="50,78 46,56 50,64 54,56" fill="%23CBD5E1"/><rect x="43" y="44" width="14" height="16" rx="3" fill="%23FCD3C1"/><path d="M28 28 C 28 14, 72 14, 72 28 V 62 C 72 62, 68 64, 64 56 V 32 C 64 18, 36 18, 36 32 V 56 C 32 64, 28 62, 28 62 Z" fill="%231A202C"/><path d="M33 26 C 33 16, 67 16, 67 26 V 40 C 67 52, 33 52, 33 40 Z" fill="%23FCD3C1"/><circle cx="31" cy="35" r="3.5" fill="%23F8B195"/><circle cx="69" cy="35" r="3.5" fill="%23F8B195"/><path d="M31 26 C 32 14, 68 14, 69 26 C 60 16, 50 32, 31 26 Z" fill="%231A202C"/></svg>`,
-  // 9. Male Glasses + Dark Jacket + White Shirt (ครูหอพัก/วิชาการ)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M16 92 C 20 62, 34 56, 50 56 C 66 56, 80 62, 84 92 Z" fill="%232B2D42"/><path d="M42 56 H58 V80 H42 Z" fill="%23F8F9FA"/><rect x="42" y="44" width="16" height="16" rx="3" fill="%23FCD3C1"/><path d="M30 26 C 30 14, 70 14, 70 26 V 40 C 70 54, 30 54, 30 40 Z" fill="%23FCD3C1"/><circle cx="41" cy="34" r="8" fill="none" stroke="%23212529" stroke-width="2.5"/><circle cx="59" cy="34" r="8" fill="none" stroke="%23212529" stroke-width="2.5"/><line x1="49" y1="34" x2="51" y2="34" stroke="%23212529" stroke-width="2.5"/><line x1="30" y1="33" x2="33" y2="33" stroke="%23212529" stroke-width="2.5"/><line x1="67" y1="33" x2="70" y2="33" stroke="%23212529" stroke-width="2.5"/><circle cx="28" cy="36" r="4" fill="%23F8B195"/><circle cx="72" cy="36" r="4" fill="%23F8B195"/><path d="M29 26 C 30 10, 70 10, 71 26 C 66 14, 52 14, 29 26 Z" fill="%231A202C"/></svg>`,
-  // 10. Female Glasses + Dark Jacket + Blue Shirt (ครูหอพัก/วิชาการ)
-  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M18 92 C 22 62, 34 56, 50 56 C 66 56, 78 62, 82 92 Z" fill="%232B2D42"/><polygon points="50,78 36,56 46,56" fill="%236C5CE7"/><polygon points="50,78 64,56 54,56" fill="%236C5CE7"/><rect x="43" y="44" width="14" height="16" rx="3" fill="%23FCD3C1"/><path d="M28 28 C 28 12, 72 12, 72 28 V 58 C 72 58, 68 60, 64 54 V 30 C 64 16, 36 16, 36 30 V 54 C 32 60, 28 58, 28 58 Z" fill="%234A3728"/><path d="M33 26 C 33 16, 67 16, 67 26 V 40 C 67 52, 33 52, 33 40 Z" fill="%23FCD3C1"/><circle cx="42" cy="34" r="7.5" fill="none" stroke="%23212529" stroke-width="2.5"/><circle cx="58" cy="34" r="7.5" fill="none" stroke="%23212529" stroke-width="2.5"/><line x1="49.5" y1="34" x2="50.5" y2="34" stroke="%23212529" stroke-width="2.5"/><circle cx="31" cy="35" r="3.5" fill="%23F8B195"/><circle cx="69" cy="35" r="3.5" fill="%23F8B195"/><path d="M31 26 C 32 14, 68 14, 69 26 C 60 16, 50 28, 31 26 Z" fill="%234A3728"/></svg>`
-];
-
-const PRESET_AVATARS_META = [
-  { roleName: "ผู้ดูแล/ผู้บริหาร", badgeColor: "bg-purple-100 text-purple-800 border-purple-200" },
-  { roleName: "เจ้าหน้าที่/ครูหอพัก", badgeColor: "bg-pink-100 text-pink-800 border-pink-200" },
-  { roleName: "บัตรประจำตัว", badgeColor: "bg-blue-100 text-blue-800 border-blue-200" },
-  { roleName: "เจ้าหน้าที่", badgeColor: "bg-orange-100 text-orange-800 border-orange-200" },
-  { roleName: "ผู้ดูแลระบบ", badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-  { roleName: "ผู้ดูแลระบบ", badgeColor: "bg-slate-100 text-slate-800 border-slate-200" },
-  { roleName: "เจ้าหน้าที่บริการ", badgeColor: "bg-amber-100 text-amber-800 border-amber-200" },
-  { roleName: "ครูหอพัก/ผู้บริหาร", badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200" },
-  { roleName: "ครูหอพัก/วิชาการ", badgeColor: "bg-sky-100 text-sky-800 border-sky-200" },
-  { roleName: "ครูหอพัก/วิชาการ", badgeColor: "bg-teal-100 text-teal-800 border-teal-200" }
-];
-
 export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   currentUser,
   dorms,
   students = [],
   notices = [],
   attendanceRecords = [],
-  usersList,
+  usersList = [],
   systemSettings = DEFAULT_SYSTEM_SETTINGS,
   onUpdateSystemSettings,
   onDataReset,
@@ -413,12 +384,17 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
   const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Password Change Form State
+  // Password Change & Profile Picture Form State
   const [selectedTargetUserId, setSelectedTargetUserId] = useState<string>(currentUser?.id || "");
   const [oldPassword, setOldPassword] = useState<string>("");
   const [newPassword, setNewPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
-  const [selectedAvatar, setSelectedAvatar] = useState<string>(currentUser?.avatarUrl || PRESET_AVATARS[0]);
+  const [selectedAvatar, setSelectedAvatar] = useState<string>(() =>
+    currentUser?.avatarUrl?.trim() ? currentUser.avatarUrl.trim() : ""
+  );
+  const [selectedGender, setSelectedGender] = useState<"male" | "female">(() =>
+    inferUserGender(currentUser, dorms)
+  );
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string>("");
 
   // Manage Users Modal State
@@ -429,20 +405,32 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
+    gender: "male" as "male" | "female",
     roleLevel: 2, // 1 = Admin, 2 = Staff, 3 = Teacher, 4 = Guest/Visitor
     roleCategory: "STAFF" as "ADMIN" | "STAFF" | "DORM_TEACHER" | "GUEST",
     dormId: "",
     dormPosition: "ครูประจำหอพัก" as DormPosition,
     allowedDormIds: [] as string[],
-    avatarUrl: PRESET_AVATARS[0],
+    avatarUrl: "",
     password: ""
   });
 
+  // Firestore Profile Avatar Sync State
+  const [isSavingProfileAvatar, setIsSavingProfileAvatar] = useState<boolean>(false);
+  const [firestoreAvatars, setFirestoreAvatars] = useState<ProfileAvatarItem[]>([]);
+  const [isLoadingFirestoreAvatars, setIsLoadingFirestoreAvatars] = useState<boolean>(false);
+  const [isUploadingGalleryAvatars, setIsUploadingGalleryAvatars] = useState<boolean>(false);
+  const [isDeletingGalleryAvatars, setIsDeletingGalleryAvatars] = useState<boolean>(false);
+  const [selectedGalleryKeys, setSelectedGalleryKeys] = useState<string[]>([]);
+  const [pendingDeleteGalleryItems, setPendingDeleteGalleryItems] = useState<Array<{
+    key: string;
+    id?: string;
+    imageUrl: string;
+    label: string;
+    usedByNames: string[];
+  }> | null>(null);
 
-  // Google Drive Upload State
-  const [isUploadingDrive, setIsUploadingDrive] = useState<boolean>(false);
-
-  // Local File Selection State for Auto Google Drive Upload on Save
+  // Local File Selection State for Firestore Profile Picture Storage
   const [profileSelectedFile, setProfileSelectedFile] = useState<File | null>(null);
   const [profileFilePreview, setProfileFilePreview] = useState<string | null>(null);
 
@@ -455,6 +443,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
 
     if (file.size > 20 * 1024 * 1024) {
       showNotification("error", "ไฟล์รูปภาพมีขนาดใหญ่เกิน 20 MB โปรดเลือกไฟล์ขนาดเล็กกว่า");
+      e.target.value = "";
       return;
     }
 
@@ -465,7 +454,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       setProfileFilePreview(previewUrl);
       setSelectedAvatar(previewUrl);
       setCustomAvatarUrl("");
-      showNotification("success", `เลือกรูปภาพ "${file.name}" สำเร็จ! กด 'บันทึกรูปโปรไฟล์' เพื่อบันทึกลงระบบทันที`);
+      showNotification("success", `เลือกรูปภาพ "${file.name}" สำเร็จ! กด 'บันทึกรูปโปรไฟล์ลง Firestore' เพื่อบันทึก`);
     } else {
       if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
       setModalSelectedFile(file);
@@ -473,6 +462,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       setFormData((prev) => ({ ...prev, avatarUrl: previewUrl }));
       showNotification("success", `เลือกรูปภาพ "${file.name}" สำเร็จ! กด 'บันทึก' เพื่อบันทึกข้อมูล`);
     }
+    e.target.value = "";
   };
 
   const clearSelectedFile = (target: "PROFILE" | "MODAL") => {
@@ -480,72 +470,13 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
       setProfileSelectedFile(null);
       setProfileFilePreview(null);
-      setSelectedAvatar(PRESET_AVATARS[0]);
+      setSelectedAvatar("");
+      setCustomAvatarUrl("");
     } else {
       if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
       setModalSelectedFile(null);
       setModalFilePreview(null);
-      setFormData((prev) => ({ ...prev, avatarUrl: PRESET_AVATARS[0] }));
-    }
-  };
-
-  // Handle direct file upload to Google Drive for avatar (optional feature with graceful fallback)
-  const handleFileUploadToGoogleDrive = async (e: React.ChangeEvent<HTMLInputElement>, target: "PROFILE" | "MODAL") => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 20 * 1024 * 1024) {
-      showNotification("error", "ไฟล์รูปภาพมีขนาดใหญ่เกิน 20 MB โปรดเลือกไฟล์ขนาดเล็กกว่า");
-      return;
-    }
-
-    setIsUploadingDrive(true);
-    try {
-      showNotification("success", "กำลังเชื่อมต่อ Google Drive และเริ่มอัปโหลดไฟล์...");
-      const driveResult = await uploadImageToGoogleDrive(
-        file,
-        `avatar_${Date.now()}_${file.name}`,
-        "1K7PFEk9ylOYLBtMHFijwPkzB3Xl13UfQ"
-      );
-
-      if (driveResult && driveResult.directUrl) {
-        if (target === "PROFILE") {
-          setProfileSelectedFile(null);
-          if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
-          setProfileFilePreview(null);
-          setCustomAvatarUrl(driveResult.directUrl);
-          setSelectedAvatar(driveResult.directUrl);
-        } else {
-          setModalSelectedFile(null);
-          if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
-          setModalFilePreview(null);
-          setFormData((prev) => ({ ...prev, avatarUrl: driveResult.directUrl }));
-        }
-        showNotification("success", "อัปโหลดรูปภาพไปยัง Google Drive สำเร็จ! ตั้งค่ารูปโปรไฟล์เรียบร้อยแล้ว");
-      }
-    } catch (err: any) {
-      console.warn("Google Drive Upload Notice:", err);
-      // Fallback: Compress locally and set as avatar directly to prevent blocking user
-      const compressedDataUrl = await compressImageFile(file, 250, 250, 0.85);
-      if (compressedDataUrl) {
-        if (target === "PROFILE") {
-          setProfileSelectedFile(file);
-          setSelectedAvatar(compressedDataUrl);
-          setCustomAvatarUrl("");
-        } else {
-          setModalSelectedFile(file);
-          setFormData((prev) => ({ ...prev, avatarUrl: compressedDataUrl }));
-        }
-        showNotification(
-          "success",
-          "บันทึกรูปโปรไฟล์ลงในระบบฐานข้อมูลกลางเรียบร้อยแล้ว (ไม่ต้องเชื่อมต่อ Google Drive)"
-        );
-      } else {
-        showNotification("error", "ไม่สามารถประมวลผลรูปภาพได้: " + (err.message || err));
-      }
-    } finally {
-      setIsUploadingDrive(false);
-      e.target.value = "";
+      setFormData((prev) => ({ ...prev, avatarUrl: "" }));
     }
   };
 
@@ -814,16 +745,95 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     });
   }, [users, dorms]);
 
+  const loadFirestoreAvatars = async () => {
+    setIsLoadingFirestoreAvatars(true);
+    try {
+      const items = await fetchProfileAvatars();
+      setFirestoreAvatars(items);
+    } catch (err) {
+      console.error("Error loading Firestore avatars:", err);
+    } finally {
+      setIsLoadingFirestoreAvatars(false);
+    }
+  };
+
+  // Unified list of ALL custom profile images currently stored in Firestore (/profile_avatars + /users)
+  const allFirestoreGalleryImages = React.useMemo(() => {
+    const byUrl = new Map<
+      string,
+      {
+        key: string;
+        id?: string;
+        imageUrl: string;
+        label: string;
+        uploadedAt?: string;
+        source: "LIBRARY" | "USER_PROFILE";
+        usedByNames: string[];
+      }
+    >();
+
+    firestoreAvatars.forEach((item) => {
+      const url = item.imageUrl?.trim();
+      if (!url) return;
+      if (!byUrl.has(url)) {
+        byUrl.set(url, {
+          key: item.id,
+          id: item.id,
+          imageUrl: url,
+          label: item.label || "รูปใน Firestore",
+          uploadedAt: item.uploadedAt,
+          source: "LIBRARY",
+          usedByNames: []
+        });
+      }
+    });
+
+    const knownUsersMap = new Map<string, UserProfile>();
+    [...(usersList || []), ...users].forEach((u) => {
+      if (u?.id) knownUsersMap.set(u.id, u);
+    });
+
+    knownUsersMap.forEach((u) => {
+      if (!hasCustomAvatar(u)) return;
+      const url = String(u.avatarUrl || "").trim();
+      if (!url) return;
+      const existing = byUrl.get(url);
+      if (existing) {
+        if (!existing.usedByNames.includes(u.name)) {
+          existing.usedByNames.push(u.name);
+        }
+      } else {
+        byUrl.set(url, {
+          key: `user-avatar-${u.id}`,
+          imageUrl: url,
+          label: u.name,
+          source: "USER_PROFILE",
+          usedByNames: [u.name]
+        });
+      }
+    });
+
+    return Array.from(byUrl.values());
+  }, [firestoreAvatars, users, usersList]);
+
   useEffect(() => {
     loadUsersList();
+    loadFirestoreAvatars();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "CHANGE_PROFILE") {
+      loadFirestoreAvatars();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (currentUser) {
       setSelectedTargetUserId(currentUser.id);
-      setSelectedAvatar(currentUser.avatarUrl || PRESET_AVATARS[0]);
+      setSelectedAvatar(currentUser.avatarUrl?.trim() ? currentUser.avatarUrl.trim() : "");
+      setSelectedGender(inferUserGender(currentUser, dorms));
     }
-  }, [currentUser]);
+  }, [currentUser, dorms]);
 
   const showNotification = (type: "success" | "error", text: string) => {
     setMsg({ type, text });
@@ -1007,45 +1017,257 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     }
   };
 
-  // Profile Avatar Change Handler
+  const ensureFirestoreAuthForProfileWrite = async (): Promise<void> => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+      const fbUser = await signInWithGoogleAndRefresh();
+      setFirebaseAuthEmail(fbUser.email || "");
+    }
+  };
+
+  // Profile Avatar Save Handler (Stored on Firestore)
   const handleSaveProfileAvatar = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetUser = users.find((u) => u.id === selectedTargetUserId) || currentUser;
     if (!targetUser) return;
 
+    setIsSavingProfileAvatar(true);
     try {
-      let updatedAvatar = customAvatarUrl.trim() ? sanitizeSafeImageUrl(customAvatarUrl.trim()) : selectedAvatar;
+      let updatedAvatar = customAvatarUrl.trim()
+        ? sanitizeSafeImageUrl(customAvatarUrl.trim())
+        : selectedAvatar;
+
       if (customAvatarUrl.trim() && !updatedAvatar) {
         showNotification("error", "URL รูปภาพไม่ถูกต้อง (ต้องขึ้นต้นด้วย https:// หรือไฟล์ภาพที่ปลอดภัย)");
         return;
       }
 
-      // When a local file is selected, compress it directly into a clean, compact Data URL
       if (profileSelectedFile) {
-        showNotification("success", "กำลังประมวลผลรูปภาพโปรไฟล์...");
-        const compressed = await compressImageFile(profileSelectedFile, 250, 250, 0.85);
-        if (compressed) {
-          updatedAvatar = compressed;
+        const compressed = await compressImageFile(profileSelectedFile, 240, 240, 0.82, 45000);
+        if (!compressed) {
+          showNotification("error", "ไม่สามารถบีบอัดไฟล์รูปภาพได้ กรุณาลองเลือกไฟล์อื่น");
+          return;
         }
+        updatedAvatar = compressed;
+      } else if (updatedAvatar) {
+        const normalized = getDirectImageUrl(updatedAvatar) || updatedAvatar;
+        updatedAvatar = await compressDataUrlIfNeeded(normalized, 240, 240, 0.82, 45000);
       } else {
-        updatedAvatar = await compressDataUrlIfNeeded(getDirectImageUrl(updatedAvatar), 250, 250, 0.85);
+        updatedAvatar = "";
       }
 
-      await updateUser(targetUser.id, { avatarUrl: updatedAvatar });
+      await ensureFirestoreAuthForProfileWrite();
+      const updatedUser = await updateUser(
+        targetUser.id,
+        { avatarUrl: updatedAvatar, gender: selectedGender },
+        { requireCloudSync: true, baseUser: targetUser }
+      );
+
+      if (updatedAvatar) {
+        try {
+          await saveProfileAvatarToLibrary({
+            imageUrl: updatedAvatar,
+            label: profileSelectedFile?.name || targetUser.name,
+            uploadedBy: currentUser?.name
+          });
+        } catch (galleryErr) {
+          console.warn("Saved user profile picture; library record skipped:", galleryErr);
+        }
+      }
+
       if (currentUser && targetUser.id === currentUser.id && onUserUpdated) {
-        onUserUpdated({ ...currentUser, avatarUrl: updatedAvatar });
+        onUserUpdated({ ...currentUser, ...updatedUser, avatarUrl: updatedAvatar, gender: selectedGender });
       }
 
-      showNotification("success", `บันทึกและอัปเดตรูปโปรไฟล์สำหรับ ${targetUser.name} สำเร็จแล้ว!`);
+      setSelectedAvatar(updatedAvatar);
       setCustomAvatarUrl("");
       setProfileSelectedFile(null);
       if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
       setProfileFilePreview(null);
-      loadUsersList();
+      invalidateFirestoreReadCache("users");
+      invalidateFirestoreReadCache("profile_avatars");
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await Promise.all([loadUsersList(), loadFirestoreAvatars()]);
+      showNotification("success", `บันทึกรูปโปรไฟล์สำหรับ ${targetUser.name} ลง Firestore สำเร็จแล้ว!`);
     } catch (err: any) {
-      showNotification("error", err.message || "เกิดข้อผิดพลาดในการอัปเดตรูปโปรไฟล์");
+      const rawMsg = String(err?.message || err || "");
+      const friendlyMsg =
+        rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+          ? "ไม่มีสิทธิ์เขียนลง Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : rawMsg || "เกิดข้อผิดพลาดในการบันทึกรูปโปรไฟล์ลง Firestore";
+      showNotification("error", friendlyMsg);
     } finally {
-      setIsUploadingDrive(false);
+      setIsSavingProfileAvatar(false);
+    }
+  };
+
+  // Upload one or multiple images directly into Firestore Profile Avatars Gallery
+  const handleGalleryUploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+
+    const validFiles = files.filter((f) => f.size <= 20 * 1024 * 1024);
+    if (validFiles.length < files.length) {
+      showNotification("error", "บางไฟล์มีขนาดเกิน 20 MB จึงถูกข้ามอัตโนมัติ");
+    }
+    if (validFiles.length === 0) return;
+
+    setIsUploadingGalleryAvatars(true);
+    try {
+      await ensureFirestoreAuthForProfileWrite();
+      let uploadedCount = 0;
+      let lastUploadedUrl = "";
+
+      for (const file of validFiles) {
+        const compressed = await compressImageFile(file, 240, 240, 0.82, 45000);
+        if (!compressed) continue;
+        const saved = await saveProfileAvatarToLibrary({
+          imageUrl: compressed,
+          label: file.name,
+          uploadedBy: currentUser?.name
+        });
+        uploadedCount++;
+        lastUploadedUrl = saved.imageUrl;
+      }
+
+      if (uploadedCount === 0) {
+        showNotification("error", "ไม่สามารถประมวลผลไฟล์รูปภาพที่เลือกได้");
+        return;
+      }
+
+      if (uploadedCount === 1 && lastUploadedUrl) {
+        if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
+        setProfileSelectedFile(null);
+        setProfileFilePreview(null);
+        setCustomAvatarUrl("");
+        setSelectedAvatar(lastUploadedUrl);
+      }
+
+      invalidateFirestoreReadCache("profile_avatars");
+      await loadFirestoreAvatars();
+      showNotification(
+        "success",
+        `อัปโหลดรูปภาพเข้าคลัง Firestore สำเร็จ ${uploadedCount} รูป!`
+      );
+    } catch (err: any) {
+      const rawMsg = String(err?.message || err || "");
+      const friendlyMsg =
+        rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+          ? "ไม่มีสิทธิ์อัปโหลดรูปเข้า Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : rawMsg || "เกิดข้อผิดพลาดในการอัปโหลดรูปภาพเข้า Firestore";
+      showNotification("error", friendlyMsg);
+    } finally {
+      setIsUploadingGalleryAvatars(false);
+    }
+  };
+
+  // Toggle selection checkbox for batch deleting images in Firestore Gallery (Level 1 & 2 only)
+  const toggleGalleryKeySelection = (key: string) => {
+    if (!isAdmin && !isStaff) return;
+    setSelectedGalleryKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  // Confirm & execute deletion of selected image(s) from Firestore (Level 1 & 2 only)
+  const handleConfirmDeleteGalleryItems = async () => {
+    if (!isAdmin && !isStaff) {
+      setPendingDeleteGalleryItems(null);
+      showNotification("error", "เฉพาะสิทธิ์ระดับ 1 และระดับ 2 เท่านั้นที่สามารถลบรูปภาพใน Firestore ได้");
+      return;
+    }
+    if (!pendingDeleteGalleryItems || pendingDeleteGalleryItems.length === 0) return;
+    setIsDeletingGalleryAvatars(true);
+    try {
+      await ensureFirestoreAuthForProfileWrite();
+      const knownUsers = Array.from(
+        new Map([...(usersList || []), ...users].map((u) => [u.id, u])).values()
+      );
+      const deletedUrls = new Set(pendingDeleteGalleryItems.map((i) => i.imageUrl.trim()));
+      const deletedKeys = new Set(pendingDeleteGalleryItems.map((i) => i.key));
+
+      const res = await deleteProfileAvatarsFromLibrary(
+        pendingDeleteGalleryItems.map((item) => ({ id: item.id, imageUrl: item.imageUrl })),
+        knownUsers
+      );
+
+      if (deletedUrls.has(selectedAvatar.trim())) {
+        setSelectedAvatar("");
+      }
+      if (currentUser && currentUser.avatarUrl && deletedUrls.has(currentUser.avatarUrl.trim()) && onUserUpdated) {
+        onUserUpdated({ ...currentUser, avatarUrl: "" });
+      }
+
+      setSelectedGalleryKeys((prev) => prev.filter((k) => !deletedKeys.has(k)));
+      setPendingDeleteGalleryItems(null);
+      invalidateFirestoreReadCache("profile_avatars");
+      invalidateFirestoreReadCache("users");
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await Promise.all([loadFirestoreAvatars(), loadUsersList()]);
+
+      showNotification(
+        "success",
+        `ลบรูปภาพออกจาก Firestore สำเร็จ ${pendingDeleteGalleryItems.length} รูป${
+          res.clearedUsers > 0 ? ` (รีเซ็ตรูปโปรไฟล์ผู้ใช้ ${res.clearedUsers} บัญชีกลับเป็นรูปตัวอย่างตามเพศ)` : ""
+        }`
+      );
+    } catch (err: any) {
+      const rawMsg = String(err?.message || err || "");
+      const friendlyMsg =
+        rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+          ? "ไม่มีสิทธิ์ลบรูปภาพบน Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : rawMsg || "เกิดข้อผิดพลาดในการลบรูปภาพออกจาก Firestore";
+      showNotification("error", friendlyMsg);
+    } finally {
+      setIsDeletingGalleryAvatars(false);
+    }
+  };
+
+  // Profile Avatar Delete Handler (Clears avatar on Firestore so system falls back to gender sample avatar)
+  const handleDeleteProfileAvatar = async () => {
+    const targetUser = users.find((u) => u.id === selectedTargetUserId) || currentUser;
+    if (!targetUser) return;
+
+    const hasSavedCloudAvatar = hasCustomAvatar(targetUser);
+    if (!hasSavedCloudAvatar) {
+      clearSelectedFile("PROFILE");
+      showNotification(
+        "success",
+        `ล้างรูปที่เลือกเรียบร้อยแล้ว ระบบจะใช้รูปตัวอย่างระบบ (${getGenderLabel(selectedGender)})`
+      );
+      return;
+    }
+
+    setIsSavingProfileAvatar(true);
+    try {
+      await ensureFirestoreAuthForProfileWrite();
+      const updatedUser = await updateUser(
+        targetUser.id,
+        { avatarUrl: "", gender: selectedGender },
+        { requireCloudSync: true, baseUser: targetUser }
+      );
+
+      if (currentUser && targetUser.id === currentUser.id && onUserUpdated) {
+        onUserUpdated({ ...currentUser, ...updatedUser, avatarUrl: "", gender: selectedGender });
+      }
+
+      clearSelectedFile("PROFILE");
+      invalidateFirestoreReadCache("users");
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await Promise.all([loadUsersList(), loadFirestoreAvatars()]);
+      showNotification(
+        "success",
+        `ลบรูปโปรไฟล์ของ ${targetUser.name} ออกจาก Firestore สำเร็จแล้ว (แสดงรูปตัวอย่าง${getGenderLabel(selectedGender)}แทน)`
+      );
+    } catch (err: any) {
+      const rawMsg = String(err?.message || err || "");
+      const friendlyMsg =
+        rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
+          ? "ไม่มีสิทธิ์ลบรูปโปรไฟล์บน Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          : rawMsg || "เกิดข้อผิดพลาดในการลบรูปโปรไฟล์ออกจาก Firestore";
+      showNotification("error", friendlyMsg);
+    } finally {
+      setIsSavingProfileAvatar(false);
     }
   };
 
@@ -1092,23 +1314,28 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       role = "GUEST";
     }
 
-    let processedAvatarUrl = getDirectImageUrl(formData.avatarUrl || PRESET_AVATARS[0]) || PRESET_AVATARS[0];
-
-    // Compress local file directly if selected in modal
+    let processedAvatarUrl = "";
     if (modalSelectedFile) {
-      const compressed = await compressImageFile(modalSelectedFile, 250, 250, 0.85);
+      const compressed = await compressImageFile(modalSelectedFile, 240, 240, 0.82, 45000);
       if (compressed) {
         processedAvatarUrl = compressed;
       }
-    } else {
-      processedAvatarUrl = await compressDataUrlIfNeeded(processedAvatarUrl, 250, 250, 0.85);
+    } else if (formData.avatarUrl && formData.avatarUrl.trim()) {
+      const safe = sanitizeSafeImageUrl(getDirectImageUrl(formData.avatarUrl.trim()) || formData.avatarUrl.trim());
+      if (!safe) {
+        showNotification("error", "URL รูปภาพไม่ถูกต้อง (ต้องขึ้นต้นด้วย https:// หรือไฟล์ภาพที่ปลอดภัย)");
+        return;
+      }
+      processedAvatarUrl = await compressDataUrlIfNeeded(safe, 240, 240, 0.82, 45000);
     }
 
     try {
+      const syncToCloud = Boolean(auth.currentUser && auth.currentUser.emailVerified);
       if (editingUser) {
         const payload: Partial<UserProfile> & { password?: string } = {
           name: trimmedName,
           phone: trimmedPhone,
+          gender: formData.gender,
           roleLevel: level as any,
           roleCategory: formData.roleCategory,
           roleCategoryName,
@@ -1121,27 +1348,34 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
           ...(rawPasswordInput ? { password: rawPasswordInput } : {})
         };
 
-        const updated = await updateUser(editingUser.id, payload);
+        const updated = await updateUser(editingUser.id, payload, {
+          requireCloudSync: syncToCloud,
+          baseUser: editingUser
+        });
         showNotification("success", `อัปเดตข้อมูลผู้ใช้ ${trimmedName} สำเร็จแล้ว`);
 
         if (currentUser && currentUser.id === editingUser.id && onUserUpdated) {
           onUserUpdated({ ...currentUser, ...updated });
         }
       } else {
-        await addUser({
-          name: trimmedName,
-          phone: trimmedPhone,
-          roleLevel: level as any,
-          roleCategory: formData.roleCategory,
-          roleCategoryName,
-          roleLabel,
-          role,
-          dormId: formData.dormId || "",
-          dormPosition: formData.dormPosition,
-          allowedDormIds: formData.allowedDormIds,
-          avatarUrl: processedAvatarUrl,
-          ...(rawPasswordInput ? { password: rawPasswordInput } : {})
-        });
+        await addUser(
+          {
+            name: trimmedName,
+            phone: trimmedPhone,
+            gender: formData.gender,
+            roleLevel: level as any,
+            roleCategory: formData.roleCategory,
+            roleCategoryName,
+            roleLabel,
+            role,
+            dormId: formData.dormId || "",
+            dormPosition: formData.dormPosition,
+            allowedDormIds: formData.allowedDormIds,
+            avatarUrl: processedAvatarUrl,
+            ...(rawPasswordInput ? { password: rawPasswordInput } : {})
+          },
+          { requireCloudSync: syncToCloud }
+        );
         showNotification("success", `เพิ่มผู้ใช้งานใหม่ ${trimmedName} สำเร็จแล้ว`);
       }
 
@@ -1150,6 +1384,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       setModalSelectedFile(null);
       if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
       setModalFilePreview(null);
+      invalidateFirestoreReadCache("users");
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["dorms"] });
       queryClient.invalidateQueries({ queryKey: ["dailyReport"] });
@@ -2186,7 +2421,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
             {/* Target User Info Badge */}
             <div className="flex items-center gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
               <img
-                src={(users.find((u) => u.id === selectedTargetUserId) || currentUser)?.avatarUrl || PRESET_AVATARS[0]}
+                src={getUserAvatarUrl(users.find((u) => u.id === selectedTargetUserId) || currentUser, dorms)}
                 alt="Target User"
                 className="w-11 h-11 rounded-full object-cover ring-2 ring-[#A05AFF]/30 border-2 border-white shrink-0"
               />
@@ -2260,212 +2495,595 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       )}
 
       {/* TAB: Change Profile Picture */}
-      {activeTab === "CHANGE_PROFILE" && (
-        <div className="max-w-2xl mx-auto space-y-6">
-          <div className="border-b border-gray-100 pb-4">
-            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-              <ImageIcon className="w-5 h-5 text-[#A05AFF]" />
-              <span>{isAdmin ? "5. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : (isStaff ? "4. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : "2. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)")}</span>
-            </h3>
-            <p className="text-xs text-gray-500 mt-1">
-              เลือกรูปภาพไอคอนประจำตัว หรืออัปโหลดรูปภาพใหม่จากเครื่องลง Google Drive อัตโนมัติ
-            </p>
-          </div>
+      {activeTab === "CHANGE_PROFILE" && (() => {
+        const targetUser = users.find((u) => u.id === selectedTargetUserId) || currentUser;
+        const activeCustomUrl = customAvatarUrl.trim();
+        const hasPendingOrSavedAvatar = Boolean(
+          profileFilePreview || activeCustomUrl || selectedAvatar.trim()
+        );
+        const displayedAvatarSrc = profileFilePreview
+          ? profileFilePreview
+          : activeCustomUrl
+          ? (sanitizeSafeImageUrl(activeCustomUrl) || getDefaultAvatarByGender(selectedGender))
+          : selectedAvatar.trim()
+          ? (sanitizeSafeImageUrl(getDirectImageUrl(selectedAvatar.trim()) || selectedAvatar.trim()) || getDefaultAvatarByGender(selectedGender))
+          : getDefaultAvatarByGender(selectedGender);
 
-          <form onSubmit={handleSaveProfileAvatar} className="space-y-5">
-            {/* Admin Select Target User */}
-            {isAdmin && (
+        return (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="border-b border-gray-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">
-                  เลือกผู้ใช้งานที่ต้องการเปลี่ยนรูปโปรไฟล์:
-                </label>
-                <select
-                  value={selectedTargetUserId}
-                  onChange={(e) => {
-                    setSelectedTargetUserId(e.target.value);
-                    const sel = users.find((u) => u.id === e.target.value);
-                    if (sel) {
-                      setSelectedAvatar(sel.avatarUrl || PRESET_AVATARS[0]);
-                      setCustomAvatarUrl("");
-                    }
-                  }}
-                  className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2.5 font-bold outline-none focus:ring-2 focus:ring-[#A05AFF]"
-                >
-                  {sortedUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.roleCategoryName} - ระดับ {u.roleLevel})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Avatar Live Preview */}
-            <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <img
-                src={customAvatarUrl.trim() || selectedAvatar}
-                alt="Profile Preview"
-                className="w-16 h-16 rounded-full object-cover ring-4 ring-[#A05AFF]/30 border-2 border-white shadow-sm shrink-0"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-black text-slate-800">
-                  {(users.find((u) => u.id === selectedTargetUserId) || currentUser)?.name}
-                </div>
-                <div className="text-xs text-[#A05AFF] font-bold">
-                  {(users.find((u) => u.id === selectedTargetUserId) || currentUser)?.roleCategoryName}
-                </div>
-                <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
-                  {customAvatarUrl.trim() || selectedAvatar}
-                </div>
-              </div>
-              <span className="text-[10px] font-bold bg-[#A05AFF]/10 text-[#A05AFF] px-2.5 py-1 rounded-full border border-[#A05AFF]/20 shrink-0">
-                พรีวิว Real-time
-              </span>
-            </div>
-
-            {/* Upload image file from user's device */}
-            <div className="p-3.5 bg-gradient-to-r from-blue-50/80 via-indigo-50/80 to-purple-50/80 rounded-2xl border border-indigo-100 shadow-2xs space-y-2.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <CloudUpload className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-800 truncate">เลือกรูปภาพจากเครื่องของท่าน</div>
-                    <div className="text-[10px] text-slate-500 truncate">บันทึกรูปภาพลงฐานข้อมูลกลางระบบโดยตรง รวดเร็ว ปลอดภัย และแสดงผลได้ทันที</div>
-                  </div>
-                </div>
-
-                <label className={`px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer shadow-xs transition-all shrink-0 flex items-center justify-center gap-1.5 ${isUploadingDrive ? "opacity-60 pointer-events-none" : ""}`}>
-                  {isUploadingDrive ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>กำลังประมวลผล...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Cloud className="w-3.5 h-3.5" />
-                      <span>เลือกรูปภาพจากเครื่อง...</span>
-                    </>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleLocalFileSelect(e, "PROFILE")}
-                    disabled={isUploadingDrive}
-                    className="hidden"
-                  />
-                </label>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-[#A05AFF]" />
+                  <span>{isAdmin ? "5. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : (isStaff ? "4. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)" : "2. เปลี่ยนรูปโปรไฟล์ (Change Profile Picture)")}</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  อัปโหลดและเก็บรูปโปรไฟล์ไว้บนฐานข้อมูลกลาง (Firestore) หากไม่มีรูปโปรไฟล์ระบบจะใช้รูปตัวอย่างแยกตามเพศอัตโนมัติ
+                </p>
               </div>
 
-              {/* Selected File Badge */}
-              {profileSelectedFile && (
-                <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-blue-200 text-xs">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                    <span className="font-semibold text-slate-700 truncate">รูปที่เลือก: {profileSelectedFile.name}</span>
-                    <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold shrink-0">
-                      (พร้อมบันทึกเป็นรูปโปรไฟล์)
-                    </span>
-                  </div>
+              <div className="shrink-0">
+                {firebaseAuthEmail ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="truncate max-w-[180px]">Firestore: {firebaseAuthEmail}</span>
+                  </span>
+                ) : (
                   <button
                     type="button"
-                    onClick={() => clearSelectedFile("PROFILE")}
-                    className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors cursor-pointer shrink-0"
-                    title="ยกเลิกไฟล์ที่เลือก"
+                    onClick={async () => {
+                      try {
+                        await handleGoogleSignInForDb();
+                        showNotification("success", "เชื่อมต่อบัญชี Google สำหรับบันทึก Firestore สำเร็จ");
+                      } catch (err: any) {
+                        showNotification("error", err?.message || "ไม่สามารถเชื่อมต่อ Google ได้");
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <Cloud className="w-3.5 h-3.5 text-amber-600" />
+                    <span>เชื่อมต่อ Google เพื่อซิงค์ Firestore</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveProfileAvatar} className="space-y-5">
+              {/* Admin Select Target User */}
+              {isAdmin && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    เลือกผู้ใช้งานที่ต้องการเปลี่ยนรูปโปรไฟล์:
+                  </label>
+                  <select
+                    value={selectedTargetUserId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedTargetUserId(nextId);
+                      const sel = users.find((u) => u.id === nextId);
+                      if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
+                      setProfileSelectedFile(null);
+                      setProfileFilePreview(null);
+                      setCustomAvatarUrl("");
+                      if (sel) {
+                        setSelectedAvatar(sel.avatarUrl?.trim() ? sel.avatarUrl.trim() : "");
+                        setSelectedGender(inferUserGender(sel, dorms));
+                      }
+                    }}
+                    className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3 py-2.5 font-bold outline-none focus:ring-2 focus:ring-[#A05AFF]"
+                  >
+                    {sortedUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.roleCategoryName} - ระดับ {u.roleLevel})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Profile Picture Display Box (กล่องแสดงรูปโปรไฟล์) */}
+              <div className="bg-gradient-to-br from-slate-50 via-white to-purple-50/50 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                  {/* Large Profile Showcase Box */}
+                  <div className="flex flex-col items-center gap-2.5 shrink-0">
+                    <div className="relative w-32 h-32 sm:w-36 sm:h-36 rounded-2xl bg-white p-1.5 border-2 border-[#A05AFF]/30 shadow-md flex items-center justify-center overflow-hidden">
+                      <img
+                        src={displayedAvatarSrc}
+                        alt={targetUser?.name || "Profile Picture"}
+                        className="w-full h-full rounded-xl object-cover"
+                      />
+                      <span
+                        className={`absolute bottom-2 left-2 right-2 text-center text-[10px] font-extrabold px-2 py-0.5 rounded-lg backdrop-blur-xs shadow-xs ${
+                          hasPendingOrSavedAvatar
+                            ? "bg-[#A05AFF]/90 text-white"
+                            : selectedGender === "female"
+                            ? "bg-pink-600/85 text-white"
+                            : "bg-blue-600/85 text-white"
+                        }`}
+                      >
+                        {hasPendingOrSavedAvatar
+                          ? (profileSelectedFile ? "รูปใหม่ (รอบันทึก)" : "รูปโปรไฟล์ Firestore")
+                          : `ตัวอย่างระบบ (${getGenderLabel(selectedGender)})`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* User Details + Gender + Upload / Delete Buttons */}
+                  <div className="flex-1 min-w-0 w-full space-y-4 text-center sm:text-left">
+                    <div>
+                      <div className="text-base font-black text-slate-900 truncate">
+                        {targetUser?.name}
+                      </div>
+                      <div className="text-xs text-[#A05AFF] font-bold mt-0.5">
+                        {targetUser?.roleCategoryName} (ระดับ {targetUser?.roleLevel})
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        {hasPendingOrSavedAvatar
+                          ? "กำลังใช้รูปโปรไฟล์ที่กำหนดเอง (จัดเก็บใน Firestore)"
+                          : `ยังไม่มีรูปโปรไฟล์ — ระบบแสดงรูปตัวอย่าง${getGenderLabel(selectedGender)}ให้อัตโนมัติ`}
+                      </p>
+                    </div>
+
+                    {/* Gender Selector for System Default Avatar */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                        เพศผู้ใช้ (ใช้กำหนดรูปตัวอย่างจากระบบเมื่อไม่มีรูปโปรไฟล์):
+                      </label>
+                      <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedGender("male")}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                            selectedGender === "male"
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-white/70"
+                          }`}
+                        >
+                          ชาย (Male)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedGender("female")}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                            selectedGender === "female"
+                              ? "bg-pink-600 text-white shadow-xs"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-white/70"
+                          }`}
+                        >
+                          หญิง (Female)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Upload & Delete Action Buttons */}
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5 pt-1">
+                      <label
+                        className={`px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer shadow-xs transition-all flex items-center gap-1.5 ${
+                          isSavingProfileAvatar ? "opacity-60 pointer-events-none" : ""
+                        }`}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{hasPendingOrSavedAvatar ? "เปลี่ยนรูปภาพจากเครื่อง" : "อัปโหลดรูปโปรไฟล์"}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleLocalFileSelect(e, "PROFILE")}
+                          disabled={isSavingProfileAvatar}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={handleDeleteProfileAvatar}
+                        disabled={isSavingProfileAvatar || !hasPendingOrSavedAvatar}
+                        className={`px-4 py-2.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 ${
+                          hasPendingOrSavedAvatar && !isSavingProfileAvatar
+                            ? "bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 cursor-pointer shadow-2xs"
+                            : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        }`}
+                        title={
+                          hasPendingOrSavedAvatar
+                            ? "ลบรูปโปรไฟล์และกลับไปใช้รูปตัวอย่างตามเพศ"
+                            : "ยังไม่มีรูปโปรไฟล์ให้ลบ"
+                        }
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>ลบรูปโปรไฟล์</span>
+                      </button>
+                    </div>
+
+                    {profileSelectedFile && (
+                      <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-blue-200 text-xs">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                          <span className="font-semibold text-slate-700 truncate">ไฟล์ที่เลือก: {profileSelectedFile.name}</span>
+                          <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold shrink-0">
+                            พร้อมบันทึกลง Firestore
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
+                            setProfileSelectedFile(null);
+                            setProfileFilePreview(null);
+                            setSelectedAvatar(targetUser?.avatarUrl?.trim() ? targetUser.avatarUrl.trim() : "");
+                          }}
+                          className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                          title="ยกเลิกไฟล์ที่เลือก"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Gender Fallback Visual Preview Strip */}
+                <div className="pt-4 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-[11px] font-bold text-slate-600">
+                    รูปตัวอย่างจากระบบแยกตามเพศ (แสดงอัตโนมัติเมื่อไม่มีรูปโปรไฟล์):
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold ${
+                        selectedGender === "male"
+                          ? "bg-blue-50 border-blue-200 text-blue-800"
+                          : "bg-white border-slate-200 text-slate-500"
+                      }`}
+                    >
+                      <img src={getDefaultAvatarByGender("male")} alt="รูปตัวอย่างเพศชาย" className="w-7 h-7 rounded-full object-cover" />
+                      <span>เพศชาย</span>
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold ${
+                        selectedGender === "female"
+                          ? "bg-pink-50 border-pink-200 text-pink-800"
+                          : "bg-white border-slate-200 text-slate-500"
+                      }`}
+                    >
+                      <img src={getDefaultAvatarByGender("female")} alt="รูปตัวอย่างเพศหญิง" className="w-7 h-7 rounded-full object-cover" />
+                      <span>เพศหญิง</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                  หรือวางลิงก์รูปภาพ HTTPS URL (ทางเลือก):
+                </label>
+                <input
+                  type="url"
+                  value={customAvatarUrl}
+                  onChange={(e) => {
+                    setCustomAvatarUrl(e.target.value);
+                    if (profileSelectedFile) {
+                      if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
+                      setProfileSelectedFile(null);
+                      setProfileFilePreview(null);
+                    }
+                  }}
+                  placeholder="https://example.com/avatar.png"
+                  className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-[#A05AFF]"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingProfileAvatar}
+                className="w-full py-3 bg-gradient-to-r from-[#A05AFF] to-[#1BCFB4] text-white font-black text-sm rounded-xl shadow-md hover:opacity-95 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {isSavingProfileAvatar ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>กำลังบันทึกลง Firestore...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    <span>บันทึกรูปโปรไฟล์ลง Firestore</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Firestore Profile Pictures Gallery (แสดงรูปทั้งหมดที่มีอยู่ใน Firestore พร้อมอัปโหลดและเลือกลบ) */}
+            <div className="bg-white p-5 sm:p-6 rounded-2xl border-2 border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-[#A05AFF]" />
+                    <span>รูปภาพทั้งหมดที่มีอยู่ใน Firestore</span>
+                    <span className="text-[11px] font-extrabold bg-purple-100 text-[#A05AFF] px-2 py-0.5 rounded-lg">
+                      {allFirestoreGalleryImages.length} รูป
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {isAdmin || isStaff
+                      ? "คลิกที่รูปเพื่อเลือกใช้เป็นรูปโปรไฟล์ หรือติ๊กเลือกหลายรูปเพื่อลบออกจากฐานข้อมูล Firestore"
+                      : "คลิกที่รูปเพื่อเลือกใช้เป็นรูปโปรไฟล์ของคุณ"}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    className={`px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-[11px] font-bold rounded-xl cursor-pointer shadow-xs transition-all inline-flex items-center gap-1.5 ${
+                      isUploadingGalleryAvatars ? "opacity-60 pointer-events-none" : ""
+                    }`}
+                  >
+                    {isUploadingGalleryAvatars ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isUploadingGalleryAvatars ? "กำลังอัปโหลด..." : "อัปโหลดเข้าคลัง Firestore"}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleGalleryUploadFiles}
+                      disabled={isUploadingGalleryAvatars}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      invalidateFirestoreReadCache("profile_avatars");
+                      loadFirestoreAvatars();
+                    }}
+                    disabled={isLoadingFirestoreAvatars}
+                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1 disabled:opacity-50"
+                    title="รีเฟรชรายการรูปภาพจาก Firestore"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFirestoreAvatars ? "animate-spin" : ""}`} />
+                    <span>รีเฟรช</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Selection & Batch Delete Action Bar (Visible strictly to Level 1 & Level 2) */}
+              {(isAdmin || isStaff) && allFirestoreGalleryImages.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200/80">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedGalleryKeys.length === allFirestoreGalleryImages.length) {
+                          setSelectedGalleryKeys([]);
+                        } else {
+                          setSelectedGalleryKeys(allFirestoreGalleryImages.map((item) => item.key));
+                        }
+                      }}
+                      className="text-[11px] font-bold text-slate-700 hover:text-[#A05AFF] px-2.5 py-1 rounded-lg bg-white border border-slate-200 transition-colors cursor-pointer"
+                    >
+                      {selectedGalleryKeys.length === allFirestoreGalleryImages.length
+                        ? "ยกเลิกเลือกทั้งหมด"
+                        : "เลือกทั้งหมด"}
+                    </button>
+                    {selectedGalleryKeys.length > 0 && (
+                      <span className="text-[11px] font-bold text-[#A05AFF]">
+                        เลือกแล้ว {selectedGalleryKeys.length} รูป
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={selectedGalleryKeys.length === 0 || isDeletingGalleryAvatars}
+                    onClick={() => {
+                      const itemsToDelete = allFirestoreGalleryImages.filter((item) =>
+                        selectedGalleryKeys.includes(item.key)
+                      );
+                      if (itemsToDelete.length > 0) {
+                        setPendingDeleteGalleryItems(itemsToDelete);
+                      }
+                    }}
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border transition-all inline-flex items-center gap-1.5 ${
+                      selectedGalleryKeys.length > 0 && !isDeletingGalleryAvatars
+                        ? "bg-rose-600 hover:bg-rose-700 text-white border-rose-600 cursor-pointer shadow-xs"
+                        : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ลบรูปที่เลือก ({selectedGalleryKeys.length})</span>
                   </button>
                 </div>
               )}
 
-              {/* Google Drive Folder Banner */}
-              <div className="pt-2 border-t border-indigo-100 flex items-center justify-between gap-2 text-[11px]">
-                <div className="flex items-center gap-1.5 text-indigo-900 font-medium truncate">
-                  <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span className="truncate">โฟลเดอร์รูปภาพบน Google Drive (ทางเลือก):</span>
+              {/* Gallery Grid */}
+              {isLoadingFirestoreAvatars && allFirestoreGalleryImages.length === 0 ? (
+                <div className="py-10 flex flex-col items-center justify-center gap-2 text-slate-500 text-xs">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#A05AFF]" />
+                  <span>กำลังโหลดรูปภาพทั้งหมดจาก Firestore...</span>
                 </div>
-                <a
-                  href={GOOGLE_DRIVE_AVATAR_FOLDER_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg transition-colors shrink-0"
-                >
-                  <span>เปิด Google Drive ↗</span>
-                </a>
-              </div>
-            </div>
-
-            {/* Preset avatars vector icons grid */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] font-bold text-slate-700">
-                  เลือกไอคอนสัญลักษณ์ตัวอย่าง:
-                </label>
-              </div>
-              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2 p-2 bg-slate-50 rounded-2xl border border-slate-200">
-                {PRESET_AVATARS.map((url, idx) => {
-                  const meta = PRESET_AVATARS_META[idx] || { roleName: "ไอคอน", badgeColor: "" };
-                  const isSelected = selectedAvatar === url && !customAvatarUrl && !profileSelectedFile;
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setSelectedAvatar(url);
-                        setCustomAvatarUrl("");
-                        if (profileSelectedFile) clearSelectedFile("PROFILE");
-                      }}
-                      className={`relative rounded-xl p-1.5 flex items-center justify-center border-2 cursor-pointer transition-all hover:scale-105 ${
-                        isSelected
-                          ? "border-[#A05AFF] ring-2 ring-[#A05AFF]/40 scale-105 bg-purple-50 shadow-xs"
-                          : "border-slate-200 hover:border-slate-300 bg-white"
-                      }`}
-                      title={meta.roleName}
-                    >
-                      <img src={url} alt={`Icon ${idx + 1}`} className="w-10 h-10 object-cover rounded-full" />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-gray-600 mb-1">
-                หรือป้อน URL รูปภาพประจำตัวแบบกำหนดเอง:
-              </label>
-              <input
-                type="url"
-                value={customAvatarUrl}
-                onChange={(e) => {
-                  setCustomAvatarUrl(e.target.value);
-                  if (profileSelectedFile) clearSelectedFile("PROFILE");
-                }}
-                placeholder="https://example.com/avatar.png หรือลิงก์รูปภาพ..."
-                className="w-full bg-gray-50 border border-gray-300 text-xs text-gray-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-[#A05AFF]"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isUploadingDrive}
-              className="w-full py-3 bg-gradient-to-r from-[#A05AFF] to-[#1BCFB4] text-white font-black text-sm rounded-xl shadow-md hover:opacity-95 transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              {isUploadingDrive ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>กำลังอัปโหลดและบันทึก...</span>
-                </>
+              ) : allFirestoreGalleryImages.length === 0 ? (
+                <div className="py-10 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-2">
+                  <ImageIcon className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">
+                    ยังไม่มีรูปภาพโปรไฟล์ที่บันทึกอยู่ใน Firestore
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    กดปุ่ม &ldquo;อัปโหลดเข้าคลัง Firestore&rdquo; ด้านบน หรืออัปโหลดรูปโปรไฟล์เพื่อเริ่มสร้างคลังรูปภาพ
+                  </p>
+                </div>
               ) : (
-                <>
-                  <ImageIcon className="w-5 h-5" />
-                  <span>บันทึกการเปลี่ยนรูปโปรไฟล์</span>
-                </>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {allFirestoreGalleryImages.map((item) => {
+                    const isChecked = selectedGalleryKeys.includes(item.key);
+                    const isActiveForTarget =
+                      !profileFilePreview &&
+                      !customAvatarUrl.trim() &&
+                      selectedAvatar.trim() === item.imageUrl;
+
+                    return (
+                      <div
+                        key={item.key}
+                        className={`group relative rounded-2xl border-2 p-2 bg-white transition-all flex flex-col gap-2 ${
+                          isActiveForTarget
+                            ? "border-[#A05AFF] ring-2 ring-[#A05AFF]/20 bg-purple-50/30 shadow-sm"
+                            : isChecked
+                            ? "border-rose-400 bg-rose-50/30"
+                            : "border-slate-200 hover:border-slate-300 hover:shadow-xs"
+                        }`}
+                      >
+                        {/* Top Bar: Checkbox + Individual Delete Button (Level 1 & Level 2 only) */}
+                        {(isAdmin || isStaff) && (
+                          <div className="flex items-center justify-between gap-1">
+                            <label
+                              className="inline-flex items-center gap-1 cursor-pointer select-none"
+                              title="ติ๊กเพื่อเลือกลบรูปภาพ"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleGalleryKeySelection(item.key)}
+                                className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                              />
+                              <span className="text-[10px] font-bold text-slate-500">เลือก</span>
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteGalleryItems([item])}
+                              disabled={isDeletingGalleryAvatars}
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="ลบรูปนี้ออกจาก Firestore"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Clickable Image Thumbnail to Select as Profile Avatar */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (profileFilePreview) URL.revokeObjectURL(profileFilePreview);
+                            setProfileSelectedFile(null);
+                            setProfileFilePreview(null);
+                            setCustomAvatarUrl("");
+                            setSelectedAvatar(item.imageUrl);
+                            showNotification(
+                              "success",
+                              `เลือกรูป "${item.label}" แล้ว กด 'บันทึกรูปโปรไฟล์ลง Firestore' เพื่อใช้งาน`
+                            );
+                          }}
+                          className="relative aspect-square w-full rounded-xl overflow-hidden bg-slate-100 border border-slate-200 cursor-pointer focus:outline-none"
+                          title="คลิกเพื่อใช้รูปนี้เป็นรูปโปรไฟล์"
+                        >
+                          <img
+                            src={item.imageUrl}
+                            alt={item.label}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          />
+                          {isActiveForTarget && (
+                            <span className="absolute top-1.5 right-1.5 bg-[#A05AFF] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs inline-flex items-center gap-0.5">
+                              <Check className="w-2.5 h-2.5" />
+                              <span>เลือกอยู่</span>
+                            </span>
+                          )}
+                        </button>
+
+                        {/* Footer Info */}
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="text-[11px] font-bold text-slate-800 truncate" title={item.label}>
+                            {item.label}
+                          </div>
+                          {item.usedByNames.length > 0 ? (
+                            <div
+                              className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md truncate"
+                              title={`ใช้อยู่โดย: ${item.usedByNames.join(", ")}`}
+                            >
+                              ใช้อยู่: {item.usedByNames[0]}
+                              {item.usedByNames.length > 1 ? ` +${item.usedByNames.length - 1}` : ""}
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-400 font-medium truncate">
+                              คลังรูป Firestore
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </button>
-          </form>
-        </div>
-      )}
+            </div>
+
+            {/* In-UI Confirmation Modal for Deleting Images from Firestore (Level 1 & Level 2 only) */}
+            {(isAdmin || isStaff) && pendingDeleteGalleryItems && pendingDeleteGalleryItems.length > 0 && (
+              <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-black text-slate-900">
+                        ยืนยันการลบรูปภาพออกจาก Firestore
+                      </h4>
+                      <p className="text-xs text-slate-600 mt-1">
+                        คุณต้องการลบรูปภาพจำนวน{" "}
+                        <span className="font-black text-rose-600">{pendingDeleteGalleryItems.length}</span>{" "}
+                        รูปออกจากฐานข้อมูลกลางอย่างถาวรใช่หรือไม่?
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    {pendingDeleteGalleryItems.map((imgItem) => (
+                      <div key={imgItem.key} className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0">
+                        <img src={imgItem.imageUrl} alt={imgItem.label} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+
+                  {pendingDeleteGalleryItems.some((i) => i.usedByNames.length > 0) && (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 font-semibold">
+                      หมายเหตุ: รูปบางรูปกำลังถูกใช้งานอยู่โดย{" "}
+                      {Array.from(new Set(pendingDeleteGalleryItems.flatMap((i) => i.usedByNames))).join(", ")}{" "}
+                      เมื่อลบแล้วบัญชีดังกล่าวจะเปลี่ยนกลับไปใช้รูปตัวอย่างตามเพศอัตโนมัติ
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      disabled={isDeletingGalleryAvatars}
+                      onClick={() => setPendingDeleteGalleryItems(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeletingGalleryAvatars}
+                      onClick={handleConfirmDeleteGalleryItems}
+                      className="px-4 py-2 text-xs font-black text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"
+                    >
+                      {isDeletingGalleryAvatars ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>กำลังลบ...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>ยืนยันลบรูปออกจาก Firestore</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* TAB 2: Manage Staff & Users (Admin & Staff) */}
       {activeTab === "MANAGE_USERS" && (isAdmin || isStaff) && (
@@ -2478,23 +3096,27 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 {isAdmin
-                  ? "สามารถ เพิ่ม ลบ แก้ไข เจ้าหน้าที่ (Level 2), ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมกำหนดรูปไอคอนประจำตัว"
-                  : "สิทธิ์เจ้าหน้าที่ (Level 2) สามารถ เพิ่ม ลบ แก้ไข บัญชีผู้ใช้ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมกำหนดรูปไอคอนประจำตัว"}
+                  ? "สามารถ เพิ่ม ลบ แก้ไข เจ้าหน้าที่ (Level 2), ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมจัดการรูปโปรไฟล์บน Firestore"
+                  : "สิทธิ์เจ้าหน้าที่ (Level 2) สามารถ เพิ่ม ลบ แก้ไข บัญชีผู้ใช้ครูหอพัก (Level 3) และผู้เยี่ยมชม (Level 4) พร้อมจัดการรูปโปรไฟล์บน Firestore"}
               </p>
             </div>
 
             <button
               onClick={() => {
                 setEditingUser(null);
+                setModalSelectedFile(null);
+                if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
+                setModalFilePreview(null);
                 setFormData({
                   name: "",
                   phone: "",
+                  gender: "male",
                   roleLevel: isStaff ? 3 : 2,
                   roleCategory: isStaff ? "DORM_TEACHER" : "STAFF",
                   dormId: "",
                   dormPosition: "ครูประจำหอพัก",
                   allowedDormIds: [],
-                  avatarUrl: PRESET_AVATARS[0],
+                  avatarUrl: "",
                   password: ""
                 });
                 setIsAddUserModalOpen(true);
@@ -2540,7 +3162,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     <tr key={u.id} className="hover:bg-gray-50 transition-colors">
                       <td className="py-3 px-4 text-center">
                         <img
-                          src={u.avatarUrl || PRESET_AVATARS[0]}
+                          src={getUserAvatarUrl(u, dorms)}
                           alt={u.name}
                           className="w-10 h-10 rounded-full object-cover border-2 border-purple-200 mx-auto"
                         />
@@ -2636,15 +3258,19 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                                     return;
                                   }
                                   setEditingUser(u);
+                                  setModalSelectedFile(null);
+                                  if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
+                                  setModalFilePreview(null);
                                   setFormData({
                                     name: u.name,
                                     phone: u.phone || "",
+                                    gender: inferUserGender(u, dorms),
                                     roleLevel: u.roleLevel,
                                     roleCategory: u.roleCategory,
                                     dormId: u.dormId || "",
                                     dormPosition: u.dormPosition || "ครูประจำหอพัก",
                                     allowedDormIds: u.allowedDormIds || (u.dormId ? [u.dormId] : []),
-                                    avatarUrl: u.avatarUrl || PRESET_AVATARS[0],
+                                    avatarUrl: u.avatarUrl?.trim() ? u.avatarUrl.trim() : "",
                                     password: ""
                                   });
                                   setIsAddUserModalOpen(true);
@@ -4132,76 +4758,114 @@ git push -u origin main`);
               </div>
               )}
 
-              {/* Avatar Selector with Local File Upload */}
-              <div className="space-y-2.5">
-                <label className="block text-xs font-bold text-gray-700 flex items-center justify-between">
-                  <span>เลือกรูปไอคอนประจำตัว (Avatar):</span>
-                  <span className="text-[11px] text-[#A05AFF] font-bold">เลือกสำเร็จ</span>
-                </label>
-
-                {/* Preview & URL */}
-                <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                  <img
-                    src={formData.avatarUrl || PRESET_AVATARS[0]}
-                    alt="Current Avatar"
-                    className="w-12 h-12 rounded-full object-cover ring-2 ring-[#A05AFF]/30 border-2 border-white shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-slate-800">ตัวอย่างไอคอนที่เลือก</div>
-                    <input
-                      type="url"
-                      value={formData.avatarUrl}
-                      onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })}
-                      placeholder="หรือวาง URL รูปภาพ..."
-                      className="w-full mt-1 bg-white border border-slate-300 text-[11px] text-slate-700 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-[#A05AFF] outline-none"
-                    />
+              {/* Gender Selector & Profile Picture Box */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    เพศผู้ใช้ (ใช้แสดงรูปโปรไฟล์ตัวอย่างจากระบบเมื่อไม่มีรูปภาพ)
+                  </label>
+                  <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, gender: "male" })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        formData.gender === "male"
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:bg-white/70"
+                      }`}
+                    >
+                      ชาย (Male)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, gender: "female" })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        formData.gender === "female"
+                          ? "bg-pink-600 text-white shadow-xs"
+                          : "text-slate-600 hover:bg-white/70"
+                      }`}
+                    >
+                      หญิง (Female)
+                    </button>
                   </div>
                 </div>
 
-                {/* Upload image file from user's device */}
-                <div className="p-3 bg-gradient-to-r from-blue-50/80 via-indigo-50/80 to-purple-50/80 rounded-xl border border-indigo-100 space-y-2">
+                {/* Profile Picture Display Box inside Modal */}
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                        <CloudUpload className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold text-slate-800 truncate">เลือกรูปตัวอย่างไอคอนจากเครื่องตัวเอง</div>
-                        <div className="text-[9.5px] text-slate-500 truncate">อัปโหลดไปยัง Google Drive โฟลเดอร์เป้าหมายให้อัตโนมัติเมื่อกดบันทึก</div>
-                      </div>
-                    </div>
-
-                    <label className={`px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-[10.5px] font-bold rounded-lg cursor-pointer transition-all shrink-0 flex items-center justify-center gap-1 ${isUploadingDrive ? "opacity-60 pointer-events-none" : ""}`}>
-                      {isUploadingDrive ? (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>กำลังอัปโหลด...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Cloud className="w-3 h-3" />
-                          <span>เลือกรูปจากเครื่อง...</span>
-                        </>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleLocalFileSelect(e, "MODAL")}
-                        disabled={isUploadingDrive}
-                        className="hidden"
-                      />
-                    </label>
+                    <span className="text-xs font-bold text-slate-800">กล่องแสดงรูปโปรไฟล์ (เก็บบน Firestore)</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                      (modalFilePreview || formData.avatarUrl.trim())
+                        ? "bg-purple-100 text-purple-800"
+                        : "bg-slate-200 text-slate-700"
+                    }`}>
+                      {(modalFilePreview || formData.avatarUrl.trim())
+                        ? "มีรูปโปรไฟล์"
+                        : `ตัวอย่างระบบ (${getGenderLabel(formData.gender)})`}
+                    </span>
                   </div>
 
-                  {/* Selected File Badge */}
+                  <div className="flex items-center gap-3.5">
+                    <img
+                      src={
+                        modalFilePreview ||
+                        (formData.avatarUrl.trim()
+                          ? (sanitizeSafeImageUrl(getDirectImageUrl(formData.avatarUrl.trim()) || formData.avatarUrl.trim()) || getDefaultAvatarByGender(formData.gender))
+                          : getDefaultAvatarByGender(formData.gender))
+                      }
+                      alt="Current Avatar"
+                      className="w-16 h-16 rounded-2xl object-cover ring-2 ring-[#A05AFF]/30 border-2 border-white shadow-xs shrink-0 bg-white"
+                    />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-[11px] font-bold rounded-xl cursor-pointer transition-all inline-flex items-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{(modalFilePreview || formData.avatarUrl.trim()) ? "เปลี่ยนรูปภาพ" : "เลือกรูปจากเครื่อง"}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleLocalFileSelect(e, "MODAL")}
+                            className="hidden"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => clearSelectedFile("MODAL")}
+                          disabled={!modalFilePreview && !formData.avatarUrl.trim()}
+                          className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border inline-flex items-center gap-1 transition-all ${
+                            (modalFilePreview || formData.avatarUrl.trim())
+                              ? "bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 cursor-pointer"
+                              : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                          }`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>ลบรูป</span>
+                        </button>
+                      </div>
+
+                      <input
+                        type="url"
+                        value={modalSelectedFile ? "" : formData.avatarUrl}
+                        onChange={(e) => {
+                          if (modalSelectedFile) {
+                            if (modalFilePreview) URL.revokeObjectURL(modalFilePreview);
+                            setModalSelectedFile(null);
+                            setModalFilePreview(null);
+                          }
+                          setFormData({ ...formData, avatarUrl: e.target.value });
+                        }}
+                        placeholder="หรือวาง URL รูปภาพ HTTPS (ไม่บังคับ)..."
+                        className="w-full bg-white border border-slate-300 text-[11px] text-slate-700 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-[#A05AFF] outline-none"
+                      />
+                    </div>
+                  </div>
+
                   {modalSelectedFile && (
                     <div className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-lg border border-blue-200 text-[11px]">
                       <div className="flex items-center gap-1.5 truncate">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
                         <span className="font-semibold text-slate-700 truncate">รูปที่เลือก: {modalSelectedFile.name}</span>
-                        <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-md font-bold shrink-0">
-                          (อัปโหลดลง Drive เมื่อบันทึก)
-                        </span>
                       </div>
                       <button
                         type="button"
@@ -4213,52 +4877,6 @@ git push -u origin main`);
                       </button>
                     </div>
                   )}
-
-                  {/* Google Drive Folder Link */}
-                  <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between gap-2 text-[10px]">
-                    <div className="flex items-center gap-1 text-indigo-900 font-medium truncate">
-                      <Globe className="w-3 h-3 text-indigo-600 shrink-0" />
-                      <span className="truncate">โฟลเดอร์สำหรับเก็บรูปภาพบน Google Drive:</span>
-                    </div>
-                    <a
-                      href={GOOGLE_DRIVE_AVATAR_FOLDER_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-0.5 text-[9px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md transition-colors shrink-0"
-                    >
-                      <span>เปิด Google Drive ↗</span>
-                    </a>
-                  </div>
-                </div>
-
-                {/* Vector Preset Grid */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-slate-700">
-                      เลือกไอคอนสัญลักษณ์ตัวอย่าง:
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 p-1.5 bg-slate-50 rounded-xl border border-slate-200">
-                    {PRESET_AVATARS.map((url, idx) => {
-                      const meta = PRESET_AVATARS_META[idx] || { roleName: "ไอคอน", badgeColor: "" };
-                      const isSelected = formData.avatarUrl === url;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setFormData({ ...formData, avatarUrl: url })}
-                          className={`rounded-xl p-1 flex items-center justify-center border-2 cursor-pointer transition-all hover:scale-105 ${
-                            isSelected
-                              ? "border-[#A05AFF] ring-2 ring-[#A05AFF]/40 scale-105 bg-purple-50 shadow-xs"
-                              : "border-slate-200 bg-white"
-                          }`}
-                          title={meta.roleName}
-                        >
-                          <img src={url} alt={`Preset ${idx + 1}`} className="w-9 h-9 object-cover rounded-full" />
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
 

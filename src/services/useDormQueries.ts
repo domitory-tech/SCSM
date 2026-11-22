@@ -66,7 +66,7 @@ export function useUsersQuery(enabled: boolean = true) {
 export function useAddUserMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: addUser,
+    mutationFn: (userData: Partial<UserProfile> & { password?: string }) => addUser(userData),
     onSuccess: () => {
       recordLastDbSave();
       queryClient.invalidateQueries({ queryKey: ["users"] });
