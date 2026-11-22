@@ -9,6 +9,7 @@ import {
 import {
   getAuth,
   GoogleAuthProvider,
+  signInAnonymously,
   signInWithPopup,
   User
 } from "firebase/auth";
@@ -40,6 +41,7 @@ export async function ensureAuthReady(): Promise<void> {
 
 export type FirestoreAccessIssueCode =
   | "AUTH_REQUIRED"
+  | "ANONYMOUS_AUTH_DISABLED"
   | "UNAUTHORIZED_DOMAIN"
   | "PERMISSION_DENIED"
   | "POPUP_BLOCKED"
@@ -60,6 +62,10 @@ export function getFirestoreAccessIssue(): FirestoreAccessIssue | null {
 }
 
 export function setFirestoreAccessIssue(issue: FirestoreAccessIssue | null): void {
+  // Do not accidentally clear ANONYMOUS_AUTH_DISABLED on read queries; only clear it when auth succeeds
+  if (issue === null && currentAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED") {
+    return;
+  }
   const same =
     currentAccessIssue?.code === issue?.code &&
     currentAccessIssue?.message === issue?.message &&
@@ -90,6 +96,60 @@ export function getCurrentHostname(): string {
   return window.location.hostname || "";
 }
 
+let inFlightAnonymousSignIn: Promise<User | null> | null = null;
+
+/**
+ * Ensures the browser has a valid Firebase Auth session (Google or silent Anonymous Auth)
+ * so all authorized in-app users can write to Firestore without Google login popups.
+ */
+export async function ensureFirebaseAuthSession(): Promise<User | null> {
+  await ensureAuthReady();
+  if (auth.currentUser) {
+    if (currentAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" || currentAccessIssue?.code === "AUTH_REQUIRED") {
+      currentAccessIssue = null;
+      accessIssueListeners.forEach((l) => {
+        try { l(null); } catch {}
+      });
+    }
+    return auth.currentUser;
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return null;
+  }
+
+  if (inFlightAnonymousSignIn) {
+    return inFlightAnonymousSignIn;
+  }
+
+  inFlightAnonymousSignIn = (async () => {
+    try {
+      const cred = await withTimeout(signInAnonymously(auth), 8000);
+      currentAccessIssue = null;
+      accessIssueListeners.forEach((l) => {
+        try { l(null); } catch {}
+      });
+      return cred.user;
+    } catch (err: any) {
+      const code = String(err?.code || "").toLowerCase();
+      if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") {
+        setFirestoreAccessIssue({
+          code: "ANONYMOUS_AUTH_DISABLED",
+          message: `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) กรุณาเปิดที่ Authentication -> Sign-in method -> Anonymous`,
+          hostname: getCurrentHostname()
+        });
+      } else {
+        console.warn("Silent Firebase Anonymous sign-in skipped:", err?.message || err);
+      }
+      return null;
+    } finally {
+      inFlightAnonymousSignIn = null;
+    }
+  })();
+
+  return inFlightAnonymousSignIn;
+}
+
 export function classifyFirestoreError(
   error: unknown,
   path: string | null = null,
@@ -114,13 +174,22 @@ export function classifyFirestoreError(
       return;
     }
 
-    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    if (!auth.currentUser) {
+      if (currentAccessIssue?.code !== "ANONYMOUS_AUTH_DISABLED") {
+        setFirestoreAccessIssue({
+          code: "AUTH_REQUIRED",
+          message: `ยังไม่มีเซสชันยืนยันตัวตนกับ Firebase สำหรับเขียนข้อมูล (${path || "firestore"})`,
+          hostname,
+          path: path || undefined
+        });
+      }
       return;
     }
 
+    const actorLabel = auth.currentUser.email || (auth.currentUser.isAnonymous ? "Anonymous Auth" : auth.currentUser.uid);
     setFirestoreAccessIssue({
       code: "PERMISSION_DENIED",
-      message: `บัญชี ${auth.currentUser.email || ""} ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้ (${path || "firestore"})`,
+      message: `เซสชัน (${actorLabel}) ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้ (${path || "firestore"})`,
       hostname,
       path: path || undefined
     });
@@ -154,7 +223,10 @@ export async function signInWithGoogleAndRefresh(): Promise<User> {
       err.code = "auth/email-not-verified";
       throw err;
     }
-    setFirestoreAccessIssue(null);
+    currentAccessIssue = null;
+    accessIssueListeners.forEach((l) => {
+      try { l(null); } catch {}
+    });
     return result.user;
   } catch (err: any) {
     const code = String(err?.code || "");
@@ -203,7 +275,7 @@ export async function signInWithGoogleAndRefresh(): Promise<User> {
 
 async function testConnection() {
   try {
-    await ensureAuthReady();
+    await ensureFirebaseAuthSession();
     await getDocFromServer(doc(db, "test", "connection"));
   } catch (error) {
     if (error instanceof Error && error.message.includes("the client is offline")) {
@@ -322,7 +394,7 @@ export async function checkFirebaseConnection(): Promise<CloudConnectionStatus> 
   }
 
   try {
-    await ensureAuthReady();
+    await ensureFirebaseAuthSession();
     const testDocRef = doc(db, "system_settings", "config");
     const snap = await withTimeout(getDocFromServer(testDocRef), 8000);
 
@@ -378,6 +450,7 @@ export async function commitChunkedSetDocs(
   merge: boolean = true
 ) {
   if (!items || items.length === 0) return 0;
+  await ensureFirebaseAuthSession();
   const CHUNK_SIZE = 400;
   let count = 0;
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
@@ -408,6 +481,7 @@ export async function commitChunkedDeleteDocs(
   docIds: string[]
 ) {
   if (!docIds || docIds.length === 0) return 0;
+  await ensureFirebaseAuthSession();
   const CHUNK_SIZE = 400;
   let count = 0;
   for (let i = 0; i < docIds.length; i += CHUNK_SIZE) {
@@ -418,7 +492,11 @@ export async function commitChunkedDeleteDocs(
       batch.delete(docRef);
       count++;
     });
-    await batch.commit();
+    try {
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, collectionName, true);
+    }
   }
   return count;
 }

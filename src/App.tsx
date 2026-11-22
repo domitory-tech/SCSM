@@ -21,10 +21,13 @@ import { SpecialStatusManagerView } from "./components/attendance/SpecialStatusM
 import { FingerprintCompareView } from "./components/attendance/FingerprintCompareView";
 import { MaintenancePopupModal } from "./components/common/MaintenancePopupModal";
 import { sanitizeUserForClient, stripDangerousKeys } from "./utils/security";
-import { Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, WifiOff, X } from "lucide-react";
 import {
   auth,
   checkFirebaseConnection,
+  ensureFirebaseAuthSession,
+  FIREBASE_PROJECT_ID,
+  FirestoreAccessIssue,
   subscribeFirestoreAccessIssue
 } from "./lib/firebase";
 import { invalidateFirestoreReadCache } from "./services/api";
@@ -74,6 +77,8 @@ function MainAppContent() {
     typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "checking"
   );
   const [isRetryingConnection, setIsRetryingConnection] = useState<boolean>(false);
+  const [firestoreAccessIssue, setFirestoreAccessIssueState] = useState<FirestoreAccessIssue | null>(null);
+  const [isAuthBannerDismissed, setIsAuthBannerDismissed] = useState<boolean>(false);
 
   const { data: dbSettings } = useSystemSettingsQuery(dbConnectionState === "online");
   const updateSystemSettingsMutation = useUpdateSystemSettingsMutation();
@@ -139,6 +144,7 @@ function MainAppContent() {
       setIsRetryingConnection(true);
     }
     try {
+      await ensureFirebaseAuthSession();
       const status = await checkFirebaseConnection();
       if (status.isConnected) {
         if (status.settings) {
@@ -179,6 +185,10 @@ function MainAppContent() {
     window.addEventListener("offline", handleOffline);
 
     const unsubIssue = subscribeFirestoreAccessIssue((issue) => {
+      setFirestoreAccessIssueState(issue);
+      if (issue?.code === "ANONYMOUS_AUTH_DISABLED") {
+        setIsAuthBannerDismissed(false);
+      }
       if (issue?.code === "OFFLINE") {
         setDbConnectionState("offline");
       }
@@ -186,7 +196,7 @@ function MainAppContent() {
 
     let lastUid: string | null | undefined = undefined;
     const unsubAuth = auth.onAuthStateChanged((fbUser) => {
-      const nextUid = fbUser?.emailVerified ? fbUser.uid : null;
+      const nextUid = fbUser ? fbUser.uid : null;
       if ((lastUid !== undefined && lastUid !== nextUid) || (lastUid === undefined && nextUid !== null)) {
         invalidateFirestoreReadCache();
         queryClient.invalidateQueries();
@@ -499,6 +509,47 @@ function MainAppContent() {
                   <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
                   <span>{isRetryingConnection ? "กำลังตรวจสอบ..." : "ตรวจสอบการเชื่อมต่ออีกครั้ง"}</span>
                 </button>
+              </div>
+            </div>
+          )}
+          {dbConnectionState !== "offline" &&
+            firestoreAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" &&
+            !isAuthBannerDismissed && (
+            <div className="mb-5 rounded-2xl border-2 border-rose-300 bg-gradient-to-r from-rose-50 via-white to-amber-50 p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <h3 className="text-sm font-extrabold text-rose-950">
+                      ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console
+                    </h3>
+                    <p className="text-xs text-rose-900 leading-relaxed">
+                      เพื่อให้ครูและเจ้าหน้าที่ทุกคนบันทึกข้อมูล/เช็คยอดลง Firestore ได้ทันทีโดยไม่ต้องมีป๊อปอัป Google กรุณาเข้าไปที่{" "}
+                      <span className="font-bold">Firebase Console ({FIREBASE_PROJECT_ID}) &rarr; Authentication &rarr; Sign-in method &rarr; Anonymous &rarr; เปิดใช้งาน (Enable)</span>
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                  <button
+                    type="button"
+                    onClick={() => verifyDatabaseConnectivity(true)}
+                    disabled={isRetryingConnection}
+                    className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-2xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? "animate-spin" : ""}`} />
+                    <span>{isRetryingConnection ? "กำลังเชื่อมต่อ..." : "ลองเชื่อมต่ออีกครั้ง"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAuthBannerDismissed(true)}
+                    className="p-2 rounded-xl text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
+                    title="ปิดแถบแจ้งเตือนชั่วคราว"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           )}

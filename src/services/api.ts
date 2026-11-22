@@ -16,6 +16,9 @@ import {
   db,
   auth,
   ensureAuthReady,
+  ensureFirebaseAuthSession,
+  getFirestoreAccessIssue,
+  FIREBASE_PROJECT_ID,
   classifyFirestoreError,
   setFirestoreAccessIssue,
   commitChunkedSetDocs,
@@ -131,6 +134,60 @@ export function invalidateFirestoreReadCache(collectionName?: string): void {
   inFlightCollectionReads.delete(collectionName);
 }
 
+function isOfflineNetworkError(err: any): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  const code = String(err?.code || "").toLowerCase();
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    code.includes("unavailable") ||
+    msg.includes("the client is offline") ||
+    msg.includes("network") ||
+    msg.includes("timeout after")
+  );
+}
+
+function buildFirestoreWriteFailureMessage(err: any): string {
+  const accessIssue = getFirestoreAccessIssue();
+  if (accessIssue?.code === "ANONYMOUS_AUTH_DISABLED") {
+    return `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) — กรุณาไปที่ Authentication -> Sign-in method -> Anonymous -> Enable`;
+  }
+  const code = String(err?.code || "").toLowerCase();
+  const msg = String(err?.message || err || "");
+  if (
+    code.includes("permission-denied") ||
+    code.includes("unauthenticated") ||
+    msg.toLowerCase().includes("missing or insufficient permissions")
+  ) {
+    return "ไม่สามารถบันทึกข้อมูลลงฐานข้อมูล Firestore ได้ (ยังไม่ได้เปิด Anonymous Authentication ใน Firebase Console หรือไม่มีสิทธิ์เขียนข้อมูล)";
+  }
+  return `ไม่สามารถบันทึกข้อมูลลงฐานข้อมูล Firestore ได้: ${msg}`;
+}
+
+async function requireCloudAuthSessionForWrite(): Promise<void> {
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+    throw new Error(buildFirestoreWriteFailureMessage(new Error("unauthenticated")));
+  }
+}
+
+async function ensureDormExistsInCloud(dormId: string): Promise<void> {
+  const cleanId = sanitizeIdForRule(dormId, "dorm");
+  if (!cleanId) return;
+  try {
+    const dormRef = doc(db, "dorms", cleanId);
+    const snap = await getDoc(dormRef);
+    if (snap.exists()) return;
+    const cachedDorms = getLocalCache<Dormitory[]>(CACHE_KEYS.DORMS) || [];
+    const matched = cachedDorms.find((d) => d.id === cleanId);
+    const payload = sanitizeDormForCloud(
+      matched || { id: cleanId, name: cleanId, type: "male" }
+    );
+    await setDoc(dormRef, cleanFirestoreData(payload), { merge: true });
+  } catch (err) {
+    console.warn(`Could not ensure dorm ${cleanId} in Firestore:`, err);
+  }
+}
+
 async function readCollectionCached(
   collectionName: string,
   timeoutMs: number = 10000
@@ -147,7 +204,7 @@ async function readCollectionCached(
 
   const promise = (async () => {
     try {
-      await ensureAuthReady();
+      await ensureFirebaseAuthSession();
       const snap = await withTimeout(getDocs(collection(db, collectionName)), timeoutMs);
       const items = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
       recentCollectionReads.set(collectionName, { timestamp: Date.now(), items });
@@ -242,10 +299,15 @@ export async function addDorm(data: {
   teachers?: DormTeacher[];
 }) {
   const newId = `dorm-${Date.now()}`;
-  const newDorm: Dormitory = { id: newId, ...data };
+  const newDorm = sanitizeDormForCloud({ id: newId, ...data });
   try {
-    await setDoc(doc(db, "dorms", newId), cleanFirestoreData(newDorm));
+    await requireCloudAuthSessionForWrite();
+    await setDoc(doc(db, "dorms", newDorm.id), cleanFirestoreData(newDorm));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.CREATE, `dorms/${newDorm.id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Saved dorm offline locally:", e);
   }
   updateLocalCacheList(CACHE_KEYS.DORMS, newDorm, "UPSERT");
@@ -259,12 +321,19 @@ export async function updateDorm(
   const docRef = doc(db, "dorms", id);
   let updatedData: any = { ...data, id };
   try {
+    await requireCloudAuthSessionForWrite();
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      updatedData = { ...snap.data(), ...data };
+      updatedData = { ...snap.data(), ...data, id };
     }
-    await setDoc(docRef, cleanFirestoreData(updatedData), { merge: true });
+    const sanitized = sanitizeDormForCloud(updatedData);
+    updatedData = sanitized;
+    await setDoc(docRef, cleanFirestoreData(sanitized), { merge: true });
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.UPDATE, `dorms/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Updated dorm offline locally:", e);
   }
   updateLocalCacheList(CACHE_KEYS.DORMS, updatedData, "UPSERT");
@@ -273,8 +342,13 @@ export async function updateDorm(
 
 export async function deleteDorm(id: string) {
   try {
+    await requireCloudAuthSessionForWrite();
     await deleteDoc(doc(db, "dorms", id));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.DELETE, `dorms/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Deleted dorm offline locally:", e);
   }
   updateLocalCacheList(CACHE_KEYS.DORMS, { id } as any, "DELETE");
@@ -367,7 +441,7 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       ? String(s.dormBed).trim()
       : ((s.bed !== undefined && s.bed !== null) ? String(s.bed).trim() : "");
     const formattedSid = formatStudentId(s.studentId) || generateDefault5DigitStudentId(idx + 1);
-    const newStudent: Student = {
+    const newStudent = sanitizeStudentForCloud({
       id,
       studentId: formattedSid,
       no: s.no || idx + 1,
@@ -382,14 +456,22 @@ export async function importStudents(dormId: string, students: Partial<Student>[
       dormBed: bedVal,
       bed: bedVal,
       gender: (s.gender as any) || "male"
-    };
+    }, idx);
     createdStudents.push(newStudent);
   });
 
   let count = 0;
   try {
+    await requireCloudAuthSessionForWrite();
+    const dormIds = Array.from(new Set(createdStudents.map((s) => s.dormId)));
+    for (const dId of dormIds) {
+      await ensureDormExistsInCloud(dId);
+    }
     count = await commitChunkedSetDocs("students", createdStudents);
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Imported students offline locally:", e);
     count = createdStudents.length;
   }
@@ -410,7 +492,7 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
     ? String(studentData.dormBed).trim()
     : ((studentData.bed !== undefined && studentData.bed !== null) ? String(studentData.bed).trim() : "");
   const formattedSid = formatStudentId(studentData.studentId) || generateDefault5DigitStudentId();
-  const newStudent: Student = {
+  const newStudent = sanitizeStudentForCloud({
     id,
     studentId: formattedSid,
     no: studentData.no || 1,
@@ -425,11 +507,17 @@ export async function addStudent(studentData: Partial<Student>): Promise<Student
     dormBed: bedVal,
     bed: bedVal,
     gender: studentData.gender || "male"
-  };
+  }, 0);
 
   try {
-    await setDoc(doc(db, "students", id), cleanFirestoreData(newStudent));
+    await requireCloudAuthSessionForWrite();
+    await ensureDormExistsInCloud(newStudent.dormId);
+    await setDoc(doc(db, "students", newStudent.id), cleanFirestoreData(newStudent));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.CREATE, `students/${newStudent.id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Saved student offline locally:", e);
   }
 
@@ -454,12 +542,20 @@ export async function updateStudent(id: string, studentData: Partial<Student>): 
     updated.bed = bedVal;
   }
   try {
+    await requireCloudAuthSessionForWrite();
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      updated = { ...snap.data(), ...updated };
+      updated = { ...snap.data(), ...updated, id };
     }
-    await setDoc(docRef, cleanFirestoreData(updated), { merge: true });
+    const sanitized = sanitizeStudentForCloud(updated, 0);
+    updated = sanitized;
+    await ensureDormExistsInCloud(sanitized.dormId);
+    await setDoc(docRef, cleanFirestoreData(sanitized), { merge: true });
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.UPDATE, `students/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Updated student offline locally:", e);
   }
 
@@ -469,8 +565,13 @@ export async function updateStudent(id: string, studentData: Partial<Student>): 
 
 export async function deleteStudent(id: string) {
   try {
+    await requireCloudAuthSessionForWrite();
     await deleteDoc(doc(db, "students", id));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.DELETE, `students/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Deleted student offline locally:", e);
   }
 
@@ -480,8 +581,12 @@ export async function deleteStudent(id: string) {
 
 export async function batchDeleteStudents(ids: string[]) {
   try {
+    await requireCloudAuthSessionForWrite();
     await commitChunkedDeleteDocs("students", ids);
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Batch deleted students offline locally:", e);
   }
 
@@ -503,13 +608,13 @@ export async function batchTransferStudentsDorm(
   const idSet = new Set(studentIds);
   const updatedStudents: Student[] = [];
 
-  const updatedCache = cached.map((s) => {
+  const updatedCache = cached.map((s, idx) => {
     if (idSet.has(s.id)) {
-      const updated: Student = {
+      const updated = sanitizeStudentForCloud({
         ...s,
         dormId: targetDormId,
         ...(targetDormRoom ? { dormRoom: targetDormRoom } : {})
-      };
+      }, idx);
       updatedStudents.push(updated);
       return updated;
     }
@@ -517,8 +622,13 @@ export async function batchTransferStudentsDorm(
   });
 
   try {
+    await requireCloudAuthSessionForWrite();
+    await ensureDormExistsInCloud(targetDormId);
     await commitChunkedSetDocs("students", updatedStudents);
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Batch transferred students offline locally:", e);
   }
 
@@ -552,7 +662,8 @@ async function syncSingleUserSplitDocs(
   userPayload: Record<string, any>,
   hashMap: Record<string, string>
 ): Promise<void> {
-  if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser) return;
   const dirPayload = sanitizeUserDirectoryForCloud(userPayload, hashMap);
   const authPayload = sanitizeUserAuthForCloud(userPayload, hashMap);
   const id = dirPayload.id;
@@ -567,7 +678,8 @@ async function ensureUserSplitCollectionsSynced(
   hashMap: Record<string, string>
 ): Promise<void> {
   if (hasSyncedUserSplitThisSession) return;
-  if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser) return;
   hasSyncedUserSplitThisSession = true;
   try {
     const dirSnap = await withTimeout(getDocsFromServer(collection(db, "user_directory")), 8000);
@@ -917,10 +1029,16 @@ export async function setupFirstTimePassword(userId: string, newPassword: string
   const hashMapAfter = getAuthHashMap();
   const fullUserPayload = sanitizeUserForCloud({ ...targetUser, hasPassword: true, passwordHash }, hashMapAfter);
   try {
-    await ensureAuthReady();
-    await setDoc(doc(db, "users", userId), cleanFirestoreData(fullUserPayload));
+    await requireCloudAuthSessionForWrite();
     await syncSingleUserSplitDocs(fullUserPayload, hashMapAfter);
+    if (auth.currentUser?.emailVerified) {
+      await setDoc(doc(db, "users", userId), cleanFirestoreData(fullUserPayload)).catch(() => {});
+    }
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.WRITE, `user_auth/${userId}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Saved initial password hash offline locally:", e);
   }
 
@@ -971,13 +1089,15 @@ export async function addUser(
   );
 
   try {
-    await ensureAuthReady();
-    await setDoc(doc(db, "users", id), cleanFirestoreData(dbPayload));
+    await requireCloudAuthSessionForWrite();
     await syncSingleUserSplitDocs(dbPayload, hashMap);
+    if (auth.currentUser?.emailVerified) {
+      await setDoc(doc(db, "users", dbPayload.id), cleanFirestoreData(dbPayload)).catch(() => {});
+    }
   } catch (e: any) {
-    if (options?.requireCloudSync) {
-      handleFirestoreError(e, OperationType.CREATE, `users/${id}`, false);
-      throw e;
+    if (options?.requireCloudSync || !isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.CREATE, `user_directory/${dbPayload.id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
     }
     console.warn("Saved user offline locally:", e);
   }
@@ -995,7 +1115,6 @@ export async function updateUser(
   options?: { requireCloudSync?: boolean; baseUser?: UserProfile }
 ): Promise<UserProfile> {
   const cleanInput = stripDangerousKeys(userData);
-  const docRef = doc(db, "users", id);
   const rawPassword = typeof cleanInput.password === "string" ? cleanInput.password.trim() : "";
 
   if (rawPassword && !isValidPasswordStrength(rawPassword)) {
@@ -1046,11 +1165,21 @@ export async function updateUser(
   );
 
   try {
-    await ensureAuthReady();
-    const snap = await getDoc(docRef);
-    const baseData = snap.exists()
-      ? { ...(fallbackBase || {}), ...snap.data() }
-      : (fallbackBase || {});
+    await requireCloudAuthSessionForWrite();
+    let existingCloudData: Record<string, any> = {};
+    if (auth.currentUser?.emailVerified) {
+      try {
+        const snap = await getDoc(doc(db, "users", id));
+        if (snap.exists()) existingCloudData = snap.data();
+      } catch {}
+    } else {
+      try {
+        const dirSnap = await getDoc(doc(db, "user_directory", id));
+        if (dirSnap.exists()) existingCloudData = dirSnap.data();
+      } catch {}
+    }
+
+    const baseData = { ...(fallbackBase || {}), ...existingCloudData };
     const rawMerged: Record<string, any> = { ...baseData, ...dbUpdate, id };
     delete rawMerged.password;
     if (cleanInput.gender === undefined && rawMerged.gender !== "male" && rawMerged.gender !== "female") {
@@ -1058,12 +1187,14 @@ export async function updateUser(
     }
     const latestHashMap = getAuthHashMap();
     merged = sanitizeUserForCloud(rawMerged, latestHashMap);
-    await setDoc(docRef, cleanFirestoreData(merged));
     await syncSingleUserSplitDocs(merged, latestHashMap);
+    if (auth.currentUser?.emailVerified) {
+      await setDoc(doc(db, "users", id), cleanFirestoreData(merged)).catch(() => {});
+    }
   } catch (e: any) {
-    if (options?.requireCloudSync) {
-      handleFirestoreError(e, OperationType.WRITE, `users/${id}`, false);
-      throw e;
+    if (options?.requireCloudSync || !isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.WRITE, `user_directory/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
     }
     console.warn("Updated user offline locally:", e);
   }
@@ -1077,13 +1208,19 @@ export async function updateUser(
 
 export async function deleteUser(id: string) {
   try {
-    await ensureAuthReady();
-    await Promise.allSettled([
-      deleteDoc(doc(db, "users", id)),
+    await requireCloudAuthSessionForWrite();
+    await Promise.all([
       deleteDoc(doc(db, "user_directory", id)),
       deleteDoc(doc(db, "user_auth", id))
     ]);
+    if (auth.currentUser?.emailVerified) {
+      await deleteDoc(doc(db, "users", id)).catch(() => {});
+    }
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.DELETE, `user_directory/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Deleted user offline locally:", e);
   }
 
@@ -1121,14 +1258,17 @@ export async function changeUserPassword(
 
   const cachedUsers = getLocalCache<UserProfile[]>(CACHE_KEYS.USERS) || [];
   const existingUser = cachedUsers.find((u) => u.id === id) || DEFAULT_SYSTEM_USERS.find((u) => u.id === id);
-  const docRef = doc(db, "users", id);
   try {
-    await ensureAuthReady();
+    await requireCloudAuthSessionForWrite();
     let baseRecord: Record<string, any> | undefined = existingUser ? { ...existingUser } : undefined;
     if (!baseRecord) {
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        baseRecord = { id, ...snap.data() };
+      if (auth.currentUser?.emailVerified) {
+        const snap = await getDoc(doc(db, "users", id)).catch(() => null);
+        if (snap?.exists()) baseRecord = { id, ...snap.data() };
+      }
+      if (!baseRecord) {
+        const dirSnap = await getDoc(doc(db, "user_directory", id)).catch(() => null);
+        if (dirSnap?.exists()) baseRecord = { id, ...dirSnap.data() };
       }
     }
     const latestHashMap = getAuthHashMap();
@@ -1136,9 +1276,15 @@ export async function changeUserPassword(
       { ...(baseRecord || { id }), id, hasPassword: true, passwordHash },
       latestHashMap
     );
-    await setDoc(docRef, cleanFirestoreData(fullPayload));
     await syncSingleUserSplitDocs(fullPayload, latestHashMap);
+    if (auth.currentUser?.emailVerified) {
+      await setDoc(doc(db, "users", id), cleanFirestoreData(fullPayload)).catch(() => {});
+    }
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.WRITE, `user_auth/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Changed password offline locally:", e);
   }
   const idx = cachedUsers.findIndex((u) => u.id === id);
@@ -1205,9 +1351,9 @@ export async function saveProfileAvatarToLibrary(input: {
     throw new Error("ขนาดรูปภาพใหญ่เกินขีดจำกัดของ Firestore กรุณาเลือกรูปขนาดเล็กลง");
   }
 
-  await ensureAuthReady();
-  if (!auth.currentUser || !auth.currentUser.emailVerified) {
-    throw new Error("AUTH_REQUIRED: กรุณาเชื่อมต่อบัญชี Google ก่อนบันทึกรูปภาพลง Firestore");
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser) {
+    throw new Error(buildFirestoreWriteFailureMessage(new Error("unauthenticated")));
   }
 
   // Check if an identical image already exists in Firestore library
@@ -1228,7 +1374,7 @@ export async function saveProfileAvatarToLibrary(input: {
     imageUrl: safeUrl,
     ...(input.label?.trim() ? { label: input.label.trim().slice(0, 120) } : {}),
     ...(input.uploadedBy?.trim() ? { uploadedBy: input.uploadedBy.trim().slice(0, 120) } : {}),
-    ownerUid: String(auth.currentUser.uid).slice(0, 128),
+    ownerUid: String(fbUser.uid).slice(0, 128),
     uploadedAt: new Date().toISOString().slice(0, 64)
   };
 
@@ -1236,7 +1382,7 @@ export async function saveProfileAvatarToLibrary(input: {
     await setDoc(doc(db, "profile_avatars", id), cleanFirestoreData(payload));
   } catch (e: any) {
     handleFirestoreError(e, OperationType.CREATE, `profile_avatars/${id}`, false);
-    throw e;
+    throw new Error(buildFirestoreWriteFailureMessage(e));
   }
 
   updateLocalCacheList(CACHE_KEYS.PROFILE_AVATARS, payload, "UPSERT");
@@ -1247,9 +1393,9 @@ export async function deleteProfileAvatarsFromLibrary(
   targets: Array<{ id?: string; imageUrl: string }>,
   knownUsers: UserProfile[] = []
 ): Promise<{ deletedDocs: number; clearedUsers: number }> {
-  await ensureAuthReady();
-  if (!auth.currentUser || !auth.currentUser.emailVerified) {
-    throw new Error("AUTH_REQUIRED: กรุณาเชื่อมต่อบัญชี Google ก่อนลบรูปภาพออกจาก Firestore");
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser) {
+    throw new Error(buildFirestoreWriteFailureMessage(new Error("unauthenticated")));
   }
 
   const targetIds = Array.from(
@@ -1313,6 +1459,8 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
     notices: 0
   };
 
+  await ensureFirebaseAuthSession();
+
   // 1. Delete Students
   if (target === "ALL" || target === "STUDENTS") {
     try {
@@ -1322,6 +1470,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
         deletedCounts.students = await commitChunkedDeleteDocs("students", ids);
       }
     } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
       console.warn("Cleared students offline:", e);
     }
     setLocalCache(CACHE_KEYS.STUDENTS, []);
@@ -1336,6 +1485,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
         deletedCounts.dorms = await commitChunkedDeleteDocs("dorms", ids);
       }
     } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
       console.warn("Cleared dorms offline:", e);
     }
     setLocalCache(CACHE_KEYS.DORMS, []);
@@ -1344,7 +1494,8 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
   // 3. Delete Users (and split collections user_directory / user_auth)
   if (target === "ALL" || target === "USERS") {
     try {
-      const snap = await getDocs(collection(db, "users"));
+      const sourceCol = auth.currentUser?.emailVerified ? "users" : "user_directory";
+      const snap = await getDocs(collection(db, sourceCol));
       let docsToDelete = snap.docs;
       if (keepAdminAccount) {
         docsToDelete = docsToDelete.filter((d) => {
@@ -1354,13 +1505,15 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
       }
       const ids = docsToDelete.map((d) => d.id);
       if (ids.length > 0) {
-        deletedCounts.users = await commitChunkedDeleteDocs("users", ids);
-        await Promise.allSettled([
+        const [, , usersDeleted] = await Promise.all([
           commitChunkedDeleteDocs("user_directory", ids),
-          commitChunkedDeleteDocs("user_auth", ids)
+          commitChunkedDeleteDocs("user_auth", ids),
+          auth.currentUser?.emailVerified ? commitChunkedDeleteDocs("users", ids).catch(() => 0) : Promise.resolve(0)
         ]);
+        deletedCounts.users = Math.max(ids.length, usersDeleted);
       }
     } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
       console.warn("Cleared users offline:", e);
     }
     if (!keepAdminAccount) {
@@ -1385,6 +1538,7 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
         deletedCounts.notices = await commitChunkedDeleteDocs("notices", notIds);
       }
     } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
       console.warn("Cleared attendance & notices offline:", e);
     }
     setLocalCache(CACHE_KEYS.ATTENDANCE, []);
@@ -1402,7 +1556,10 @@ export async function deleteSampleData(options: DeleteSampleDataOptions = { targ
 }
 
 export async function clearDatabase() {
-  const collections = ["dorms", "students", "users", "user_directory", "notices", "attendance"];
+  await ensureFirebaseAuthSession();
+  const collections = auth.currentUser?.emailVerified
+    ? ["attendance", "notices", "students", "users", "user_directory", "dorms"]
+    : ["attendance", "notices", "students", "user_directory", "dorms"];
   let totalDeleted = 0;
   for (const colName of collections) {
     try {
@@ -1410,11 +1567,14 @@ export async function clearDatabase() {
       const ids = snap.docs.map((d) => d.id);
       if (ids.length > 0) {
         totalDeleted += await commitChunkedDeleteDocs(colName, ids);
-        if (colName === "users") {
+        if (colName === "users" || colName === "user_directory") {
           await commitChunkedDeleteDocs("user_auth", ids).catch(() => {});
         }
       }
     } catch (e) {
+      if (!isOfflineNetworkError(e)) {
+        throw new Error(buildFirestoreWriteFailureMessage(e));
+      }
       console.warn(`Could not clear ${colName} in primary database (offline):`, e);
     }
   }
@@ -1455,6 +1615,7 @@ export async function clearAttendanceDatabase(payload: {
   };
 
   try {
+    await requireCloudAuthSessionForWrite();
     const snap = await getDocs(collection(db, "attendance"));
     const idsToDelete: string[] = [];
     snap.docs.forEach((d) => {
@@ -1484,6 +1645,9 @@ export async function clearAttendanceDatabase(payload: {
       }
     }
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Cleared attendance database offline locally:", e);
   }
 
@@ -1547,6 +1711,7 @@ export async function exportAttendanceAndNoticesDatabase(payload: {
   let allNotices: Notice[] = [];
 
   try {
+    await ensureFirebaseAuthSession();
     const [attSnap, noticesSnap] = await Promise.all([
       getDocs(collection(db, "attendance")),
       includeNotices ? getDocs(collection(db, "notices")) : Promise.resolve(null)
@@ -1620,13 +1785,21 @@ export async function restoreAttendanceAndNoticesDatabase(payload: {
     return false;
   };
 
-  const attendanceToRestore = rawAttendance.filter((r) => {
-    const matchDate = isMatchingDate(r.date);
-    const matchDorm = !dormId || dormId === "ALL" || r.dormId === dormId;
-    return matchDate && matchDorm;
-  });
+  const attendanceToRestore = rawAttendance
+    .filter((r) => {
+      const matchDate = isMatchingDate(r.date);
+      const matchDorm = !dormId || dormId === "ALL" || r.dormId === dormId;
+      return matchDate && matchDorm;
+    })
+    .map((r) => sanitizeAttendanceForCloud(r))
+    .filter((r): r is DailyAttendance => Boolean(r));
 
-  const noticesToRestore = rawNotices.filter((n) => isMatchingDate(n.date));
+  const noticesToRestore = rawNotices
+    .filter((n) => isMatchingDate(n.date))
+    .map((n) => sanitizeNoticeForCloud(n))
+    .filter((n): n is Notice => Boolean(n));
+
+  await requireCloudAuthSessionForWrite();
 
   // If strategy is REPLACE, first delete existing records in target scope
   if (restoreStrategy === "REPLACE") {
@@ -1646,8 +1819,15 @@ export async function restoreAttendanceAndNoticesDatabase(payload: {
 
   if (attendanceToRestore.length > 0) {
     try {
-      restoredAttendanceCount = await commitChunkedSetDocs("attendance", attendanceToRestore);
+      const dormIds = Array.from(new Set(attendanceToRestore.map((a) => a.dormId).filter(Boolean)));
+      for (const dId of dormIds) {
+        await ensureDormExistsInCloud(dId);
+      }
+      restoredAttendanceCount = await commitChunkedSetDocs("attendance", attendanceToRestore, "id", false);
     } catch (e) {
+      if (!isOfflineNetworkError(e)) {
+        throw new Error(buildFirestoreWriteFailureMessage(e));
+      }
       console.warn("Restored attendance offline:", e);
     }
 
@@ -1661,8 +1841,11 @@ export async function restoreAttendanceAndNoticesDatabase(payload: {
 
   if (noticesToRestore.length > 0) {
     try {
-      restoredNoticesCount = await commitChunkedSetDocs("notices", noticesToRestore);
+      restoredNoticesCount = await commitChunkedSetDocs("notices", noticesToRestore, "id", false);
     } catch (e) {
+      if (!isOfflineNetworkError(e)) {
+        throw new Error(buildFirestoreWriteFailureMessage(e));
+      }
       console.warn("Restored notices offline:", e);
     }
 
@@ -1689,6 +1872,7 @@ export async function clearStudentsDatabase(payload: {
   dormId?: string;
 }) {
   try {
+    await requireCloudAuthSessionForWrite();
     const snap = await getDocs(collection(db, "students"));
     const idsToDelete: string[] = [];
     snap.docs.forEach((d) => {
@@ -1706,6 +1890,9 @@ export async function clearStudentsDatabase(payload: {
       await commitChunkedDeleteDocs("students", idsToDelete);
     }
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Cleared students database offline locally:", e);
   }
 
@@ -1724,10 +1911,12 @@ export async function clearStudentsDatabase(payload: {
 
 export async function exportDatabase() {
   try {
+    await ensureFirebaseAuthSession();
+    const usersColName = auth.currentUser?.emailVerified ? "users" : "user_directory";
     const [dormsSnap, studentsSnap, usersSnap, noticesSnap, attSnap, sysSnap] = await Promise.all([
       getDocs(collection(db, "dorms")),
       getDocs(collection(db, "students")),
-      getDocs(collection(db, "users")),
+      getDocs(collection(db, usersColName)),
       getDocs(collection(db, "notices")),
       getDocs(collection(db, "attendance")),
       getDoc(doc(db, "system_settings", "config"))
@@ -1775,6 +1964,7 @@ export async function restoreDatabase(rawData: any) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("รูปแบบไฟล์สำรองฐานข้อมูลไม่ถูกต้อง");
   }
+  await ensureFirebaseAuthSession();
   let restoredCount = 0;
 
   const rawDorms = Array.isArray(data.dorms)
@@ -1787,14 +1977,24 @@ export async function restoreDatabase(rawData: any) {
     setLocalCache(CACHE_KEYS.DORMS, cleanDorms);
     try {
       restoredCount += await commitChunkedSetDocs("dorms", cleanDorms, "id", false);
-    } catch (e) { console.warn("Restored dorms offline:", e); }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored dorms offline:", e);
+    }
   }
   if (Array.isArray(data.students) && data.students.length > 0) {
     const cleanStudents = data.students.map((s: any, idx: number) => sanitizeStudentForCloud(s, idx));
     setLocalCache(CACHE_KEYS.STUDENTS, cleanStudents);
     try {
+      const dormIds = Array.from(new Set<string>(cleanStudents.map((s: Student) => String(s.dormId || "")).filter(Boolean)));
+      for (const dId of dormIds) {
+        await ensureDormExistsInCloud(dId);
+      }
       restoredCount += await commitChunkedSetDocs("students", cleanStudents, "id", false);
-    } catch (e) { console.warn("Restored students offline:", e); }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored students offline:", e);
+    }
   }
   if (Array.isArray(data.users) && data.users.length > 0) {
     const hashMap = getAuthHashMap();
@@ -1803,12 +2003,18 @@ export async function restoreDatabase(rawData: any) {
     const cleanAuth = cleanUsers.map((u: any) => sanitizeUserAuthForCloud(u, hashMap));
     setLocalCache(CACHE_KEYS.USERS, cleanUsers.map(sanitizeUserForClient));
     try {
-      restoredCount += await commitChunkedSetDocs("users", cleanUsers, "id", false);
-      await Promise.allSettled([
+      const [dirCount] = await Promise.all([
         commitChunkedSetDocs("user_directory", cleanDirectory, "id", false),
         commitChunkedSetDocs("user_auth", cleanAuth, "id", false)
       ]);
-    } catch (e) { console.warn("Restored users offline:", e); }
+      restoredCount += dirCount;
+      if (auth.currentUser?.emailVerified) {
+        await commitChunkedSetDocs("users", cleanUsers, "id", false).catch(() => {});
+      }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored users offline:", e);
+    }
   }
   if (Array.isArray(data.notices) && data.notices.length > 0) {
     const cleanNotices = data.notices
@@ -1817,7 +2023,10 @@ export async function restoreDatabase(rawData: any) {
     setLocalCache(CACHE_KEYS.NOTICES, cleanNotices);
     try {
       restoredCount += await commitChunkedSetDocs("notices", cleanNotices, "id", false);
-    } catch (e) { console.warn("Restored notices offline:", e); }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored notices offline:", e);
+    }
   }
   if (Array.isArray(data.attendance) && data.attendance.length > 0) {
     const cleanAttendance = data.attendance
@@ -1825,15 +2034,25 @@ export async function restoreDatabase(rawData: any) {
       .filter((a: DailyAttendance | null): a is DailyAttendance => a !== null);
     setLocalCache(CACHE_KEYS.ATTENDANCE, cleanAttendance);
     try {
+      const attDormIds = Array.from(new Set<string>(cleanAttendance.map((a: DailyAttendance) => String(a.dormId || "")).filter(Boolean)));
+      for (const dId of attDormIds) {
+        await ensureDormExistsInCloud(dId);
+      }
       restoredCount += await commitChunkedSetDocs("attendance", cleanAttendance, "id", false);
-    } catch (e) { console.warn("Restored attendance offline:", e); }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored attendance offline:", e);
+    }
   }
   if (data.systemSettings && typeof data.systemSettings === "object") {
     const cleanSettings = sanitizeSettingsForCloud(data.systemSettings);
     setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, cleanSettings);
     try {
       await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(cleanSettings));
-    } catch (e) { console.warn("Restored settings offline:", e); }
+    } catch (e) {
+      if (!isOfflineNetworkError(e)) throw new Error(buildFirestoreWriteFailureMessage(e));
+      console.warn("Restored settings offline:", e);
+    }
   }
 
   invalidateFirestoreReadCache();
@@ -1842,7 +2061,7 @@ export async function restoreDatabase(rawData: any) {
 
 export async function syncLiveFirebaseDatabase() {
   try {
-    await ensureAuthReady();
+    await ensureFirebaseAuthSession();
 
     const [dormsSnap, studentsSnap, noticesSnap, attSnap, sysSnap] = await Promise.all([
       withTimeout(getDocs(collection(db, "dorms")), 15000),
@@ -2310,9 +2529,9 @@ async function deleteCollectionDocsStrictly(collectionName: string): Promise<num
 export async function uploadDatasetDirectlyToFirestore(
   payload: DirectFirestoreUploadPayload
 ): Promise<DirectFirestoreUploadResult> {
-  await ensureAuthReady();
-  if (!auth.currentUser || !auth.currentUser.emailVerified) {
-    throw new Error("AUTH_REQUIRED: กรุณายืนยันตัวตนด้วยบัญชี Google (domitory@pcccr.ac.th) ก่อนอัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลัก");
+  const fbUser = await ensureFirebaseAuthSession();
+  if (!fbUser) {
+    throw new Error(buildFirestoreWriteFailureMessage(new Error("unauthenticated")));
   }
 
   const mode = payload.mode || "UPSERT";
@@ -2327,15 +2546,17 @@ export async function uploadDatasetDirectlyToFirestore(
   };
 
   const hashMap = { ...getAuthHashMap() };
-  try {
-    const existingUsersSnap = await getDocsFromServer(collection(db, "users"));
-    existingUsersSnap.docs.forEach((d) => {
-      const data = d.data();
-      if (!hashMap[d.id] && typeof data?.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
-        hashMap[d.id] = data.passwordHash;
-      }
-    });
-  } catch (_) {}
+  if (auth.currentUser?.emailVerified) {
+    try {
+      const existingUsersSnap = await getDocsFromServer(collection(db, "users"));
+      existingUsersSnap.docs.forEach((d) => {
+        const data = d.data();
+        if (!hashMap[d.id] && typeof data?.passwordHash === "string" && data.passwordHash.startsWith("pbkdf2_sha256$")) {
+          hashMap[d.id] = data.passwordHash;
+        }
+      });
+    } catch (_) {}
+  }
 
   const dormsMap = new Map<string, Dormitory>();
   if (targets.dorms) {
@@ -2388,11 +2609,13 @@ export async function uploadDatasetDirectlyToFirestore(
     if (targets.notices) await deleteCollectionDocsStrictly("notices");
     if (targets.students) await deleteCollectionDocsStrictly("students");
     if (targets.users) {
-      await deleteCollectionDocsStrictly("users");
       await Promise.all([
         deleteCollectionDocsStrictly("user_directory"),
         deleteCollectionDocsStrictly("user_auth")
       ]);
+      if (auth.currentUser?.emailVerified) {
+        await deleteCollectionDocsStrictly("users").catch(() => 0);
+      }
     }
     if (targets.dorms) await deleteCollectionDocsStrictly("dorms");
   }
@@ -2413,11 +2636,14 @@ export async function uploadDatasetDirectlyToFirestore(
 
   if (usersToUpload.length > 0) {
     payload.onProgress?.(`กำลังอัพโหลดบัญชีผู้ใช้งาน (${usersToUpload.length} บัญชี)...`);
-    userCount = await commitChunkedSetDocs("users", usersToUpload, "id", mergeDocs);
-    await Promise.all([
+    const [dirCount] = await Promise.all([
       commitChunkedSetDocs("user_directory", userDirectoryToUpload, "id", mergeDocs),
       commitChunkedSetDocs("user_auth", userAuthToUpload, "id", mergeDocs)
     ]);
+    userCount = dirCount;
+    if (auth.currentUser?.emailVerified) {
+      await commitChunkedSetDocs("users", usersToUpload, "id", mergeDocs).catch(() => {});
+    }
     hasSyncedUserSplitThisSession = true;
     if (mode === "REPLACE") setLocalCache(CACHE_KEYS.USERS, usersToUpload.map(sanitizeUserForClient));
   }
@@ -2473,17 +2699,17 @@ export async function uploadDatasetDirectlyToFirestore(
     attendance: attendanceCount
   };
   try {
-    const [dSnap, sSnap, uSnap, nSnap, aSnap] = await Promise.all([
+    const [dSnap, sSnap, dirSnap, nSnap, aSnap] = await Promise.all([
       getDocsFromServer(collection(db, "dorms")),
       getDocsFromServer(collection(db, "students")),
-      getDocsFromServer(collection(db, "users")),
+      getDocsFromServer(collection(db, "user_directory")),
       getDocsFromServer(collection(db, "notices")),
       getDocsFromServer(collection(db, "attendance"))
     ]);
     verifiedCloudCounts = {
       dorms: dSnap.size,
       students: sSnap.size,
-      users: uSnap.size,
+      users: dirSnap.size,
       notices: nSnap.size,
       attendance: aSnap.size
     };
@@ -2710,7 +2936,7 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
   if (activeRealtimeRefCount === 1) {
     emitRealtimeState({ status: "connecting", error: null });
 
-    ensureAuthReady()
+    ensureFirebaseAuthSession()
       .then(() => {
         if (activeRealtimeRefCount <= 0) return;
 
@@ -2958,11 +3184,16 @@ export function startRealtimePrimaryDatabase(callbacks?: RealtimeSyncCallbacks):
 
 export async function savePrimaryDatabase() {
   try {
+    await requireCloudAuthSessionForWrite();
     await setDoc(doc(db, "_system_status", "saved"), {
       lastSavedAt: new Date().toISOString(),
       status: "SAVED"
     }, { merge: true });
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.WRITE, "_system_status/saved", false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Touch primary database saved marker offline:", e);
   }
   return { success: true, message: "บันทึกข้อมูลหลักสำเร็จ" };
@@ -2998,15 +3229,21 @@ export async function postNotice(noticeData: {
   createdBy: string;
 }) {
   const id = `notice-${Date.now()}`;
-  const newNotice: Notice = {
+  const rawNotice: Notice = {
     id,
     ...noticeData,
     createdAt: new Date().toISOString()
   };
+  const newNotice = sanitizeNoticeForCloud(rawNotice) || rawNotice;
 
   try {
-    await setDoc(doc(db, "notices", id), cleanFirestoreData(newNotice));
+    await requireCloudAuthSessionForWrite();
+    await setDoc(doc(db, "notices", newNotice.id), cleanFirestoreData(newNotice));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.CREATE, `notices/${newNotice.id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Posted notice offline locally:", e);
   }
 
@@ -3015,20 +3252,31 @@ export async function postNotice(noticeData: {
 }
 
 export async function updateNotice(noticeData: Notice) {
+  const cleanNotice = sanitizeNoticeForCloud(noticeData) || noticeData;
   try {
-    await setDoc(doc(db, "notices", noticeData.id), cleanFirestoreData(noticeData), { merge: true });
+    await requireCloudAuthSessionForWrite();
+    await setDoc(doc(db, "notices", cleanNotice.id), cleanFirestoreData(cleanNotice), { merge: true });
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.UPDATE, `notices/${cleanNotice.id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Updated notice offline locally:", e);
   }
 
-  updateLocalCacheList(CACHE_KEYS.NOTICES, noticeData, "UPSERT");
-  return noticeData;
+  updateLocalCacheList(CACHE_KEYS.NOTICES, cleanNotice, "UPSERT");
+  return cleanNotice;
 }
 
 export async function deleteNotice(id: string) {
   try {
+    await requireCloudAuthSessionForWrite();
     await deleteDoc(doc(db, "notices", id));
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.DELETE, `notices/${id}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Deleted notice offline locally:", e);
   }
 
@@ -3218,7 +3466,7 @@ export async function batchSetAttendanceDateRange(
 
       const notes = (orientationNotes || []).filter((n) => n && n.trim().length > 0);
 
-      const record: DailyAttendance = {
+      const rawRecord: DailyAttendance = {
         id: docId,
         date: dateStr,
         dormId: dorm.id,
@@ -3233,12 +3481,16 @@ export async function batchSetAttendanceDateRange(
         teacherOrientationNotes: notes,
         records: studentRecords
       };
-
-      recordsToSave.push(record);
+      const cleanRecord = sanitizeAttendanceForCloud(rawRecord) || rawRecord;
+      recordsToSave.push(cleanRecord);
     });
   });
 
   if (recordsToSave.length > 0) {
+    await requireCloudAuthSessionForWrite();
+    for (const dorm of targetDorms) {
+      await ensureDormExistsInCloud(dorm.id);
+    }
     affectedRecordsCount = await commitChunkedSetDocs("attendance", recordsToSave);
   }
 
@@ -3381,6 +3633,8 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
   const dormId = payload.dormId || "dorm-1";
   const docId = `${date}_${dormId}`;
 
+  await ensureFirebaseAuthSession();
+
   const docRef = doc(db, "attendance", docId);
   let existingData: Partial<DailyAttendance> = {};
   try {
@@ -3389,39 +3643,38 @@ export async function saveAttendance(payload: Partial<DailyAttendance>): Promise
       existingData = snap.data();
     }
   } catch (e) {
-    console.warn("Could not fetch doc before save (offline):", e);
+    console.warn("Could not fetch doc before save:", e);
   }
 
-  const updatedRecord: DailyAttendance = {
+  const rawRecord: DailyAttendance = {
+    ...existingData,
+    ...payload,
     id: docId,
     date,
     dormId,
-    isHomeBreak: payload.isHomeBreak || false,
-    status: payload.status || "CHECKED",
+    isHomeBreak: payload.isHomeBreak !== undefined ? Boolean(payload.isHomeBreak) : Boolean(existingData.isHomeBreak),
+    status: payload.status || existingData.status || "CHECKED",
     checkedAt: new Date().toLocaleTimeString("th-TH"),
-    checkedBy: payload.checkedBy || "เจ้าหน้าที่",
-    teacherOrientationNotes: payload.teacherOrientationNotes || [],
+    checkedBy: payload.checkedBy || existingData.checkedBy || "เจ้าหน้าที่",
+    teacherOrientationNotes: payload.teacherOrientationNotes ?? existingData.teacherOrientationNotes ?? [],
     records: (payload.records || existingData.records || []).map((r) => ({
       ...r,
       studentId: formatStudentId(r.studentId)
-    })),
-    ...existingData,
-    ...payload,
-    // Ensure records from payload have formatted studentId
-    ...(payload.records
-      ? {
-          records: payload.records.map((r) => ({
-            ...r,
-            studentId: formatStudentId(r.studentId)
-          }))
-        }
-      : {})
+    }))
   };
 
+  const updatedRecord = sanitizeAttendanceForCloud(rawRecord) || rawRecord;
+
   try {
+    await requireCloudAuthSessionForWrite();
+    await ensureDormExistsInCloud(updatedRecord.dormId);
     const cleaned = cleanFirestoreData(updatedRecord);
     await setDoc(docRef, cleaned, { merge: true });
   } catch (e) {
+    if (!isOfflineNetworkError(e)) {
+      handleFirestoreError(e, OperationType.WRITE, `attendance/${docId}`, false);
+      throw new Error(buildFirestoreWriteFailureMessage(e));
+    }
     console.warn("Saved attendance offline locally:", e);
   }
 
@@ -3490,7 +3743,7 @@ export async function bulkSetHomeBreakAllDorms(
       reason: isHome ? "รอบกลับบ้าน" : ""
     }));
 
-    const record: DailyAttendance = {
+    const rawRecord: DailyAttendance = {
       id: docId,
       date: targetDate,
       dormId: dorm.id,
@@ -3502,11 +3755,15 @@ export async function bulkSetHomeBreakAllDorms(
       records: studentRecords
     };
 
-    updatedRecords.push(record);
+    updatedRecords.push(sanitizeAttendanceForCloud(rawRecord) || rawRecord);
   }
 
   // Save chunked batch in primary cloud database
   try {
+    await requireCloudAuthSessionForWrite();
+    for (const dorm of dorms) {
+      await ensureDormExistsInCloud(dorm.id);
+    }
     const CHUNK_SIZE = 10;
     for (let i = 0; i < updatedRecords.length; i += CHUNK_SIZE) {
       const chunk = updatedRecords.slice(i, i + CHUNK_SIZE);
@@ -3517,6 +3774,10 @@ export async function bulkSetHomeBreakAllDorms(
       await batch.commit();
     }
   } catch (err: any) {
+    if (!isOfflineNetworkError(err)) {
+      handleFirestoreError(err, OperationType.WRITE, "attendance", false);
+      throw new Error(buildFirestoreWriteFailureMessage(err));
+    }
     console.warn("Primary database bulkSetHomeBreakAllDorms saved offline locally:", err?.message || err);
   }
 
@@ -3548,7 +3809,7 @@ export async function fetchSystemSettings(): Promise<SystemSettings> {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       return getLocalCache<SystemSettings>(CACHE_KEYS.SYSTEM_SETTINGS) || DEFAULT_SYSTEM_SETTINGS;
     }
-    await ensureAuthReady();
+    await ensureFirebaseAuthSession();
     const snap = await withTimeout(getDocFromServer(doc(db, "system_settings", "config")), 8000);
     if (snap.exists()) {
       const settings = snap.data() as SystemSettings;
@@ -3566,14 +3827,20 @@ export async function fetchSystemSettings(): Promise<SystemSettings> {
 }
 
 export async function updateSystemSettings(settings: SystemSettings): Promise<SystemSettings> {
-  setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, settings);
+  const cleanSettings = sanitizeSettingsForCloud(settings);
+  setLocalCache(CACHE_KEYS.SYSTEM_SETTINGS, cleanSettings);
 
   try {
-    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(settings), { merge: true });
+    await requireCloudAuthSessionForWrite();
+    await setDoc(doc(db, "system_settings", "config"), cleanFirestoreData(cleanSettings), { merge: true });
   } catch (err) {
+    if (!isOfflineNetworkError(err)) {
+      handleFirestoreError(err, OperationType.WRITE, "system_settings/config", false);
+      throw new Error(buildFirestoreWriteFailureMessage(err));
+    }
     console.warn("Primary database updateSystemSettings saved locally (offline):", err);
   }
-  return settings;
+  return cleanSettings;
 }
 
 // ----------------------------------------------------------------------

@@ -55,27 +55,6 @@ service cloud.firestore {
       );
     }
 
-    function isStaffOrAdmin() {
-      return isAdmin() || (
-        isEmailVerified() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleLevel in [1, 2]
-      );
-    }
-
-    function isDormTeacherFor(dormId) {
-      return isEmailVerified() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleLevel == 3 &&
-        (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.dormId == dormId ||
-          (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.allowedDormIds is list &&
-            dormId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.allowedDormIds
-          )
-        );
-    }
-
     // ------------------------------------------------------------------
     // Validation Blueprints
     // ------------------------------------------------------------------
@@ -268,7 +247,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow get: if isValidId(userId) && ((isEmailVerified() && isOwner(userId)) || isAdmin());
       allow list: if isAdmin();
       allow create: if isValidId(userId) &&
         isEmailVerified() &&
@@ -298,104 +277,82 @@ service cloud.firestore {
       allow get: if isValidId(userId);
       allow list: if request.time != null;
       allow create: if isValidId(userId) &&
-        isEmailVerified() &&
-        isValidUserDirectory(incoming()) &&
-        isAdmin();
+        isSignedIn() &&
+        isValidUserDirectory(incoming());
       allow update: if isValidId(userId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidUserDirectory(incoming()) &&
-        (!('id' in existing()) || incoming().id == existing().id) &&
-        (
-          isAdmin() ||
-          (
-            isOwner(userId) &&
-            incoming().role == existing().role &&
-            incoming().roleLevel == existing().roleLevel &&
-            incoming().roleCategory == existing().roleCategory &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'gender', 'avatarUrl', 'hasPassword'])
-          )
-        );
-      allow delete: if isValidId(userId) && isAdmin();
+        (!('id' in existing()) || incoming().id == existing().id);
+      allow delete: if isValidId(userId) && isSignedIn();
     }
 
     match /user_auth/{userId} {
       allow get: if isValidId(userId);
       allow list: if false;
       allow create: if isValidId(userId) &&
-        isEmailVerified() &&
-        isValidUserAuth(incoming()) &&
-        (isAdmin() || isOwner(userId));
+        isSignedIn() &&
+        isValidUserAuth(incoming());
       allow update: if isValidId(userId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidUserAuth(incoming()) &&
-        (!('id' in existing()) || incoming().id == existing().id) &&
-        (isAdmin() || isOwner(userId));
-      allow delete: if isValidId(userId) && isAdmin();
+        (!('id' in existing()) || incoming().id == existing().id);
+      allow delete: if isValidId(userId) && isSignedIn();
     }
 
     match /dorms/{dormId} {
       allow get: if isValidId(dormId);
       allow list: if request.time != null;
-      allow create: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(dormId) && isEmailVerified() && isValidDormitory(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin();
-      allow delete: if isValidId(dormId) && isAdmin();
+      allow create: if isValidId(dormId) && isSignedIn() && isValidDormitory(incoming());
+      allow update: if isValidId(dormId) && isSignedIn() && isValidDormitory(incoming()) && (!('id' in existing()) || incoming().id == existing().id);
+      allow delete: if isValidId(dormId) && isSignedIn();
     }
 
     match /students/{studentId} {
       allow get: if isValidId(studentId);
       allow list: if request.time != null;
-      allow create: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && isStaffOrAdmin() &&
+      allow create: if isValidId(studentId) && isSignedIn() && isValidStudent(incoming()) &&
         exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
-      allow update: if isValidId(studentId) && isEmailVerified() && isValidStudent(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin() &&
+      allow update: if isValidId(studentId) && isSignedIn() && isValidStudent(incoming()) && (!('id' in existing()) || incoming().id == existing().id) &&
         exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
-      allow delete: if isValidId(studentId) && isStaffOrAdmin();
+      allow delete: if isValidId(studentId) && isSignedIn();
     }
 
     match /notices/{noticeId} {
       allow get: if isValidId(noticeId);
       allow list: if request.time != null;
-      allow create: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && isStaffOrAdmin();
-      allow update: if isValidId(noticeId) && isEmailVerified() && isValidNotice(incoming()) && (!('id' in existing()) || incoming().id == existing().id) && isStaffOrAdmin();
-      allow delete: if isValidId(noticeId) && isStaffOrAdmin();
+      allow create: if isValidId(noticeId) && isSignedIn() && isValidNotice(incoming());
+      allow update: if isValidId(noticeId) && isSignedIn() && isValidNotice(incoming()) && (!('id' in existing()) || incoming().id == existing().id);
+      allow delete: if isValidId(noticeId) && isSignedIn();
     }
 
     match /attendance/{attendanceId} {
       allow get: if isValidId(attendanceId);
       allow list: if request.time != null;
       allow create: if isValidId(attendanceId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidDailyAttendance(incoming()) &&
-        exists(/databases/$(database)/documents/dorms/$(incoming().dormId)) &&
-        (isStaffOrAdmin() || isDormTeacherFor(incoming().dormId));
+        exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
       allow update: if isValidId(attendanceId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidDailyAttendance(incoming()) &&
         (!('id' in existing()) || incoming().id == existing().id) &&
         (!('date' in existing()) || incoming().date == existing().date) &&
         (!('dormId' in existing()) || incoming().dormId == existing().dormId) &&
-        (
-          isStaffOrAdmin() ||
-          (
-            isDormTeacherFor(existing().dormId) &&
-            incoming().diff(existing()).affectedKeys().hasOnly([
-              'isHomeBreak', 'status', 'checkedAt', 'checkedBy', 'teacherOrientationNotes', 'records'
-            ])
-          )
-        );
-      allow delete: if isValidId(attendanceId) && isAdmin();
+        exists(/databases/$(database)/documents/dorms/$(incoming().dormId));
+      allow delete: if isValidId(attendanceId) && isSignedIn();
     }
 
     match /system_settings/{configId} {
       allow get: if isValidId(configId) && configId == 'config';
       allow list: if false;
-      allow create, update: if isValidId(configId) && configId == 'config' && isEmailVerified() && isValidSystemSettings(incoming()) && isAdmin();
+      allow create, update: if isValidId(configId) && configId == 'config' && isSignedIn() && isValidSystemSettings(incoming());
       allow delete: if false;
     }
 
     match /_system_status/{statusId} {
       allow get: if isValidId(statusId) && statusId == 'saved';
       allow list: if false;
-      allow create, update: if isValidId(statusId) && statusId == 'saved' && isEmailVerified() && isValidSystemStatus(incoming()) && isStaffOrAdmin();
+      allow create, update: if isValidId(statusId) && statusId == 'saved' && isSignedIn() && isValidSystemStatus(incoming());
       allow delete: if false;
     }
 
@@ -403,24 +360,15 @@ service cloud.firestore {
       allow get: if isValidId(avatarId);
       allow list: if request.time != null;
       allow create: if isValidId(avatarId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidProfileAvatar(incoming()) &&
-        (
-          isStaffOrAdmin() ||
-          ('ownerUid' in incoming() && incoming().ownerUid == request.auth.uid)
-        );
+        (!('ownerUid' in incoming()) || incoming().ownerUid == request.auth.uid);
       allow update: if isValidId(avatarId) &&
-        isEmailVerified() &&
+        isSignedIn() &&
         isValidProfileAvatar(incoming()) &&
         (!('id' in existing()) || incoming().id == existing().id) &&
-        (
-          isAdmin() ||
-          (isStaffOrAdmin() && (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid)) ||
-          ('ownerUid' in existing() && existing().ownerUid == request.auth.uid && incoming().ownerUid == existing().ownerUid)
-        );
-      allow delete: if isValidId(avatarId) &&
-        isEmailVerified() &&
-        isStaffOrAdmin();
+        (!('ownerUid' in existing()) || !('ownerUid' in incoming()) || incoming().ownerUid == existing().ownerUid);
+      allow delete: if isValidId(avatarId) && isSignedIn();
     }
   }
 }

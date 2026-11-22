@@ -15,8 +15,10 @@ import { isValidPasswordStrength, sanitizeSafeImageUrl } from "../../utils/secur
 import { ThaiDatePicker } from "../common/ThaiDatePicker";
 import {
   auth,
+  ensureFirebaseAuthSession,
   signInWithGoogleAndRefresh,
-  getCurrentHostname,
+  subscribeFirestoreAccessIssue,
+  FirestoreAccessIssue,
   FIREBASE_PROJECT_ID,
   FIREBASE_DATABASE_ID
 } from "../../lib/firebase";
@@ -561,7 +563,12 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   // Central database realtime & direct upload states
   const realtimeDbState = useRealtimeDatabaseState(true);
   const [isInitializingDefaultDb, setIsInitializingDefaultDb] = useState<boolean>(false);
-  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string>(() => auth.currentUser?.email || "");
+  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string>(() =>
+    auth.currentUser?.emailVerified && auth.currentUser.email ? auth.currentUser.email : ""
+  );
+  const [firebaseAuthUid, setFirebaseAuthUid] = useState<string>(() => auth.currentUser?.uid || "");
+  const [isFirebaseAnonymous, setIsFirebaseAnonymous] = useState<boolean>(() => Boolean(auth.currentUser?.isAnonymous));
+  const [firestoreAccessIssue, setFirestoreAccessIssueState] = useState<FirestoreAccessIssue | null>(null);
   const [directUploadFile, setDirectUploadFile] = useState<File | null>(null);
   const [directUploadRawJson, setDirectUploadRawJson] = useState<any | null>(null);
   const [directUploadAnalysis, setDirectUploadAnalysis] = useState<DirectUploadAnalysis | null>(null);
@@ -581,10 +588,19 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((fbUser) => {
+    ensureFirebaseAuthSession().catch(() => {});
+    const unsubscribeAuth = auth.onAuthStateChanged((fbUser) => {
       setFirebaseAuthEmail(fbUser?.emailVerified && fbUser.email ? fbUser.email : "");
+      setFirebaseAuthUid(fbUser?.uid || "");
+      setIsFirebaseAnonymous(Boolean(fbUser?.isAnonymous));
     });
-    return () => unsubscribe();
+    const unsubscribeIssue = subscribeFirestoreAccessIssue((issue) => {
+      setFirestoreAccessIssueState(issue);
+    });
+    return () => {
+      unsubscribeAuth();
+      unsubscribeIssue();
+    };
   }, []);
 
   // Keep local users table synced with realtime updates from App/Firestore
@@ -623,10 +639,28 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     [realtimeDbState, realtimeAttendanceDatesCount, attendanceRecords.length, students.length, dorms.length, notices.length, usersList.length, users.length]
   );
 
+  const handleAutoAnonymousConnectForDb = async () => {
+    setDirectUploadError(null);
+    const fbUser = await ensureFirebaseAuthSession();
+    if (!fbUser) {
+      throw new Error(
+        `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID} -> Authentication -> Sign-in method -> Anonymous)`
+      );
+    }
+    setFirebaseAuthUid(fbUser.uid || "");
+    setIsFirebaseAnonymous(Boolean(fbUser.isAnonymous));
+    setFirebaseAuthEmail(fbUser.emailVerified && fbUser.email ? fbUser.email : "");
+    invalidateFirestoreReadCache();
+    await queryClient.invalidateQueries();
+    return fbUser;
+  };
+
   const handleGoogleSignInForDb = async () => {
     setDirectUploadError(null);
     const fbUser = await signInWithGoogleAndRefresh();
     setFirebaseAuthEmail(fbUser.email || "");
+    setFirebaseAuthUid(fbUser.uid || "");
+    setIsFirebaseAnonymous(false);
     invalidateFirestoreReadCache();
     await queryClient.invalidateQueries();
     return fbUser;
@@ -697,17 +731,14 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     setDirectUploadResult(null);
 
     try {
-      if (!auth.currentUser || !auth.currentUser.emailVerified) {
-        await handleGoogleSignInForDb();
+      const fbUser = await ensureFirebaseAuthSession();
+      if (!fbUser) {
+        throw new Error(
+          `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID} -> Authentication -> Sign-in method -> Anonymous)`
+        );
       }
     } catch (authErr: any) {
-      const hostname = getCurrentHostname();
-      const errMsg =
-        authErr?.code === "auth/unauthorized-domain"
-          ? `โดเมน "${hostname}" ยังไม่ได้รับอนุญาตใน Firebase Authentication — กรุณาไปที่ Firebase Console โปรเจกต์ ${FIREBASE_PROJECT_ID} -> Authentication -> Settings -> Authorized domains แล้วเพิ่ม "${hostname}"`
-          : authErr?.code === "auth/popup-closed-by-user"
-          ? "ยกเลิกการเข้าสู่ระบบด้วย Google กรุณากดอัพโหลดและเลือกบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
-          : authErr?.message || "ไม่สามารถยืนยันตัวตนด้วยบัญชี Google ได้";
+      const errMsg = authErr?.message || "ไม่สามารถเชื่อมต่อ Firebase Authentication อัตโนมัติได้";
       setDirectUploadError(errMsg);
       showNotification("error", errMsg);
       return;
@@ -732,7 +763,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       const rawMsg = String(err?.message || err || "");
       const friendlyMsg =
         rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-          ? "ไม่มีสิทธิ์เขียนลงฐานข้อมูล กรุณาเข้าสู่ระบบ Google ด้วยบัญชีผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          ? `ไม่มีสิทธิ์เขียนลงฐานข้อมูล กรุณาตรวจสอบว่าได้เปิด Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) แล้ว`
           : rawMsg || "เกิดข้อผิดพลาดในการอัพโหลดข้อมูลเข้าสู่ฐานข้อมูลหลัก";
       setDirectUploadError(friendlyMsg);
       showNotification("error", friendlyMsg);
@@ -1095,9 +1126,11 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
   };
 
   const ensureFirestoreAuthForProfileWrite = async (): Promise<void> => {
-    if (!auth.currentUser || !auth.currentUser.emailVerified) {
-      const fbUser = await signInWithGoogleAndRefresh();
-      setFirebaseAuthEmail(fbUser.email || "");
+    const fbUser = await ensureFirebaseAuthSession();
+    if (!fbUser) {
+      throw new Error(
+        `ยังไม่ได้เปิดใช้งาน Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID} -> Authentication -> Sign-in method -> Anonymous)`
+      );
     }
   };
 
@@ -1169,7 +1202,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       const rawMsg = String(err?.message || err || "");
       const friendlyMsg =
         rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-          ? "ไม่มีสิทธิ์เขียนลง Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          ? `ไม่มีสิทธิ์เขียนลง Firestore กรุณาตรวจสอบว่าได้เปิด Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) แล้ว`
           : rawMsg || "เกิดข้อผิดพลาดในการบันทึกรูปโปรไฟล์ลง Firestore";
       showNotification("error", friendlyMsg);
     } finally {
@@ -1230,7 +1263,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       const rawMsg = String(err?.message || err || "");
       const friendlyMsg =
         rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-          ? "ไม่มีสิทธิ์อัปโหลดรูปเข้า Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          ? `ไม่มีสิทธิ์อัปโหลดรูปเข้า Firestore กรุณาตรวจสอบว่าได้เปิด Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) แล้ว`
           : rawMsg || "เกิดข้อผิดพลาดในการอัปโหลดรูปภาพเข้า Firestore";
       showNotification("error", friendlyMsg);
     } finally {
@@ -1292,7 +1325,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       const rawMsg = String(err?.message || err || "");
       const friendlyMsg =
         rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-          ? "ไม่มีสิทธิ์ลบรูปภาพบน Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          ? `ไม่มีสิทธิ์ลบรูปภาพบน Firestore กรุณาตรวจสอบว่าได้เปิด Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) แล้ว`
           : rawMsg || "เกิดข้อผิดพลาดในการลบรูปภาพออกจาก Firestore";
       showNotification("error", friendlyMsg);
     } finally {
@@ -1340,7 +1373,7 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
       const rawMsg = String(err?.message || err || "");
       const friendlyMsg =
         rawMsg.includes("permission-denied") || rawMsg.includes("Missing or insufficient permissions")
-          ? "ไม่มีสิทธิ์ลบรูปโปรไฟล์บน Firestore กรุณาเชื่อมต่อบัญชี Google ผู้ดูแลระบบ (domitory@pcccr.ac.th)"
+          ? `ไม่มีสิทธิ์ลบรูปโปรไฟล์บน Firestore กรุณาตรวจสอบว่าได้เปิด Anonymous Authentication ใน Firebase Console (โปรเจกต์ ${FIREBASE_PROJECT_ID}) แล้ว`
           : rawMsg || "เกิดข้อผิดพลาดในการลบรูปโปรไฟล์ออกจาก Firestore";
       showNotification("error", friendlyMsg);
     } finally {
@@ -1407,7 +1440,8 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
     }
 
     try {
-      const syncToCloud = Boolean(auth.currentUser && auth.currentUser.emailVerified);
+      const fbSession = await ensureFirebaseAuthSession();
+      const syncToCloud = Boolean(fbSession);
       if (editingUser) {
         const payload: Partial<UserProfile> & { password?: string } = {
           name: trimmedName,
@@ -2605,21 +2639,26 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                     <span className="truncate max-w-[180px]">Firestore: {firebaseAuthEmail}</span>
                   </span>
+                ) : firebaseAuthUid || isFirebaseAnonymous ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>เชื่อมต่อ Firestore อัตโนมัติ</span>
+                  </span>
                 ) : (
                   <button
                     type="button"
                     onClick={async () => {
                       try {
-                        await handleGoogleSignInForDb();
-                        showNotification("success", "เชื่อมต่อบัญชี Google สำหรับบันทึก Firestore สำเร็จ");
+                        await handleAutoAnonymousConnectForDb();
+                        showNotification("success", "เชื่อมต่อฐานข้อมูล Firestore อัตโนมัติสำเร็จ");
                       } catch (err: any) {
-                        showNotification("error", err?.message || "ไม่สามารถเชื่อมต่อ Google ได้");
+                        showNotification("error", err?.message || "ไม่สามารถเชื่อมต่อ Firestore อัตโนมัติได้");
                       }
                     }}
                     className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                   >
                     <Cloud className="w-3.5 h-3.5 text-amber-600" />
-                    <span>เชื่อมต่อ Google เพื่อซิงค์ Firestore</span>
+                    <span>เชื่อมต่อ Firestore อัตโนมัติ</span>
                   </button>
                 )}
               </div>
@@ -3471,9 +3510,17 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                             <span className="bg-teal-100 text-teal-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-teal-300">
                               ✓ Google Auth: {firebaseAuthEmail}
                             </span>
+                          ) : firebaseAuthUid || isFirebaseAnonymous ? (
+                            <span className="bg-teal-100 text-teal-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-teal-300">
+                              ✓ เชื่อมต่ออัตโนมัติ (Anonymous Auth) พร้อมเขียนข้อมูล
+                            </span>
+                          ) : firestoreAccessIssue?.code === "ANONYMOUS_AUTH_DISABLED" ? (
+                            <span className="bg-rose-100 text-rose-900 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-rose-300">
+                              ยังไม่ได้เปิด Anonymous Auth ใน Firebase Console
+                            </span>
                           ) : (
                             <span className="bg-amber-100 text-amber-900 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300">
-                              ต้องยืนยันสิทธิ์ Google (domitory@pcccr.ac.th) เพื่อเขียนข้อมูล
+                              กำลังเตรียมเชื่อมต่อ Firestore อัตโนมัติ...
                             </span>
                           )}
                         </h4>
@@ -3484,39 +3531,41 @@ export const UserAndDatabaseView: React.FC<UserAndDatabaseViewProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      {!firebaseAuthEmail ? (
+                      {!firebaseAuthUid && !firebaseAuthEmail ? (
                         <button
                           type="button"
                           onClick={async () => {
                             try {
-                              await handleGoogleSignInForDb();
-                              showNotification("success", "เชื่อมต่อบัญชี Google สำหรับเขียนข้อมูลลง Firestore สำเร็จ");
+                              await handleAutoAnonymousConnectForDb();
+                              showNotification("success", "เชื่อมต่อฐานข้อมูล Firestore อัตโนมัติสำเร็จ");
                             } catch (e: any) {
-                              const errMsg = e?.message || "ยืนยันตัวตนด้วย Google ไม่สำเร็จ";
+                              const errMsg = e?.message || "เชื่อมต่อ Firestore อัตโนมัติไม่สำเร็จ";
                               setDirectUploadError(errMsg);
                               showNotification("error", errMsg);
                             }
                           }}
                           className="px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
                         >
-                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                          <span>ยืนยันสิทธิ์ Google</span>
+                          <RefreshCw className="w-4 h-4 text-emerald-600" />
+                          <span>เชื่อมต่ออัตโนมัติอีกครั้ง</span>
                         </button>
-                      ) : firebaseAuthEmail.toLowerCase() !== "domitory@pcccr.ac.th" ? (
+                      ) : !firebaseAuthEmail ? (
                         <button
                           type="button"
                           onClick={async () => {
                             try {
                               await handleGoogleSignInForDb();
+                              showNotification("success", "เชื่อมต่อบัญชี Google Admin สำเร็จ");
                             } catch (e: any) {
-                              const msg = e?.message || "เปลี่ยนบัญชี Google ไม่สำเร็จ";
-                              setDirectUploadError(msg);
-                              showNotification("error", msg);
+                              const errMsg = e?.message || "ยืนยันตัวตนด้วย Google ไม่สำเร็จ";
+                              setDirectUploadError(errMsg);
+                              showNotification("error", errMsg);
                             }
                           }}
-                          className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                          className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
                         >
-                          สลับบัญชี Google
+                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                          <span>เชื่อมต่อ Google Admin (ไม่บังคับ)</span>
                         </button>
                       ) : null}
                     </div>
@@ -5615,7 +5664,7 @@ git push -u origin main`);
                 <p className="text-slate-300 leading-relaxed text-[11px]">
                   <strong className="text-amber-300">✓ 1. การแสดงผลหน้าเว็บ:</strong> ตั้งค่า <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">base: './'</code> ใน <code className="bg-black/50 px-1 py-0.5 rounded text-emerald-300">vite.config.ts</code> และเพิ่มไฟล์ <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">public/404.html</code>, <code className="bg-black/50 px-1 py-0.5 rounded text-indigo-300">.nojekyll</code> แล้ว<br />
                   <strong className="text-emerald-300">✓ 2. GitHub Actions:</strong> ตั้งค่า Repository <strong className="text-white">Settings &rarr; Pages &rarr; Source</strong> เป็น <strong className="text-amber-300">"GitHub Actions"</strong><br />
-                  <strong className="text-emerald-300">✓ 3. การเชื่อมต่อฐานข้อมูล Firestore บน GitHub Pages:</strong> ผู้เยี่ยมชมสามารถเปิดเข้าชมและดึงข้อมูลจากฐานข้อมูลกลาง Firestore ได้ทันทีโดยไม่ต้องเชื่อมต่อบัญชี Google (หากต้องการบันทึก/อัพโหลดข้อมูลระดับผู้ดูแลระบบ จึงใช้การยืนยันสิทธิ์ผู้ดูแลระบบ <code className="bg-black/50 px-1 rounded text-white">domitory@pcccr.ac.th</code> และเพิ่มโดเมน GitHub Pages ใน Firebase Console &rarr; Authentication &rarr; Settings &rarr; Authorized domains)
+                  <strong className="text-emerald-300">✓ 3. การเชื่อมต่อฐานข้อมูล Firestore บน GitHub Pages:</strong> ระบบใช้ Firebase Anonymous Authentication เชื่อมต่อฐานข้อมูลกลางเบื้องหลังอัตโนมัติ เพื่อให้ครูและเจ้าหน้าที่เช็คยอดและบันทึกข้อมูลได้ทันทีโดยไม่ต้องมีป๊อปอัป Google (อย่าลืมเปิดใช้งาน <code className="bg-black/50 px-1 rounded text-white">Anonymous</code> ใน Firebase Console &rarr; Authentication &rarr; Sign-in method และเพิ่มโดเมน GitHub Pages ใน Authorized domains หากใช้การล็อกอิน Google Admin เพิ่มเติม)
                 </p>
               </div>
 
